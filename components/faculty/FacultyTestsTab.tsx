@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { collection, doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Loader2, AlertTriangle, UploadCloud } from 'lucide-react';
+import { Loader2, AlertTriangle, UploadCloud, Sparkles } from 'lucide-react';
 import GlassDropdown from '@/components/GlassDropdown';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean }) {
   const [teachingConfig, setTeachingConfig] = useState<Record<string, string[]>>({});
@@ -18,6 +19,8 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
   const [selectedTest, setSelectedTest] = useState("IAT 1");
 
   const [isLoading, setIsLoading] = useState(false);
+  const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4"];
   const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE"];
@@ -70,10 +73,59 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
   const textColor = isDark ? 'text-white' : 'text-neutral-900';
   const cardBg = isDark ? 'bg-white/[0.08] border-white/20' : 'bg-black/5 border-black/10 shadow-sm';
 
+  // AI CSV Import Handler
+  const handleAiCsvImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsAiAnalyzing(true);
+    try {
+      const text = await file.text();
+      
+      const genAI = new GoogleGenerativeAI("AQ.Ab8RN6IfSfXABq3inD_7dsaEFpkAqoi3wrpQ3_ZZyNILSNkWgQ");      
+      const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
+
+      const prompt = `
+        Analyze the following raw CSV/text data containing student marks for an exam.
+        Extract the roll numbers and their corresponding marks.
+        Return ONLY a raw JSON array of objects with the exact keys "roll" (string) and "score" (string).
+        Do not include any markdown formatting, backticks, or extra text.
+        
+        Data to analyze:
+        ${text}
+      `;
+
+      const result = await model.generateContent(prompt);
+      const responseText = result.response.text().trim();
+      
+      const cleanJson = responseText.replace(/```json/g, '').replace(/```/g, '');
+      const parsedMarks = JSON.parse(cleanJson);
+
+      // Map parsed marks to current state
+      const newMap = { ...fullMarksMap };
+      
+      classRoster.forEach((student) => {
+        const matchedData = parsedMarks.find((m: any) => m.roll === student.rollNo || m.roll === String(student.rollNo));
+        if (matchedData) {
+          if (!newMap[student.id]) newMap[student.id] = {};
+          newMap[student.id][selectedTest] = String(matchedData.score);
+        }
+      });
+
+      setFullMarksMap(newMap);
+      alert("AI successfully mapped the marks to the student list!");
+    } catch (error) {
+      console.error("AI Analysis failed:", error);
+      alert("AI failed to parse the file. Please ensure it contains readable text/CSV data.");
+    } finally {
+      setIsAiAnalyzing(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
   return (
     <div className="w-full flex flex-col h-full overflow-y-auto pr-2 pb-24 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
       
-      {/* Removed relative wrappers */}
       <div className="flex space-x-3 mb-4">
         <GlassDropdown label="Sem" value={selectedSemester} options={isHod ? AVAILABLE_SEMESTERS : Array.from(new Set(Object.keys(teachingConfig).map(k => k.split("|")[0])))} onChange={setSelectedSemester} isDark={isDark} zIndex={60} />
         <GlassDropdown label="Branch" value={selectedBranch} options={isHod ? AVAILABLE_BRANCHES : Array.from(new Set(Object.keys(teachingConfig).filter(k => k.startsWith(selectedSemester)).map(k => k.split("|")[1])))} onChange={setSelectedBranch} isDark={isDark} zIndex={50} />
@@ -87,8 +139,31 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
         </div>
       </div>
 
+      {/* Header with AI Import Button */}
       <div className="flex justify-between items-center mb-4">
         <h3 className={`text-lg font-bold ${textColor}`}>Student Scores</h3>
+        
+        <div className="relative">
+          <input 
+            type="file" 
+            accept=".csv, .txt" 
+            onChange={handleAiCsvImport}
+            ref={fileInputRef}
+            className="hidden" 
+          />
+          <button 
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isAiAnalyzing || classRoster.length === 0}
+            className={`px-4 py-2 ${isDark ? 'bg-purple-500/20 text-[#D0BCFF] border-purple-500/30 hover:bg-purple-500/30' : 'bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200'} border rounded-xl text-sm font-bold flex items-center transition-all disabled:opacity-50`}
+          >
+            {isAiAnalyzing ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Sparkles className="w-4 h-4 mr-2" />
+            )}
+            {isAiAnalyzing ? "Analyzing..." : "Auto-Fill via CSV"}
+          </button>
+        </div>
       </div>
 
       {classRoster.length === 0 ? (

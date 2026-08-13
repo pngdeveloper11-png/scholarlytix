@@ -232,7 +232,8 @@ function UploadMaterialDialog({ isHod, teachingConfig, initialSem, initialBranch
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+    // FIXED: Changed z-50 to z-[100] to sit above the dropdowns
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
       <div className="bg-white/[0.08] border border-white/20 p-8 rounded-[2rem] w-full max-w-sm backdrop-blur-[40px]">
         <h2 className="text-xl font-bold text-white mb-6">Upload Material</h2>
         <div className="space-y-4">
@@ -245,7 +246,7 @@ function UploadMaterialDialog({ isHod, teachingConfig, initialSem, initialBranch
                 options={["Notes", "Question Paper", "Assignment"]} 
                 onChange={(val) => setUpCategory(val)} 
                 isDark={true}
-                zIndex={70} 
+                zIndex={110} // Boosted to ensure this dialog's own dropdown works perfectly
               />
           </div>
 
