@@ -1,6 +1,7 @@
 import { GraduationCap, User, ArrowRight } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
+import DownloadAppButton from '@/components/DownloadAppButton';
 
 export default function Home() {
   return (
@@ -52,6 +53,11 @@ export default function Home() {
             <ArrowRight className="w-6 h-6 text-neutral-400 group-hover:text-purple-300 group-hover:translate-x-1 transition-all" />
           </div>
         </Link>
+      </div>
+
+      {/* Android App Download Button */}
+      <div className="w-full max-w-md mb-12">
+        <DownloadAppButton />
       </div>
 
       {/* Footer Branding */}
