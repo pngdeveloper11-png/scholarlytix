@@ -1,13 +1,10 @@
-'use client';
-
 import { GraduationCap, User, ArrowRight } from 'lucide-react';
-import DynamicHueBackground from '@/components/DynamicHueBackground';
 import Link from 'next/link';
+import Image from 'next/image';
 
 export default function Home() {
   return (
     <main className="relative min-h-screen w-full flex flex-col items-center justify-between p-6 md:p-12 text-white">
-      <DynamicHueBackground theme="indigo" />
 
       {/* Top Branding */}
       <div className="flex flex-col items-center text-center mt-12">
@@ -61,10 +58,12 @@ export default function Home() {
       <div className="flex flex-col items-center text-center space-y-2 mb-4">
         <p className="text-xs font-medium text-white/70">Developed by - Pratosh Gharat</p>
         <div className="relative h-14 w-44 flex items-center justify-center">
-          <img 
+          <Image 
             src="/signature.png" 
             alt="Pratosh Gharat Signature" 
-            className="h-full w-full object-contain brightness-0 invert" 
+            fill
+            sizes="(max-width: 768px) 100vw, 176px"
+            className="object-contain brightness-0 invert" 
           />
         </div>
       </div>

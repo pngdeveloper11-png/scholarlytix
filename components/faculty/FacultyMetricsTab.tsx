@@ -150,7 +150,7 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
               <div key={student.id} className={`flex items-center justify-between p-5 rounded-2xl backdrop-blur-[40px] border transition-all ${tileBg}`}>
                 <div className="flex flex-col">
                   <span className={`font-bold text-[16px] ${textColor}`}>{student.fullName}</span>
-                  <span className={`text-xs mt-0.5 font-medium ${isDark ? 'text-white/60' : 'text-neutral-500'}`}>Roll {student.rollNo}</span>
+                  <span className={`text-xs mt-0.5 font-medium ${isDark ? 'text-white/60' : 'text-neutral-500'}`}>Roll No. {student.rollNo}</span>
                 </div>
                 <div className="flex items-center space-x-4">
                   <span className={`text-xs font-bold tracking-widest ${isDark ? 'text-white/50' : 'text-neutral-500'}`}>{attended}/{totalConducted}</span>
