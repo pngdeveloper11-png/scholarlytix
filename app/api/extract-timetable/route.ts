@@ -1,24 +1,33 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const API_KEY = process.env.GEMINI_API_KEY as string;
+// Keep the 60s timeout for Vercel
+export const maxDuration = 60; 
 
 export async function POST(request: Request) {
   try {
+    // Fetch the key dynamically inside the function to ensure Vercel sees it
+    const API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    if (!API_KEY) throw new Error("API Key is missing in Vercel.");
+
     const formData = await request.formData();
     const file = formData.get('file') as File;
 
-    if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
+    if (!file) throw new Error("No file provided");
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const base64Data = buffer.toString('base64');
 
     const genAI = new GoogleGenerativeAI(API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    
+    // THE FIX: We use generationConfig to strictly force the AI to return pure JSON
+    const model = genAI.getGenerativeModel({ 
+        model: 'gemini-1.5-flash',
+        generationConfig: { responseMimeType: "application/json" } 
+    });
 
-    // HIGHLY OPTIMIZED PROMPT FOR COMPLEX TIMETABLES
     const prompt = `
-      Analyze this college timetable image. Extract all lectures into a strict JSON array of objects. 
+      Analyze this college timetable image. Extract all lectures into a JSON array of objects. 
       Keys must strictly be: 'dayOfWeek', 'startTime', 'endTime', 'semester', 'branch', 'subject', 'batch'.
       
       CRITICAL INFERENCE RULES:
@@ -43,35 +52,16 @@ export async function POST(request: Request) {
       FORMATTING RULES:
       1. 'semester' MUST be exactly "Semester 1", "Semester 2", "Semester 3", or "Semester 4". Infer from the title.
       2. All times MUST be formatted with AM/PM (e.g., "8:30 AM", "12:45 PM", "1:30 PM"). Assume classes before 1:00 are AM, and classes from 1:00 onwards are PM unless specified.
-
-      Return ONLY a pure, valid JSON array. Do not include markdown tags like \`\`\`json.
     `;
 
     const result = await model.generateContent([
       prompt,
-      {
-        inlineData: {
-          data: base64Data,
-          mimeType: file.type,
-        },
-      },
+      // Provide a fallback MIME type in case the browser omits it
+      { inlineData: { data: base64Data, mimeType: file.type || 'image/jpeg' } },
     ]);
 
-    let text = result.response.text();
-
-    // ROBUST JSON CLEANER
-    text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-    
-    // Find the first '[' and last ']' to extract just the array
-    const startIndex = text.indexOf('[');
-    const endIndex = text.lastIndexOf(']');
-    
-    if (startIndex === -1 || endIndex === -1) {
-        throw new Error("AI did not return a JSON array.");
-    }
-    
-    const cleanJsonString = text.substring(startIndex, endIndex + 1);
-    const entries = JSON.parse(cleanJsonString);
+    // Because we set responseMimeType to application/json, we can parse it directly!
+    const entries = JSON.parse(result.response.text());
 
     return NextResponse.json({ entries });
   } catch (error: any) {
