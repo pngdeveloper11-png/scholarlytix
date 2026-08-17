@@ -2,86 +2,203 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
-import { app } from '@/lib/firebase';
-import Link from 'next/link';
-import { ArrowLeft, GraduationCap, Loader2 } from 'lucide-react';
+import { doc, getDoc } from 'firebase/firestore';
+import { signInWithEmailAndPassword, signInWithPopup, signOut } from 'firebase/auth';
+import { auth, db, googleProvider } from '@/lib/firebase';
+import { ArrowLeft, School, Loader2, Lock, User as UserIcon } from 'lucide-react';
 
 export default function FacultyLogin() {
-  const [facultyName, setFacultyName] = useState("");
+  const [rawName, setRawName] = useState("");
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
     const uid = localStorage.getItem("academiq_faculty_id");
-    if (uid) router.push('/faculty/dashboard');
+    if (uid) router.replace('/faculty/dashboard');
   }, [router]);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErrorMessage(""); setIsLoading(true);
+    if (!rawName.trim() || !password.trim()) {
+      setErrorMessage("Please enter both name and password.");
+      return;
+    }
+    setIsLoading(true);
+    setErrorMessage("");
+
     try {
-      const auth = getAuth(app);
-      const formattedEmail = `${facultyName.trim().toLowerCase().replace(/\s+/g, '.')}@mitmumbai.png.edu`;
+      const formattedEmail = rawName.includes('@') 
+        ? rawName.trim().toLowerCase() 
+        : rawName.trim().toLowerCase().replace(/\s+/g, '.') + "@mitmumbai.png.edu";
+
       const userCredential = await signInWithEmailAndPassword(auth, formattedEmail, password);
-      localStorage.setItem("academiq_faculty_id", userCredential.user.uid);
-      localStorage.setItem("academiq_faculty_name", facultyName.trim());
-      router.push('/faculty/dashboard');
-    } catch (error: any) { setErrorMessage("Invalid name or password. Please try again."); } finally { setIsLoading(false); }
+      const user = userCredential.user;
+
+      localStorage.setItem("academiq_faculty_id", user.uid);
+      localStorage.setItem("academiq_faculty_name", user.displayName || rawName);
+      localStorage.setItem("userRole", "faculty"); 
+      
+      router.replace('/faculty/dashboard');
+    } catch (error: any) {
+      const msg = error.message || "Login Failed";
+      setErrorMessage(msg.includes("invalid-credential") ? "Incorrect Name or Password." : msg);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setIsGoogleLoading(true);
+    setErrorMessage("");
+
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const user = result.user;
+      const email = user.email?.toLowerCase().trim();
+
+      if (!email) throw new Error("No email found from Google.");
+
+      const docRef = doc(db, "approved_faculty_emails", email);
+      const docSnap = await getDoc(docRef);
+
+      if (docSnap.exists()) {
+        localStorage.setItem("academiq_faculty_id", user.uid);
+        localStorage.setItem("academiq_faculty_name", user.displayName || email);
+        localStorage.setItem("userRole", "faculty"); 
+        
+        router.replace('/faculty/dashboard');
+      } else {
+        await signOut(auth);
+        setErrorMessage(`Access Pending: ${email} is not registered by Admin.`);
+      }
+    } catch (error: any) {
+      setErrorMessage(error.message || "Google Sign-In failed.");
+    } finally {
+      setIsGoogleLoading(false);
+    }
   };
 
   return (
-    // FIX: Using justify-between pushes the signature safely to the bottom
-    <main className="relative min-h-screen w-full flex flex-col items-center justify-between p-6 text-white overflow-hidden">
+    <main className="min-h-screen w-full flex flex-col items-center p-6 text-white overflow-y-auto [&::-webkit-scrollbar]:hidden">
       
-      {/* Top Spacer to balance the layout */}
-      <div className="w-full pt-8" />
+      <div className="flex-1 min-h-[4vh]" />
 
-      {/* Main Login Form */}
-      <div className="w-full max-w-md flex flex-col items-center z-10 relative">
-        <div className="w-full flex items-center mb-10 relative">
-          <Link href="/" className="absolute left-0 p-3 rounded-2xl bg-white/[0.05] border border-white/[0.1] hover:bg-white/[0.1] transition-colors backdrop-blur-xl shadow-lg">
+      <div className="w-full max-w-md flex flex-col items-center z-50 relative">
+        <div className="w-full flex items-center mb-8 relative">
+          
+          {/* SAFE BACK BUTTON */}
+          <button 
+            onClick={() => {
+              localStorage.removeItem('userRole'); 
+              router.replace('/'); 
+            }}
+            className="absolute left-0 p-3 rounded-2xl bg-white/[0.05] border border-white/[0.1] hover:bg-white/[0.1] transition-colors backdrop-blur-xl shadow-lg"
+          >
             <ArrowLeft className="w-6 h-6 text-white" />
-          </Link>
+          </button>
+
           <div className="w-full flex flex-col items-center mt-4">
             <div className="p-4 rounded-[1.25rem] bg-white/[0.03] border border-white/[0.08] backdrop-blur-[40px] shadow-[0_8px_32px_0_rgba(0,0,0,0.3)] mb-5">
-              <GraduationCap className="w-12 h-12 text-[#D0BCFF]" />
+              <School className="w-12 h-12 text-[#D0BCFF]" />
             </div>
-            <h1 className="text-3xl font-bold tracking-tight">Faculty Access</h1>
-            <p className="text-white/50 text-sm mt-2">Log in to manage your classes.</p>
+            <h1 className="text-3xl font-bold tracking-tight">Faculty Portal</h1>
+            <p className="text-white/50 text-sm mt-2 text-center px-4">Enter your credentials or sign in securely with Google.</p>
           </div>
         </div>
 
-        <form onSubmit={handleLogin} className="w-full p-8 rounded-[2rem] bg-white/[0.03] backdrop-blur-[40px] border border-white/[0.08] shadow-[0_8px_32px_0_rgba(0,0,0,0.4)] space-y-6">
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-2 ml-1">Faculty Name</label>
-            <input type="text" value={facultyName} onChange={(e) => setFacultyName(e.target.value)} placeholder="e.g. Pratosh Gharat" required className="w-full bg-black/20 border border-white/10 rounded-2xl p-4 text-white focus:ring-2 focus:ring-[#D0BCFF]/50 outline-none transition-all placeholder:text-white/20" />
+        <div className="w-full p-8 rounded-[2rem] bg-white/[0.03] backdrop-blur-[40px] border border-white/[0.08] shadow-[0_8px_32px_0_rgba(0,0,0,0.4)] space-y-6">
+          
+          <form onSubmit={handleEmailLogin} className="space-y-5">
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-2 ml-1">Full Name</label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                  <UserIcon className="h-5 w-5 text-white/40" />
+                </div>
+                <input 
+                  type="text" 
+                  value={rawName} 
+                  onChange={(e) => setRawName(e.target.value)} 
+                  placeholder="e.g. Firstname Lastname" 
+                  required 
+                  className="w-full bg-black/20 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-white focus:ring-2 focus:ring-[#D0BCFF]/50 outline-none transition-all placeholder:text-white/20" 
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-2 ml-1">Password</label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                  <Lock className="h-5 w-5 text-white/40" />
+                </div>
+                <input 
+                  type="password" 
+                  value={password} 
+                  onChange={(e) => setPassword(e.target.value)} 
+                  placeholder="••••••••" 
+                  required 
+                  className="w-full bg-black/20 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-white focus:ring-2 focus:ring-[#D0BCFF]/50 outline-none transition-all placeholder:text-white/20" 
+                />
+              </div>
+            </div>
+
+            <button 
+              type="submit" 
+              disabled={isLoading || isGoogleLoading} 
+              className="w-full py-4 bg-[#D0BCFF] text-[#2A1B4E] rounded-2xl font-bold text-lg flex items-center justify-center disabled:opacity-50 transition-all hover:scale-[1.02] shadow-[0_0_20px_rgba(208,188,255,0.25)]"
+            >
+              {isLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : "Sign In"}
+            </button>
+          </form>
+
+          <div className="relative flex items-center py-2">
+            <div className="flex-grow border-t border-white/10"></div>
+            <span className="flex-shrink-0 mx-4 text-white/40 text-xs font-bold uppercase tracking-widest">Or</span>
+            <div className="flex-grow border-t border-white/10"></div>
           </div>
 
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-2 ml-1">Password</label>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required className="w-full bg-black/20 border border-white/10 rounded-2xl p-4 text-white focus:ring-2 focus:ring-[#D0BCFF]/50 outline-none transition-all placeholder:text-white/20" />
-          </div>
-
-          {errorMessage && <p className="text-red-400 text-sm text-center font-medium bg-red-500/10 py-2 rounded-lg border border-red-500/20">{errorMessage}</p>}
-
-          <button type="submit" disabled={isLoading} className="w-full py-4 mt-2 bg-[#D0BCFF] text-[#2A1B4E] rounded-2xl font-bold text-lg flex items-center justify-center disabled:opacity-50 transition-all hover:scale-[1.02] shadow-[0_0_20px_rgba(208,188,255,0.25)]">
-            {isLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : "Sign In"}
+          <button 
+            type="button"
+            onClick={handleGoogleLogin} 
+            disabled={isLoading || isGoogleLoading} 
+            className="w-full py-4 bg-transparent border border-white/20 text-white rounded-2xl font-bold text-lg flex items-center justify-center space-x-3 disabled:opacity-50 transition-all hover:bg-white/5 hover:border-white/40 shadow-lg"
+          >
+            {isGoogleLoading ? (
+              <Loader2 className="w-6 h-6 animate-spin" />
+            ) : (
+              <>
+                <svg className="w-6 h-6" viewBox="0 0 24 24">
+                    <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                </svg>
+                <span>Sign in with Google</span>
+              </>
+            )}
           </button>
-        </form>
+
+          {errorMessage && (
+            <p className="text-red-400 text-sm text-center font-medium bg-red-500/10 py-3 px-4 rounded-xl border border-red-500/20">
+              {errorMessage}
+            </p>
+          )}
+
+        </div>
       </div>
 
-      {/* Signature Anchored securely to the absolute bottom */}
-      <div className="flex flex-col items-center text-center space-y-1 z-10 pb-4">
-        <p className="text-xs text-white/50">Version 2.3.2</p>
-        <p className="text-xs font-medium text-white/70 mt-1">Developed by - Pratosh Gharat</p>
-        <div className="relative h-14 w-44 flex items-center justify-center mt-1">
+      <div className="flex-1 min-h-[10vh]" />
+
+      <div className="flex flex-col items-center text-center space-y-1 z-10 relative pb-6">
+        <p className="text-xs font-medium text-white/70">Developed by - Pratosh Gharat</p>
+        <div className="relative h-14 w-44 flex items-center justify-center">
           <img src="/signature.png" alt="Pratosh Gharat Signature" className="h-full w-full object-contain brightness-0 invert" />
         </div>
       </div>
-
     </main>
   );
 }

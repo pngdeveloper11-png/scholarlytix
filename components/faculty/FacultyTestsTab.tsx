@@ -82,8 +82,8 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
     try {
       const text = await file.text();
       
-      const genAI = new GoogleGenerativeAI("AQ.Ab8RN6IfSfXABq3inD_7dsaEFpkAqoi3wrpQ3_ZZyNILSNkWgQ");      
-      const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
+      const genAI = new GoogleGenerativeAI(process.env.NEXT_PUBLIC_GEMINI_API_KEY as string);
+      const model = genAI.getGenerativeModel({ model: "gemini-3.7-flash" });
 
       const prompt = `
         Analyze the following raw CSV/text data containing student marks for an exam.

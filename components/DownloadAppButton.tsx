@@ -7,20 +7,16 @@ import { Smartphone, Download, Loader2 } from 'lucide-react';
 
 export default function DownloadAppButton({ className = "" }: { className?: string }) {
   const [apkUrl, setApkUrl] = useState<string | null>(null);
-  const [versionCode, setVersionCode] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const fetchAppDetails = async () => {
       try {
-        // Now pointing to your existing 'updates' document
         const docRef = doc(db, 'app_config', 'updates');
         const docSnap = await getDoc(docRef);
 
         if (docSnap.exists()) {
-          // Using your exact field names from Firebase
           setApkUrl(docSnap.data().download_link);
-          setVersionCode(docSnap.data().latest_version_code);
         }
       } catch (error) {
         console.error("Error fetching APK URL:", error);
@@ -42,7 +38,6 @@ export default function DownloadAppButton({ className = "" }: { className?: stri
 
   if (!apkUrl) return null;
 
-  // Added a check to ensure it formats the URL properly if it misses "https://"
   const formatUrl = (url: string) => url.startsWith('http') ? url : `https://${url}`;
 
   return (
@@ -59,7 +54,7 @@ export default function DownloadAppButton({ className = "" }: { className?: stri
         </div>
         <div className="text-left">
           <p className="text-sm font-bold text-white group-hover:text-[#D0BCFF] transition-colors">Download Android App</p>
-          <p className="text-xs text-white/60">Latest Version (Build {versionCode})</p>
+          <p className="text-xs text-white/60">Get the latest version</p>
         </div>
       </div>
       <Download className="w-5 h-5 text-white/40 group-hover:text-[#D0BCFF] group-hover:translate-y-0.5 transition-all ml-4" />

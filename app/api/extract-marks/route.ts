@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// Hardcoded Gemini Key
-const API_KEY = "AQ.Ab8RN6IfSfXABq3inD_7dsaEFpkAqoi3wrpQ3_ZZyNILSNkWgQ";
+const API_KEY = process.env.GEMINI_API_KEY as string;
 
 export async function POST(request: Request) {
   try {
@@ -16,9 +15,9 @@ export async function POST(request: Request) {
     const buffer = Buffer.from(await file.arrayBuffer());
     const base64Data = buffer.toString('base64');
     
-    // Choose Gemini 1.5 Flash for fast multimodal vision processing
-    const genAI = new GoogleGenerativeAI("AQ.Ab8RN6IfSfXABq3inD_7dsaEFpkAqoi3wrpQ3_ZZyNILSNkWgQ");  
-    const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
+    // Choose Gemini 3.7 Flash for fast multimodal vision processing
+    const genAI = new GoogleGenerativeAI(API_KEY);  
+    const model = genAI.getGenerativeModel({ model: 'gemini-3.7-flash' });
 
     const prompt = `
       You are an AI grading assistant. 

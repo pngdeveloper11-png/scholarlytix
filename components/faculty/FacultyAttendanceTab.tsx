@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, doc, addDoc, onSnapshot } from 'firebase/firestore';
+import { collection, doc, onSnapshot, writeBatch, increment } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Loader2, Sparkles, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -72,16 +72,27 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
     return ["All", "Batch 1", "Batch 2"];
   })();
 
+  // THE FIX: Strict Roster Filtering with string cleanup
   const classStudents = roster
-    .filter(s => s.branch === selectedBranch && s.semester === selectedSem)
+    .filter(s => 
+      s.branch?.toLowerCase().trim() === selectedBranch.toLowerCase().trim() && 
+      s.semester?.toLowerCase().trim() === selectedSem.toLowerCase().trim()
+    )
     .sort((a, b) => (a.rollNo || 0) - (b.rollNo || 0));
 
+  // THE FIX: Precise Batch Logic matching the Android App
   const filteredStudents = classStudents.filter(student => {
     const r = student.rollNo || 0;
     if (selectedBatch === "All" || r === 0) return true;
     switch (selectedBatch) {
-      case "A1": case "B1": case "C1": case "D1": return r >= 1 && r <= 32;
-      case "A2": case "B2": case "C2": case "D2": return r >= 33 && r <= 65;
+      case "A1": return r >= 1 && r <= 35;
+      case "A2": return r >= 36 && r <= 65;
+      case "B1": return r >= 1 && r <= 30;
+      case "B2": return r >= 31 && r <= 60;
+      case "C1": return r >= 1 && r <= 32;
+      case "C2": return r >= 33 && r <= 62;
+      case "D1": return r >= 1 && r <= 25;
+      case "D2": return r >= 26 && r <= 50;
       default: return true;
     }
   });
@@ -122,15 +133,48 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
     setShowSummaryDialog(true);
   };
 
+  // THE FIX: Batch Write to instantly sync metrics across all devices
   const finalizeAttendanceSave = async (aiSummary: string | null = null) => {
     setIsLoading(true);
     try {
-      await addDoc(collection(db, "attendance_history"), {
-        semester: selectedSem, branchName: selectedBranch, subjectName: selectedSubject,
-        batch: selectedBatch, timestamp: Date.now(), presentStudentIds, summary: aiSummary
+      const batch = writeBatch(db);
+
+      // A. Update the metric counters for every student in the active roster view
+      filteredStudents.forEach(student => {
+        if (student.rollNo > 0 || student.grNumber) {
+          const studentRef = doc(db, 'students_directory', student.id);
+          const isPresent = presentStudentIds.includes(student.id);
+          
+          batch.update(studentRef, {
+            totalConducted: increment(1),
+            ...(isPresent ? { totalAttended: increment(1) } : {})
+          });
+        }
       });
-      setShowSummaryDialog(false); setPresentStudentIds([]);
-    } catch (e) { alert("Failed to save attendance."); } finally { setIsLoading(false); }
+
+      // B. Create the actual attendance history record
+      const newRecordRef = doc(collection(db, "attendance_history"));
+      batch.set(newRecordRef, {
+        semester: selectedSem, 
+        branchName: selectedBranch, 
+        subjectName: selectedSubject,
+        batch: selectedBatch, 
+        timestamp: Date.now(), 
+        presentStudentIds, 
+        summary: aiSummary
+      });
+
+      await batch.commit();
+
+      setShowSummaryDialog(false); 
+      setPresentStudentIds([]);
+      alert("Attendance & Metrics Saved Successfully!");
+    } catch (e) { 
+      console.error(e);
+      alert("Failed to save attendance."); 
+    } finally { 
+      setIsLoading(false); 
+    }
   };
 
   const handleGenerateAiNotes = async () => {
@@ -178,7 +222,7 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
       <div className="flex-1 overflow-y-auto w-full flex justify-center [&::-webkit-scrollbar]:hidden touch-none select-none">
         <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-7 gap-3 w-full max-w-4xl place-content-start">
           {filteredStudents.length === 0 ? (
-            <div className="col-span-full py-20 text-center"><p className={`text-[15px] ${isDark ? 'text-white/50' : 'text-neutral-500'}`}>No students in roster. Ensure classes are assigned in Settings.</p></div>
+            <div className="col-span-full py-20 text-center"><p className={`text-[15px] ${isDark ? 'text-white/50' : 'text-neutral-500'}`}>No students found for {selectedBranch} ({selectedSem}). Check your Cloud Roster.</p></div>
           ) : (
             filteredStudents.map(student => {
               const isSelected = presentStudentIds.includes(student.id);

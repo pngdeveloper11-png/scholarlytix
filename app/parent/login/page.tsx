@@ -1,32 +1,28 @@
-'use client';
+"use client";
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { signInWithPopup } from 'firebase/auth';
 import { auth, db, googleProvider } from '@/lib/firebase';
+import Link from 'next/link';
 import { ArrowLeft, User, Loader2 } from 'lucide-react';
 
-export default function StudentLogin() {
+export default function ParentLogin() {
   const [errorMessage, setErrorMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
 
-  // FIX: Check for BOTH legacy ID and the new JSON session.
+  // Redirect if already logged in as a parent
   useEffect(() => {
-    const uid = localStorage.getItem("academiq_student_id");
-    const session = localStorage.getItem("academiq_student_session");
-    
-    if (uid && session) {
-      router.replace('/student/dashboard');
-    } else if (uid && !session) {
-      // If they have an old ID but no new session object, clear the broken legacy data
-      // This prevents the infinite redirect loop and forces a clean login.
-      localStorage.removeItem("academiq_student_id");
-      localStorage.removeItem("academiq_student_name");
-      localStorage.removeItem("academiq_student_branch");
-      localStorage.removeItem("academiq_student_semester");
-      localStorage.removeItem("academiq_student_gr");
+    const userRole = localStorage.getItem("userRole");
+    if (userRole === 'parent') {
+        const savedSession = localStorage.getItem("academiq_student_session");
+        if (savedSession) {
+            router.replace('/student/dashboard');
+        } else {
+            router.replace('/parent/linking');
+        }
     }
   }, [router]);
 
@@ -36,38 +32,49 @@ export default function StudentLogin() {
 
     try {
       const result = await signInWithPopup(auth, googleProvider);
-      const userEmail = result.user.email?.toLowerCase().trim();
+      const user = result.user;
 
-      if (!userEmail) {
-         setErrorMessage("Failed to retrieve email from Google.");
+      if (!user.uid) {
+         setErrorMessage("Failed to retrieve user ID from Google.");
          setIsLoading(false);
          return;
       }
 
-      const q = query(collection(db, "students_directory"), where("email", "==", userEmail));
-      const querySnapshot = await getDocs(q);
+      // Set role immediately
+      localStorage.setItem("userRole", "parent");
 
-      if (!querySnapshot.empty) {
-        const doc = querySnapshot.docs[0];
-        const data = doc.data();
+      // Check if this parent is already linked to a student
+      const linkDocRef = doc(db, "parent_links", user.uid);
+      const linkDocSnap = await getDoc(linkDocRef);
 
-        localStorage.setItem("academiq_student_id", doc.id);
-        
-        const sessionData = {
-          studentId: doc.id,
-          name: data.fullName || "",
-          branch: data.branch || "",
-          semester: data.semester || "",
-          grNumber: data.grNumber || ""
-        };
-        localStorage.setItem("academiq_student_session", JSON.stringify(sessionData));
-        localStorage.setItem("userRole", "student"); // Secures the Global Router
-        
-        router.replace('/student/dashboard');
+      if (linkDocSnap.exists()) {
+          const studentId = linkDocSnap.data().linkedStudentId;
+          
+          // Fetch the latest student data
+          const studentDocRef = doc(db, "students_directory", studentId);
+          const studentDocSnap = await getDoc(studentDocRef);
+
+          if (studentDocSnap.exists()) {
+              const sData = studentDocSnap.data();
+              const sessionData = { 
+                  studentId: studentId, 
+                  name: sData.fullName, 
+                  branch: sData.branch, 
+                  semester: sData.semester, 
+                  grNumber: sData.grNumber 
+              };
+              
+              localStorage.setItem('academiq_student_session', JSON.stringify(sessionData));
+              router.replace('/student/dashboard');
+          } else {
+              // Student was deleted from DB, parent needs to re-link
+              router.replace('/parent/linking');
+          }
       } else {
-        await auth.signOut();
-        setErrorMessage(`Unauthorized. Your email (${userEmail}) is not registered in the college directory. Please use your official ID.`);
+          // New Parent - Needs to link a child
+          router.replace('/parent/linking');
       }
+
     } catch (error: any) { 
       setErrorMessage(error.message || "Google Sign-In failed. Please try again."); 
     } finally { 
@@ -77,13 +84,10 @@ export default function StudentLogin() {
 
   return (
     <main className="min-h-screen w-full flex flex-col items-center p-6 text-white overflow-y-auto [&::-webkit-scrollbar]:hidden">
-      
       <div className="flex-1 min-h-[4vh]" />
 
       <div className="w-full max-w-md flex flex-col items-center z-50 relative">
         <div className="w-full flex items-center mb-10 relative">
-          
-          {/* SAFE BACK BUTTON */}
           <button 
             onClick={() => {
               localStorage.removeItem('userRole'); 
@@ -93,13 +97,12 @@ export default function StudentLogin() {
           >
             <ArrowLeft className="w-6 h-6 text-white" />
           </button>
-
           <div className="w-full flex flex-col items-center mt-4">
             <div className="p-4 rounded-[1.25rem] bg-white/[0.03] border border-white/[0.08] backdrop-blur-[40px] shadow-[0_8px_32px_0_rgba(0,0,0,0.3)] mb-5">
               <User className="w-12 h-12 text-[#D0BCFF]" />
             </div>
-            <h1 className="text-3xl font-bold tracking-tight">Student Access</h1>
-            <p className="text-white/50 text-sm mt-2 text-center">Sign in with your official college Google account to access your portal.</p>
+            <h1 className="text-3xl font-bold tracking-tight">Parents' Portal</h1>
+            <p className="text-white/50 text-sm mt-2 text-center">Sign in with Google to monitor your child's academic progress.</p>
           </div>
         </div>
 
@@ -128,16 +131,6 @@ export default function StudentLogin() {
           </button>
         </div>
       </div>
-
-      <div className="flex-1 min-h-[10vh]" />
-
-      <div className="flex flex-col items-center text-center space-y-1 z-10 relative pb-6">
-        <p className="text-xs font-medium text-white/70">Developed by - Pratosh Gharat</p>
-        <div className="relative h-14 w-44 flex items-center justify-center">
-          <img src="/signature.png" alt="Pratosh Gharat Signature" className="h-full w-full object-contain brightness-0 invert" />
-        </div>
-      </div>
-
     </main>
   );
 }

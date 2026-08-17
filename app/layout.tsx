@@ -7,7 +7,7 @@ import { ThemeProvider } from '@/components/ThemeContext';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'AcademiQ',
+  title: 'Scholarlytix',
   description: 'The Intelligent EdTech Ecosystem',
 };
 
