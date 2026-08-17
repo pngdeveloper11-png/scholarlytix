@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { doc, setDoc, onSnapshot } from 'firebase/firestore';
-import { getAuth, updatePassword } from 'firebase/auth';
+import { doc, setDoc, getDocs, collection, query, where, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
 import { db } from '@/lib/firebase';
 import GlassDropdown from '@/components/GlassDropdown';
 import { 
   Settings, Lock, Edit, Download, 
-  KeyRound, Fingerprint, CloudUpload, LogOut, 
+  Smartphone, Fingerprint, CloudUpload, LogOut, 
   Clock, Zap, Loader2, Check, ChevronLeft, CalendarDays, AlertCircle
 } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -46,6 +46,7 @@ export default function FacultyDashboard() {
   const router = useRouter();
   const [isWeekView, setIsWeekView] = useState(false);
   const [facultyName, setFacultyName] = useState("");
+  const [facultyId, setFacultyId] = useState("");
   const [isHod, setIsHod] = useState(false);
   const [activeTab, setActiveTab] = useState("Classes");
   const [teachingConfig, setTeachingConfig] = useState<Record<string, string[]>>({});
@@ -70,11 +71,13 @@ export default function FacultyDashboard() {
 
   const [showPinModal, setShowPinModal] = useState(false);
   const [newPin, setNewPin] = useState("");
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [newPassword, setNewPassword] = useState("");
   
   const [showTimetableModal, setShowTimetableModal] = useState(false);
   const [showManageTimetableModal, setShowManageTimetableModal] = useState(false);
+
+  // --- NEW DEVICES STATE ---
+  const [showDevicesDialog, setShowDevicesDialog] = useState(false);
+  const [activeSessions, setActiveSessions] = useState<any[]>([]);
 
   // --- CUSTOM DIALOG STATES ---
   const [alertDialog, setAlertDialog] = useState<{title: string, message: string} | null>(null);
@@ -132,8 +135,10 @@ export default function FacultyDashboard() {
     if (savedDark !== null) setIsDarkTheme(savedDark === "true");
     if (savedHue !== null) setIsDynamicHue(savedHue === "true");
     
-    if (!name) { router.push('/faculty/login'); return; } 
+    if (!name || !uid) { router.replace('/'); return; } 
+    
     setFacultyName(name);
+    setFacultyId(uid);
     if (savedPin) setIsLocked(true);
 
     const lowerName = name.toLowerCase();
@@ -159,25 +164,39 @@ export default function FacultyDashboard() {
     else { showAlert("Access Denied", "Incorrect PIN"); setPinInput(""); }
   };
 
-  const handleLogout = () => { localStorage.clear(); router.push('/faculty/login'); };
+  const handleLogout = () => {
+    localStorage.removeItem("academiq_faculty_id");
+    localStorage.removeItem("academiq_faculty_name");
+    localStorage.removeItem("userRole");
+    const auth = getAuth();
+    auth.signOut();
+    router.replace('/'); 
+  };
+
+  const fetchActiveSessions = async () => {
+    if (!facultyId) return;
+    const q = query(collection(db, "active_sessions"), where("userId", "==", facultyId));
+    const querySnapshot = await getDocs(q);
+    const sessions = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    setActiveSessions(sessions);
+    setShowDevicesDialog(true);
+  };
+
+  const logoutOtherDevice = async (sessionId: string) => {
+    try {
+        await deleteDoc(doc(db, "active_sessions", sessionId));
+        setActiveSessions(prev => prev.filter(s => s.id !== sessionId));
+        showAlert("Success", "Logged out of device securely.");
+    } catch(e) {
+        console.error(e);
+    }
+  };
 
   const handleSaveClasses = async () => {
     setIsSavingClasses(true);
-    const uid = localStorage.getItem("academiq_faculty_id");
-    if (uid) { await setDoc(doc(db, "teacher_configs", uid), { config: draftConfig }); }
+    if (facultyId) { await setDoc(doc(db, "teacher_configs", facultyId), { config: draftConfig }); }
     setIsSavingClasses(false);
     setShowEditClasses(false);
-  };
-
-  const handleUpdatePassword = async () => {
-    const auth = getAuth();
-    if (auth.currentUser && newPassword.length >= 6) {
-      try {
-        await updatePassword(auth.currentUser, newPassword);
-        showAlert("Success", "Password updated securely!");
-        setShowPasswordModal(false); setNewPassword("");
-      } catch (e) { showAlert("Error", "Session expired. Please log out and sign back in."); }
-    } else { showAlert("Invalid Entry", "Password must be at least 6 characters long."); }
   };
 
   const handleDirectMarkClick = (slot: any) => {
@@ -202,7 +221,6 @@ export default function FacultyDashboard() {
         {isDynamicHue && <DynamicHueBackground theme={theme} />}
         <CursorGlow />
         
-        {/* Render Alert inside Locked Screen if needed */}
         {alertDialog && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
             <div className={`border p-8 rounded-[2rem] w-full max-w-sm ${modalBg}`}>
@@ -219,6 +237,7 @@ export default function FacultyDashboard() {
           <p className="opacity-70 mb-8 text-sm">Enter your PIN to access the portal.</p>
           <input type="password" maxLength={4} value={pinInput} onChange={(e) => setPinInput(e.target.value)} className={`w-full text-center text-3xl tracking-[1em] border rounded-2xl p-5 focus:ring-2 focus:ring-[#D0BCFF] outline-none mb-8 ${isDark ? 'bg-white/[0.08] border-white/20 text-white placeholder:text-white/30' : 'bg-black/5 border-black/10 text-neutral-900'}`} placeholder="••••" />
           <button onClick={handleUnlock} className="w-full py-4 bg-[#D0BCFF] text-[#2A1B4E] rounded-2xl font-bold text-lg hover:scale-[1.02] transition-all shadow-[0_0_20px_rgba(208,188,255,0.4)]">Unlock</button>
+          <button onClick={handleLogout} className="mt-4 text-xs text-red-400 hover:underline">Sign Out instead</button>
         </div>
       </main>
     );
@@ -255,7 +274,6 @@ export default function FacultyDashboard() {
             </div>
           </div>
         )}
-        {/* --------------------------- */}
         
         <div className="w-full max-w-2xl mx-auto flex flex-col pb-10 mt-6 z-10">
           <div className="flex items-center mb-10">
@@ -266,8 +284,34 @@ export default function FacultyDashboard() {
           </div>
 
           <div className={`border rounded-[2rem] overflow-hidden flex flex-col ${cardBg}`}>
-            <SettingsRow icon={<Download />} title="Check for Updates" subtitle="Download the latest version of the app." isDark={isDark} onClick={() => showAlert("Up to Date", "Your version of AcademiQ is currently up to date.")} />
-            <SettingsRow icon={<KeyRound />} title="Change Password" subtitle="Update your login credentials securely." isDark={isDark} onClick={() => setShowPasswordModal(true)} />
+            <SettingsRow icon={<Download />} title="Check for Updates" subtitle="Download the latest version of the app." isDark={isDark} onClick={() => showAlert("Up to Date", "Your version of Scholarlytix is currently up to date.")} />
+            
+            {/* MANAGE DEVICES */}
+            <div className={`flex items-center justify-between p-5 border-b cursor-pointer hover:bg-white/[0.02] ${isDark ? 'border-white/[0.05]' : 'border-black/[0.05]'}`} onClick={fetchActiveSessions}>
+              <div className="flex-1 pr-4">
+                <h3 className="font-semibold text-lg">Manage Active Devices</h3>
+                <p className={`text-sm mt-0.5 ${isDark ? 'text-white/70' : 'text-neutral-600'}`}>Log out from other phones or tablets.</p>
+              </div>
+              <Smartphone className="w-5 h-5 opacity-60" />
+            </div>
+
+            {/* PIN LOCK */}
+            <SettingsRow 
+              icon={<Lock />} 
+              title={hasPin ? "Remove App Lock PIN" : "Secure PIN"} 
+              subtitle={hasPin ? "Disable local device security." : "Set a PIN to lock the website."} 
+              isDark={isDark}
+              onClick={() => {
+                if (hasPin) {
+                  showConfirm("Remove PIN", "Are you sure you want to remove your App Lock PIN?", () => {
+                    localStorage.removeItem("academiq_pin");
+                    router.refresh();
+                  });
+                } else { 
+                  setShowPinModal(true); 
+                }
+              }} 
+            />
             
             <div className={`flex items-center justify-between p-5 border-b ${isDark ? 'border-white/[0.05]' : 'border-black/[0.05]'}`}>
               <div className="flex-1 pr-4">
@@ -294,23 +338,6 @@ export default function FacultyDashboard() {
               </div>
             </div>
 
-            <SettingsRow 
-              icon={<Lock />} 
-              title={hasPin ? "Remove App Lock PIN" : "Secure PIN"} 
-              subtitle={hasPin ? "Disable local device security." : "Set a PIN to lock the website."} 
-              isDark={isDark}
-              onClick={() => {
-                if (hasPin) {
-                  showConfirm("Remove PIN", "Are you sure you want to remove your App Lock PIN?", () => {
-                    localStorage.removeItem("academiq_pin");
-                    router.refresh();
-                  });
-                } else { 
-                  setShowPinModal(true); 
-                }
-              }} 
-            />
-
             <div className={`flex items-center justify-between p-5 hover:bg-red-500/10 transition-colors cursor-pointer group`} onClick={handleLogout}>
               <div className="flex-1 pr-4">
                 <h3 className="font-semibold text-lg text-red-400">Sign Out</h3>
@@ -320,9 +347,8 @@ export default function FacultyDashboard() {
             </div>
           </div>
 
-          {/* Exact Settings Footer Matching App Screenshot */}
           <div className="mt-12 flex flex-col items-center text-center space-y-1">
-            <p className={`text-xs ${isDark ? 'text-white/50' : 'text-neutral-500'}`}>Version 2.3.2</p>
+            <p className={`text-xs ${isDark ? 'text-white/50' : 'text-neutral-500'}`}>Version 3.5</p>
             <p className={`text-sm font-medium ${isDark ? 'text-white/70' : 'text-neutral-600'}`}>Developed by - Pratosh Gharat</p>
             <div className="relative h-16 w-48 flex items-center justify-center mt-2">
               <img 
@@ -362,21 +388,6 @@ export default function FacultyDashboard() {
           </div>
         )}
 
-        {/* Change Password Modal */}
-        {showPasswordModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-            <div className={`border p-8 rounded-[2rem] w-full max-w-sm ${modalBg}`}>
-              <h2 className="text-xl font-bold mb-2">Update Password</h2>
-              <p className="text-sm opacity-70 mb-6">Enter a new secure password (min 6 chars).</p>
-              <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className={`w-full text-center text-xl border rounded-2xl p-4 outline-none mb-6 ${isDark ? 'bg-white/[0.08] border-white/20 text-white' : 'bg-black/5 border-black/10 text-neutral-900'}`} placeholder="••••••" />
-              <div className="flex space-x-3">
-                <button onClick={() => setShowPasswordModal(false)} className={`flex-1 py-3.5 rounded-xl font-bold ${isDark ? 'bg-white/[0.05] border border-white/20' : 'bg-black/5 border border-black/10'}`}>Cancel</button>
-                <button onClick={handleUpdatePassword} className="flex-1 py-3.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold hover:scale-[1.02]">Save</button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Set PIN Modal */}
         {showPinModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
@@ -385,8 +396,31 @@ export default function FacultyDashboard() {
               <input type="password" maxLength={4} value={newPin} onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))} className={`w-full text-center text-3xl tracking-[1em] border rounded-2xl p-4 outline-none mb-6 ${isDark ? 'bg-white/[0.08] border-white/20 text-white' : 'bg-black/5 border-black/10 text-neutral-900'}`} placeholder="••••" />
               <div className="flex space-x-3">
                 <button onClick={() => setShowPinModal(false)} className={`flex-1 py-3.5 rounded-xl font-bold ${isDark ? 'bg-white/[0.05] border border-white/20' : 'bg-black/5 border border-black/10'}`}>Cancel</button>
-                <button onClick={() => { if (newPin.length === 4) { localStorage.setItem("academiq_pin", newPin); setShowPinModal(false); } else showAlert("Invalid", "PIN must be exactly 4 digits."); }} className="flex-1 py-3.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold hover:scale-[1.02]">Save PIN</button>
+                <button onClick={() => { if (newPin.length === 4) { localStorage.setItem("academiq_pin", newPin); setShowPinModal(false); setNewPin(""); } else showAlert("Invalid", "PIN must be exactly 4 digits."); }} className="flex-1 py-3.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold hover:scale-[1.02]">Save PIN</button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* DEVICES DIALOG */}
+        {showDevicesDialog && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+            <div className={`border p-8 rounded-[2rem] w-full max-w-md ${modalBg} max-h-[80vh] overflow-y-auto`}>
+              <h3 className="text-xl font-bold mb-6">Active Devices</h3>
+              {activeSessions.length === 0 ? <p className="text-center opacity-60">No other active devices found.</p> : (
+                  <div className="space-y-4 mb-6">
+                      {activeSessions.map(session => (
+                          <div key={session.id} className="flex justify-between items-center p-4 bg-white/5 rounded-xl border border-white/10">
+                              <div>
+                                  <p className="font-bold">{session.deviceName || "Unknown Device"}</p>
+                                  <p className="text-xs opacity-60">Logged in via App</p>
+                              </div>
+                              <button onClick={() => logoutOtherDevice(session.id)} className="text-red-400 text-sm font-bold bg-red-500/10 px-3 py-1 rounded-lg">Log Out</button>
+                          </div>
+                      ))}
+                  </div>
+              )}
+              <button onClick={() => setShowDevicesDialog(false)} className="w-full py-3 bg-white/10 rounded-xl font-bold">Close</button>
             </div>
           </div>
         )}
@@ -397,7 +431,6 @@ export default function FacultyDashboard() {
   const tabs = ["Classes", "Metrics", "History", "Materials", "Tests"];
   const dayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
 
-  // Main Dashboard Wrapper
   return (
     <main className={`relative min-h-screen w-full flex flex-col overflow-x-hidden [&::-webkit-scrollbar]:hidden ${bgMain}`}>
       {isDynamicHue && <DynamicHueBackground theme={theme} />}
@@ -615,7 +648,6 @@ function ToggleSwitch({ checked, onChange }: { checked: boolean, onChange: (val:
   );
 }
 
-// Fixed Alert Implementation in Modals
 function ManageTimetableModal({ onDismiss, modalBg, onShowAlert }: { onDismiss: () => void, modalBg: string, onShowAlert: (title: string, msg: string) => void }) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -694,7 +726,6 @@ function UploadTimetableModal({ onDismiss, modalBg, isDark, onShowAlert }: { onD
         
         <div className="space-y-4">
           <div className="flex space-x-3">
-            {/* Replaced native select with new Universal GlassDropdown */}
             <GlassDropdown value={upSem} options={["Semester 1", "Semester 2", "Semester 3", "Semester 4"]} onChange={setUpSem} isDark={isDark} />
             <GlassDropdown value={upBranch} options={["IT", "CSE", "CSE(AIML)", "EE"]} onChange={setUpBranch} isDark={isDark} />
           </div>
@@ -704,7 +735,6 @@ function UploadTimetableModal({ onDismiss, modalBg, isDark, onShowAlert }: { onD
 
         <div className="flex space-x-3 mt-8">
           <button onClick={onDismiss} className={`flex-1 py-3.5 rounded-xl font-bold transition-colors ${isDark ? 'bg-white/[0.05] hover:bg-white/10' : 'bg-black/5 hover:bg-black/10'}`}>Cancel</button>
-          {/* SOLID GREEN BUTTON FIX */}
           <button onClick={handlePublish} disabled={isUploading || !selectedFile} className="flex-1 py-3.5 bg-green-500 text-white rounded-xl font-bold flex justify-center items-center disabled:opacity-50 hover:bg-green-600 shadow-[0_0_20px_rgba(34,197,94,0.4)] transition-all">
             {isUploading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Publish"}
           </button>
