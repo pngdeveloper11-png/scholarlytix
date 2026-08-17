@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { doc, setDoc, getDocs, collection, query, where, deleteDoc, onSnapshot } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
-import { db } from '@/lib/firebase';
+import { doc, setDoc, getDocs, getDoc, collection, query, where, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { getAuth, onAuthStateChanged } from 'firebase/auth';
+import { db, auth } from '@/lib/firebase';
 import GlassDropdown from '@/components/GlassDropdown';
 import { 
   Settings, Lock, Edit, Download, 
@@ -75,18 +75,15 @@ export default function FacultyDashboard() {
   const [showTimetableModal, setShowTimetableModal] = useState(false);
   const [showManageTimetableModal, setShowManageTimetableModal] = useState(false);
 
-  // --- NEW DEVICES STATE ---
   const [showDevicesDialog, setShowDevicesDialog] = useState(false);
   const [activeSessions, setActiveSessions] = useState<any[]>([]);
 
-  // --- CUSTOM DIALOG STATES ---
   const [alertDialog, setAlertDialog] = useState<{title: string, message: string} | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{title: string, message: string, onConfirm: () => void} | null>(null);
 
   const showAlert = (title: string, message: string) => setAlertDialog({ title, message });
   const showConfirm = (title: string, message: string, onConfirm: () => void) => setConfirmDialog({ title, message, onConfirm });
 
-  // --- BROWSER BACK BUTTON HANDLER (SPA HISTORY STATE) ---
   useEffect(() => {
     const handlePopState = () => {
       setActiveTab("Classes");
@@ -141,8 +138,25 @@ export default function FacultyDashboard() {
     setFacultyId(uid);
     if (savedPin) setIsLocked(true);
 
-    const lowerName = name.toLowerCase();
-    if (lowerName.includes("pratosh") || lowerName.includes("admin") || lowerName.includes("yogita")) setIsHod(true);
+    // --- SECURE DATABASE-DRIVEN ROLE CHECK ---
+    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
+      if (user && user.email) {
+        const email = user.email.toLowerCase().trim();
+        try {
+          const roleDoc = await getDoc(doc(db, "approved_faculty_emails", email));
+          if (roleDoc.exists()) {
+            const role = roleDoc.data().role || "teacher";
+            if (["hod", "principal", "admin", "owner", "developer"].includes(role.toLowerCase())) {
+              setIsHod(true);
+            } else {
+              setIsHod(false);
+            }
+          }
+        } catch (e) {
+          console.error("Failed to verify user role:", e);
+        }
+      }
+    });
 
     if (!uid) return;
     
@@ -156,7 +170,11 @@ export default function FacultyDashboard() {
       else setFacultySchedule([]);
     });
 
-    return () => { unsubConfig(); unsubSchedule(); };
+    return () => { 
+        unsubscribeAuth();
+        unsubConfig(); 
+        unsubSchedule(); 
+    };
   }, [router]);
 
   const handleUnlock = () => {
@@ -168,7 +186,6 @@ export default function FacultyDashboard() {
     localStorage.removeItem("academiq_faculty_id");
     localStorage.removeItem("academiq_faculty_name");
     localStorage.removeItem("userRole");
-    const auth = getAuth();
     auth.signOut();
     router.replace('/'); 
   };
@@ -251,7 +268,6 @@ export default function FacultyDashboard() {
         {isDynamicHue && <DynamicHueBackground theme={theme} />}
         <CursorGlow />
 
-        {/* --- GLOBAL CUSTOM MODALS --- */}
         {alertDialog && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
             <div className={`border p-8 rounded-[2rem] w-full max-w-sm ${modalBg}`}>
@@ -286,7 +302,6 @@ export default function FacultyDashboard() {
           <div className={`border rounded-[2rem] overflow-hidden flex flex-col ${cardBg}`}>
             <SettingsRow icon={<Download />} title="Check for Updates" subtitle="Download the latest version of the app." isDark={isDark} onClick={() => showAlert("Up to Date", "Your version of Scholarlytix is currently up to date.")} />
             
-            {/* MANAGE DEVICES */}
             <div className={`flex items-center justify-between p-5 border-b cursor-pointer hover:bg-white/[0.02] ${isDark ? 'border-white/[0.05]' : 'border-black/[0.05]'}`} onClick={fetchActiveSessions}>
               <div className="flex-1 pr-4">
                 <h3 className="font-semibold text-lg">Manage Active Devices</h3>
@@ -295,7 +310,6 @@ export default function FacultyDashboard() {
               <Smartphone className="w-5 h-5 opacity-60" />
             </div>
 
-            {/* PIN LOCK */}
             <SettingsRow 
               icon={<Lock />} 
               title={hasPin ? "Remove App Lock PIN" : "Secure PIN"} 
@@ -360,7 +374,6 @@ export default function FacultyDashboard() {
           </div>
         </div>
 
-        {/* Theme Picker Modal */}
         {showThemeDialog && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
             <div className={`border p-8 rounded-[2rem] w-full max-w-sm ${modalBg}`}>
@@ -388,7 +401,6 @@ export default function FacultyDashboard() {
           </div>
         )}
 
-        {/* Set PIN Modal */}
         {showPinModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
             <div className={`border p-8 rounded-[2rem] w-full max-w-sm ${modalBg}`}>
@@ -402,7 +414,6 @@ export default function FacultyDashboard() {
           </div>
         )}
 
-        {/* DEVICES DIALOG */}
         {showDevicesDialog && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
             <div className={`border p-8 rounded-[2rem] w-full max-w-md ${modalBg} max-h-[80vh] overflow-y-auto`}>
@@ -436,7 +447,6 @@ export default function FacultyDashboard() {
       {isDynamicHue && <DynamicHueBackground theme={theme} />}
       <CursorGlow />
 
-      {/* --- GLOBAL CUSTOM MODALS --- */}
       {alertDialog && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
           <div className={`border p-8 rounded-[2rem] w-full max-w-sm ${modalBg}`}>
@@ -459,7 +469,6 @@ export default function FacultyDashboard() {
           </div>
         </div>
       )}
-      {/* --------------------------- */}
 
       <div className="w-full max-w-5xl mx-auto flex-1 flex flex-col p-6 md:p-8 z-10">
         <div className="flex justify-between items-center mb-8 pt-4">
@@ -559,10 +568,10 @@ export default function FacultyDashboard() {
               </button>
               
               {isHod && (
-            <button onClick={() => { window.history.pushState(null,""); setShowTimetableModal(true); }} className="w-full py-4 bg-green-500 text-white rounded-[1.25rem] font-bold text-[16px] flex justify-center items-center hover:bg-green-600 transition-all shadow-[0_0_20px_rgba(34,197,94,0.4)]">
-            <CloudUpload className="w-5 h-5 mr-3" /> Publish Branch Timetables
-            </button>
-            )}
+                <button onClick={() => { window.history.pushState(null,""); setShowTimetableModal(true); }} className="w-full py-4 bg-green-500 text-white rounded-[1.25rem] font-bold text-[16px] flex justify-center items-center hover:bg-green-600 transition-all shadow-[0_0_20px_rgba(34,197,94,0.4)]">
+                  <CloudUpload className="w-5 h-5 mr-3" /> Publish Branch Timetables
+                </button>
+              )}
             </div>
           </div>
         )}
