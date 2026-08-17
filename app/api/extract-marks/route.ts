@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export const maxDuration = 60; 
 
@@ -12,15 +11,10 @@ export async function POST(request: Request) {
     const file = formData.get('file') as File;
     const maxMarks = formData.get('maxMarks') as string || '20';
 
-    if (!file) throw new Error('No file provided');
+    if (!file) throw new Error("No file provided");
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const base64Data = buffer.toString('base64');
-
-    const genAI = new GoogleGenerativeAI(API_KEY);
-    
-    // FIX: Removed 'generationConfig' for backward compatibility
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
     const prompt = `
       You are an AI grading assistant.
@@ -29,7 +23,7 @@ export async function POST(request: Request) {
       The maximum marks for this test is ${maxMarks}. If a student is marked absent, use "AB".
 
       Return ONLY a pure, strict JSON object mapping the roll number (as a string) to the mark (as a string).
-      Do not include any student names. Do not include markdown tags like \`\`\`json.
+      Do not include any student names. Do not include markdown.
       Example format:
       {
         "101": "18",
@@ -38,25 +32,42 @@ export async function POST(request: Request) {
       }
     `;
 
-    const result = await model.generateContent([
-      prompt,
-      { inlineData: { data: base64Data, mimeType: file.type || 'image/jpeg' } },
-    ]);
+    // BULLETPROOF FETCH CALL
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: prompt },
+            { inlineData: { mimeType: file.type || 'image/jpeg', data: base64Data } }
+          ]
+        }]
+      })
+    });
 
-    let text = result.response.text();
+    if (!response.ok) {
+        const errorData = await response.text();
+        console.error("Google API Rejection:", errorData);
+        throw new Error("Google servers rejected the image.");
+    }
+
+    const data = await response.json();
+    let text = data.candidates[0].content.parts[0].text;
+
+    // SAFE JSON PARSER
     text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-    
     const startIndex = text.indexOf('{');
     const endIndex = text.lastIndexOf('}');
     
-    if (startIndex === -1 || endIndex === -1) throw new Error("AI did not return JSON.");
+    if (startIndex === -1 || endIndex === -1) throw new Error("AI did not return a JSON object.");
     
     const cleanJsonString = text.substring(startIndex, endIndex + 1);
     const marks = JSON.parse(cleanJsonString);
 
     return NextResponse.json({ marks });
   } catch (error: any) {
-    console.error("Marks Extraction Error:", error);
-    return NextResponse.json({ error: error.message || 'Failed to parse marks' }, { status: 500 });
+    console.error("Marks API Error:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

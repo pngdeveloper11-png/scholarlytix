@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// 1. Keep the 60-second limit so Vercel doesn't kill the heavy AI process
 export const maxDuration = 60; 
 
 export async function POST(request: Request) {
@@ -16,11 +14,6 @@ export async function POST(request: Request) {
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const base64Data = buffer.toString('base64');
-
-    const genAI = new GoogleGenerativeAI(API_KEY);
-    
-    // FIX: Removed 'generationConfig' to prevent instant crashes on older SDK versions
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
     const prompt = `
       Analyze this college timetable image. Extract all lectures into a strict JSON array of objects. 
@@ -46,34 +39,48 @@ export async function POST(request: Request) {
       - ED -> Entrepreneurship Development
       
       FORMATTING RULES:
-      1. 'semester' MUST be exactly "Semester 1", "Semester 2", "Semester 3", or "Semester 4". Infer from the title.
-      2. All times MUST be formatted with AM/PM (e.g., "8:30 AM", "12:45 PM", "1:30 PM").
+      1. 'semester' MUST be exactly "Semester 1", "Semester 2", "Semester 3", or "Semester 4".
+      2. All times MUST be formatted with AM/PM (e.g., "8:30 AM", "12:45 PM").
       
-      Return ONLY a pure, valid JSON array. Do not include markdown tags like \`\`\`json.
+      Return ONLY a pure JSON array.
     `;
 
-    const result = await model.generateContent([
-      prompt,
-      { inlineData: { data: base64Data, mimeType: file.type || 'image/jpeg' } },
-    ]);
+    // 100% BULLETPROOF FETCH CALL (Bypassing the buggy SDK)
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: prompt },
+            { inlineData: { mimeType: file.type || 'image/jpeg', data: base64Data } }
+          ]
+        }]
+      })
+    });
 
-    let text = result.response.text();
+    if (!response.ok) {
+        const errorData = await response.text();
+        console.error("Google API Rejection:", errorData);
+        throw new Error("Google servers rejected the image.");
+    }
 
-    // SAFE FALLBACK CLEANER: Manually strips markdown and finds the JSON array
+    const data = await response.json();
+    let text = data.candidates[0].content.parts[0].text;
+
+    // SAFE JSON PARSER
     text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
     const startIndex = text.indexOf('[');
     const endIndex = text.lastIndexOf(']');
     
-    if (startIndex === -1 || endIndex === -1) {
-        throw new Error("AI did not return a JSON array.");
-    }
+    if (startIndex === -1 || endIndex === -1) throw new Error("AI did not return an array.");
     
     const cleanJsonString = text.substring(startIndex, endIndex + 1);
     const entries = JSON.parse(cleanJsonString);
 
     return NextResponse.json({ entries });
   } catch (error: any) {
-    console.error("Timetable Extraction Error:", error);
-    return NextResponse.json({ error: error.message || 'Failed to parse timetable' }, { status: 500 });
+    console.error("Timetable API Error:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
