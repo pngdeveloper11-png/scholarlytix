@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     
     // Choose Gemini 3.7 Flash for fast multimodal vision processing
     const genAI = new GoogleGenerativeAI(API_KEY);  
-    const model = genAI.getGenerativeModel({ model: 'gemini-3.7-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
 
     const prompt = `
       You are an AI grading assistant. 
