@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-export const maxDuration = 60; // CRITICAL: Stop Vercel from killing it after 10s!
+export const maxDuration = 60; 
 
 export async function POST(request: Request) {
   try {
@@ -12,16 +12,15 @@ export async function POST(request: Request) {
     const file = formData.get('file') as File;
     const maxMarks = formData.get('maxMarks') as string || '20';
 
-    if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
+    if (!file) throw new Error('No file provided');
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const base64Data = buffer.toString('base64');
 
-    const genAI = new GoogleGenerativeAI(API_KEY as string);
-    const model = genAI.getGenerativeModel({ 
-        model: 'gemini-1.5-flash',
-        generationConfig: { responseMimeType: "application/json" } // Force strict JSON!
-    });
+    const genAI = new GoogleGenerativeAI(API_KEY);
+    
+    // FIX: Removed 'generationConfig' for backward compatibility
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
     const prompt = `
       You are an AI grading assistant.
@@ -30,7 +29,7 @@ export async function POST(request: Request) {
       The maximum marks for this test is ${maxMarks}. If a student is marked absent, use "AB".
 
       Return ONLY a pure, strict JSON object mapping the roll number (as a string) to the mark (as a string).
-      Do not include any student names.
+      Do not include any student names. Do not include markdown tags like \`\`\`json.
       Example format:
       {
         "101": "18",
@@ -44,7 +43,16 @@ export async function POST(request: Request) {
       { inlineData: { data: base64Data, mimeType: file.type || 'image/jpeg' } },
     ]);
 
-    const marks = JSON.parse(result.response.text());
+    let text = result.response.text();
+    text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+    
+    const startIndex = text.indexOf('{');
+    const endIndex = text.lastIndexOf('}');
+    
+    if (startIndex === -1 || endIndex === -1) throw new Error("AI did not return JSON.");
+    
+    const cleanJsonString = text.substring(startIndex, endIndex + 1);
+    const marks = JSON.parse(cleanJsonString);
 
     return NextResponse.json({ marks });
   } catch (error: any) {

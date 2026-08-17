@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// Keep the 60s timeout for Vercel
+// 1. Keep the 60-second limit so Vercel doesn't kill the heavy AI process
 export const maxDuration = 60; 
 
 export async function POST(request: Request) {
   try {
-    // Fetch the key dynamically inside the function to ensure Vercel sees it
     const API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
     if (!API_KEY) throw new Error("API Key is missing in Vercel.");
 
@@ -20,14 +19,11 @@ export async function POST(request: Request) {
 
     const genAI = new GoogleGenerativeAI(API_KEY);
     
-    // THE FIX: We use generationConfig to strictly force the AI to return pure JSON
-    const model = genAI.getGenerativeModel({ 
-        model: 'gemini-1.5-flash',
-        generationConfig: { responseMimeType: "application/json" } 
-    });
+    // FIX: Removed 'generationConfig' to prevent instant crashes on older SDK versions
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
     const prompt = `
-      Analyze this college timetable image. Extract all lectures into a JSON array of objects. 
+      Analyze this college timetable image. Extract all lectures into a strict JSON array of objects. 
       Keys must strictly be: 'dayOfWeek', 'startTime', 'endTime', 'semester', 'branch', 'subject', 'batch'.
       
       CRITICAL INFERENCE RULES:
@@ -51,17 +47,29 @@ export async function POST(request: Request) {
       
       FORMATTING RULES:
       1. 'semester' MUST be exactly "Semester 1", "Semester 2", "Semester 3", or "Semester 4". Infer from the title.
-      2. All times MUST be formatted with AM/PM (e.g., "8:30 AM", "12:45 PM", "1:30 PM"). Assume classes before 1:00 are AM, and classes from 1:00 onwards are PM unless specified.
+      2. All times MUST be formatted with AM/PM (e.g., "8:30 AM", "12:45 PM", "1:30 PM").
+      
+      Return ONLY a pure, valid JSON array. Do not include markdown tags like \`\`\`json.
     `;
 
     const result = await model.generateContent([
       prompt,
-      // Provide a fallback MIME type in case the browser omits it
       { inlineData: { data: base64Data, mimeType: file.type || 'image/jpeg' } },
     ]);
 
-    // Because we set responseMimeType to application/json, we can parse it directly!
-    const entries = JSON.parse(result.response.text());
+    let text = result.response.text();
+
+    // SAFE FALLBACK CLEANER: Manually strips markdown and finds the JSON array
+    text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+    const startIndex = text.indexOf('[');
+    const endIndex = text.lastIndexOf(']');
+    
+    if (startIndex === -1 || endIndex === -1) {
+        throw new Error("AI did not return a JSON array.");
+    }
+    
+    const cleanJsonString = text.substring(startIndex, endIndex + 1);
+    const entries = JSON.parse(cleanJsonString);
 
     return NextResponse.json({ entries });
   } catch (error: any) {
