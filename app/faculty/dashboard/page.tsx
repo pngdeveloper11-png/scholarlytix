@@ -138,7 +138,6 @@ export default function FacultyDashboard() {
     setFacultyId(uid);
     if (savedPin) setIsLocked(true);
 
-    // --- SECURE DATABASE-DRIVEN ROLE CHECK ---
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       if (user && user.email) {
         const email = user.email.toLowerCase().trim();
@@ -657,6 +656,9 @@ function ToggleSwitch({ checked, onChange }: { checked: boolean, onChange: (val:
   );
 }
 
+// ============================================================================
+// AI UPLOAD MODAL - NOW EQUIPPED WITH BROWSER-SIDE CANVAS COMPRESSION
+// ============================================================================
 function ManageTimetableModal({ onDismiss, modalBg, onShowAlert }: { onDismiss: () => void, modalBg: string, onShowAlert: (title: string, msg: string) => void }) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -665,11 +667,14 @@ function ManageTimetableModal({ onDismiss, modalBg, onShowAlert }: { onDismiss: 
     if (!selectedFile) return onShowAlert("Missing File", "Please select a timetable image or PDF.");
     setIsAnalyzing(true);
     try {
+      // OVERRIDE: Silently compress the image before sending to bypass Vercel limits
+      const optimizedFile = await compressImage(selectedFile);
+
       const formData = new FormData();
-      formData.append('file', selectedFile);
+      formData.append('file', optimizedFile);
 
       const res = await fetch('/api/extract-timetable', { method: 'POST', body: formData });
-      if (!res.ok) throw new Error("Google Gemini AI extraction failed");
+      if (!res.ok) throw new Error("Google Gemini AI extraction failed or timed out.");
       const data = await res.json();
       
       const uid = localStorage.getItem("academiq_faculty_id");
@@ -678,7 +683,11 @@ function ManageTimetableModal({ onDismiss, modalBg, onShowAlert }: { onDismiss: 
         onShowAlert("Success!", `Extracted and saved ${data.entries.length} classes to your schedule!`);
         onDismiss();
       }
-    } catch (e) { onShowAlert("AI Helper Error", "Make sure you upload a clear image of a timetable."); } finally { setIsAnalyzing(false); }
+    } catch (e) { 
+        onShowAlert("AI Helper Error", "Make sure you upload a clear image. If it still fails, try cropping the timetable slightly."); 
+    } finally { 
+        setIsAnalyzing(false); 
+    }
   };
 
   return (
@@ -700,6 +709,9 @@ function ManageTimetableModal({ onDismiss, modalBg, onShowAlert }: { onDismiss: 
   );
 }
 
+// ============================================================================
+// TIMETABLE UPLOAD MODAL - ALSO EQUIPPED WITH COMPRESSION
+// ============================================================================
 function UploadTimetableModal({ onDismiss, modalBg, isDark, onShowAlert }: { onDismiss: () => void, modalBg: string, isDark: boolean, onShowAlert: (title: string, msg: string) => void }) {
   const [upSem, setUpSem] = useState("Semester 3");
   const [upBranch, setUpBranch] = useState("IT");
@@ -710,13 +722,16 @@ function UploadTimetableModal({ onDismiss, modalBg, isDark, onShowAlert }: { onD
     if (!selectedFile) return onShowAlert("Missing File", "Please select a timetable file.");
     setIsUploading(true);
     try {
+      // OVERRIDE: Silently compress the image before uploading to Drive
+      const optimizedFile = await compressImage(selectedFile);
+
       const formData = new FormData();
-      formData.append('file', selectedFile);
+      formData.append('file', optimizedFile);
       formData.append('fileName', `${upSem}_${upBranch}_Timetable`);
       formData.append('path', `timetables`);
 
       const uploadRes = await fetch('/api/upload-drive', { method: 'POST', body: formData });
-      if (!uploadRes.ok) throw new Error("Google Drive upload failed");
+      if (!uploadRes.ok) throw new Error("Google Drive upload failed or timed out.");
       const { downloadUrl } = await uploadRes.json();
       
       const docId = `${upSem}_${upBranch}`.replace(/\s+/g, '');
@@ -724,7 +739,11 @@ function UploadTimetableModal({ onDismiss, modalBg, isDark, onShowAlert }: { onD
       
       onShowAlert("Timetable Published", `Timetable for ${upBranch} ${upSem} pushed to student portals and widgets instantly!`);
       onDismiss();
-    } catch (e) { onShowAlert("API Error", "Could not upload timetable to Drive."); } finally { setIsUploading(false); }
+    } catch (e) { 
+        onShowAlert("Upload Error", "Could not upload timetable. Try cropping it slightly."); 
+    } finally { 
+        setIsUploading(false); 
+    }
   };
 
   return (
@@ -766,3 +785,61 @@ function SettingsRow({ icon, title, subtitle, titleColor, onClick, isDark }: any
     </div>
   );
 }
+
+// ============================================================================
+// THE MAGIC FIX: BROWSER-SIDE SILENT COMPRESSOR
+// ============================================================================
+const compressImage = async (file: File): Promise<File> => {
+  if (!file.type.startsWith('image/')) return file; // Ignore PDFs
+
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 1800; // Large enough for OCR to still read clearly
+        const MAX_HEIGHT = 1800;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height = Math.round((height * MAX_WIDTH) / width);
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width = Math.round((width * MAX_HEIGHT) / height);
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              const compressedFile = new File([blob], file.name.replace(/\.[^/.]+$/, ".jpg"), {
+                type: 'image/jpeg',
+                lastModified: Date.now(),
+              });
+              resolve(compressedFile);
+            } else {
+              resolve(file); // Fallback
+            }
+          },
+          'image/jpeg',
+          0.85 // 85% quality reduces 10MB down to ~300KB
+        );
+      };
+      img.onerror = () => resolve(file);
+    };
+    reader.onerror = () => resolve(file);
+  });
+};

@@ -3,9 +3,40 @@
 import { useState, useEffect, useRef } from 'react';
 import { collection, doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Loader2, AlertTriangle, UploadCloud, Sparkles } from 'lucide-react';
+import { Loader2, AlertTriangle, UploadCloud, Sparkles, Image as ImageIcon } from 'lucide-react';
 import GlassDropdown from '@/components/GlassDropdown';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+
+// --- BROWSER IMAGE COMPRESSOR ---
+const compressImage = async (file: File): Promise<File> => {
+  if (!file.type.startsWith('image/')) return file; // Ignore PDFs and CSVs
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_DIM = 1800; // Big enough for OCR, small enough for Vercel
+        let { width, height } = img;
+        if (width > height) {
+          if (width > MAX_DIM) { height = Math.round((height * MAX_DIM) / width); width = MAX_DIM; }
+        } else {
+          if (height > MAX_DIM) { width = Math.round((width * MAX_DIM) / height); height = MAX_DIM; }
+        }
+        canvas.width = width; canvas.height = height;
+        canvas.getContext('2d')?.drawImage(img, 0, 0, width, height);
+        canvas.toBlob((blob) => {
+          if (blob) resolve(new File([blob], file.name.replace(/\.[^/.]+$/, ".jpg"), { type: 'image/jpeg' }));
+          else resolve(file);
+        }, 'image/jpeg', 0.85); // Compress to 85% quality
+      };
+      img.onerror = () => resolve(file);
+    };
+    reader.onerror = () => resolve(file);
+  });
+};
 
 export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean }) {
   const [teachingConfig, setTeachingConfig] = useState<Record<string, string[]>>({});
@@ -20,7 +51,9 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
 
   const [isLoading, setIsLoading] = useState(false);
   const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  const csvInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4"];
   const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE"];
@@ -73,7 +106,7 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
   const textColor = isDark ? 'text-white' : 'text-neutral-900';
   const cardBg = isDark ? 'bg-white/[0.08] border-white/20' : 'bg-black/5 border-black/10 shadow-sm';
 
-  // AI CSV Import Handler
+  // --- HANDLER 1: AI CSV TEXT IMPORT (Runs completely in browser) ---
   const handleAiCsvImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -81,31 +114,32 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
     setIsAiAnalyzing(true);
     try {
       const text = await file.text();
+      const API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY as string;
+      const genAI = new GoogleGenerativeAI(API_KEY);
       
-      const genAI = new GoogleGenerativeAI(process.env.NEXT_PUBLIC_GEMINI_API_KEY as string);
-      const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
+      // Using generationConfig to force strict JSON output to prevent errors
+      const model = genAI.getGenerativeModel({ 
+          model: "gemini-1.5-flash",
+          generationConfig: { responseMimeType: "application/json" }
+      });
 
       const prompt = `
         Analyze the following raw CSV/text data containing student marks for an exam.
         Extract the roll numbers and their corresponding marks.
-        Return ONLY a raw JSON array of objects with the exact keys "roll" (string) and "score" (string).
-        Do not include any markdown formatting, backticks, or extra text.
+        Return ONLY a strict JSON array of objects with the exact keys "roll" (number) and "score" (string).
+        If a mark is missing or absent, put "-".
         
         Data to analyze:
         ${text}
       `;
 
       const result = await model.generateContent(prompt);
-      const responseText = result.response.text().trim();
-      
-      const cleanJson = responseText.replace(/```json/g, '').replace(/```/g, '');
-      const parsedMarks = JSON.parse(cleanJson);
+      const parsedMarks = JSON.parse(result.response.text());
 
-      // Map parsed marks to current state
       const newMap = { ...fullMarksMap };
       
       classRoster.forEach((student) => {
-        const matchedData = parsedMarks.find((m: any) => m.roll === student.rollNo || m.roll === String(student.rollNo));
+        const matchedData = parsedMarks.find((m: any) => String(m.roll) === String(student.rollNo));
         if (matchedData) {
           if (!newMap[student.id]) newMap[student.id] = {};
           newMap[student.id][selectedTest] = String(matchedData.score);
@@ -113,15 +147,63 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
       });
 
       setFullMarksMap(newMap);
-      alert("AI successfully mapped the marks to the student list!");
+      alert("CSV Marks mapped successfully!");
     } catch (error) {
-      console.error("AI Analysis failed:", error);
-      alert("AI failed to parse the file. Please ensure it contains readable text/CSV data.");
+      console.error("CSV Analysis failed:", error);
+      alert("Failed to parse CSV. Make sure it has Roll Numbers and Marks.");
     } finally {
       setIsAiAnalyzing(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      if (csvInputRef.current) csvInputRef.current.value = "";
     }
   };
+
+  // --- HANDLER 2: AI IMAGE IMPORT (Compresses, then sends to backend) ---
+  const handleAiImageImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsAiAnalyzing(true);
+    try {
+      // 1. Compress the image so Vercel doesn't block it!
+      const compressedFile = await compressImage(file);
+
+      // 2. Send to backend route
+      const formData = new FormData();
+      formData.append('file', compressedFile);
+      // We pass maxMarks so the AI knows what the test is out of
+      formData.append('maxMarks', '20'); 
+
+      const res = await fetch('/api/extract-marks', { method: 'POST', body: formData });
+      if (!res.ok) throw new Error("Backend extraction failed or timed out.");
+      
+      const data = await res.json();
+      
+      if (data.error) throw new Error(data.error);
+
+      // The backend returns an object mapping { "101": "18", "102": "AB" }
+      const extractedMarksMap = data.marks || {};
+
+      const newMap = { ...fullMarksMap };
+      
+      classRoster.forEach((student) => {
+        const score = extractedMarksMap[String(student.rollNo)];
+        if (score) {
+          if (!newMap[student.id]) newMap[student.id] = {};
+          newMap[student.id][selectedTest] = String(score);
+        }
+      });
+
+      setFullMarksMap(newMap);
+      alert("Image marks scanned and mapped successfully!");
+    } catch (error: any) {
+      console.error("Image Analysis failed:", error);
+      alert(`Image scan failed: ${error.message}`);
+    } finally {
+      setIsAiAnalyzing(false);
+      if (imageInputRef.current) imageInputRef.current.value = "";
+    }
+  };
+
 
   return (
     <div className="w-full flex flex-col h-full overflow-y-auto pr-2 pb-24 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
@@ -139,29 +221,31 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
         </div>
       </div>
 
-      {/* Header with AI Import Button */}
-      <div className="flex justify-between items-center mb-4">
+      {/* Header with Dual AI Import Buttons */}
+      <div className="flex flex-col md:flex-row md:justify-between md:items-center mb-6 space-y-4 md:space-y-0">
         <h3 className={`text-lg font-bold ${textColor}`}>Student Scores</h3>
         
-        <div className="relative">
-          <input 
-            type="file" 
-            accept=".csv, .txt" 
-            onChange={handleAiCsvImport}
-            ref={fileInputRef}
-            className="hidden" 
-          />
+        <div className="flex space-x-2">
+          {/* CSV Input */}
+          <input type="file" accept=".csv, .txt" onChange={handleAiCsvImport} ref={csvInputRef} className="hidden" />
           <button 
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => csvInputRef.current?.click()}
             disabled={isAiAnalyzing || classRoster.length === 0}
-            className={`px-4 py-2 ${isDark ? 'bg-purple-500/20 text-[#D0BCFF] border-purple-500/30 hover:bg-purple-500/30' : 'bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200'} border rounded-xl text-sm font-bold flex items-center transition-all disabled:opacity-50`}
+            className={`px-3 py-2 ${isDark ? 'bg-blue-500/20 text-blue-300 border-blue-500/30' : 'bg-blue-100 text-blue-700 border-blue-200'} border rounded-xl text-sm font-bold flex items-center transition-all disabled:opacity-50`}
           >
-            {isAiAnalyzing ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <Sparkles className="w-4 h-4 mr-2" />
-            )}
-            {isAiAnalyzing ? "Analyzing..." : "Auto-Fill via CSV"}
+            {isAiAnalyzing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+            Auto CSV
+          </button>
+
+          {/* Image Input */}
+          <input type="file" accept="image/*" capture="environment" onChange={handleAiImageImport} ref={imageInputRef} className="hidden" />
+          <button 
+            onClick={() => imageInputRef.current?.click()}
+            disabled={isAiAnalyzing || classRoster.length === 0}
+            className={`px-3 py-2 ${isDark ? 'bg-purple-500/20 text-[#D0BCFF] border-purple-500/30' : 'bg-purple-100 text-purple-700 border-purple-200'} border rounded-xl text-sm font-bold flex items-center transition-all disabled:opacity-50`}
+          >
+            {isAiAnalyzing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ImageIcon className="w-4 h-4 mr-2" />}
+            Scan Image
           </button>
         </div>
       </div>
@@ -184,12 +268,12 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
                   {isDefaulter && <span className="text-xs font-bold text-[#FF453A] mt-1">Failed ({total}/40)</span>}
                 </div>
                 <input 
-                  type="number" 
+                  type="text" 
                   value={val} 
                   onChange={(e) => {
                     const newMap = { ...fullMarksMap };
                     if (!newMap[student.id]) newMap[student.id] = {};
-                    newMap[student.id][selectedTest] = e.target.value;
+                    newMap[student.id][selectedTest] = e.target.value.toUpperCase(); // Allow 'AB' for absent
                     setFullMarksMap(newMap);
                   }}
                   className={`w-20 p-3 rounded-xl border text-center font-bold outline-none focus:ring-2 focus:ring-[#D0BCFF] ${isDark ? 'bg-black/20 border-white/10 text-white' : 'bg-white border-black/10 text-neutral-900'}`}
