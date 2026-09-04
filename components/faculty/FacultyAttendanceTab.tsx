@@ -224,17 +224,31 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
           {filteredStudents.length === 0 ? (
             <div className="col-span-full py-20 text-center"><p className={`text-[15px] ${isDark ? 'text-white/50' : 'text-neutral-500'}`}>No students found for {selectedBranch} ({selectedSem}). Check your Cloud Roster.</p></div>
           ) : (
-            filteredStudents.map(student => {
+            filteredStudents.map((student, index) => { // Added 'index' here!
               const isSelected = presentStudentIds.includes(student.id);
+              
+              // If they don't have a roll number, give them a sequential grid number
+              const displayNumber = student.rollNo > 0 ? student.rollNo : (index + 1);
+
+              // Split the full name into two lines if it's long, otherwise just show it
+              const nameParts = student.fullName.split(' ');
+              const displayName = nameParts.length > 1 
+                ? <>{nameParts[0]}<br/>{nameParts[nameParts.length - 1]}</> 
+                : student.fullName;
+
               return (
                 <div 
                   key={student.id} 
                   onPointerDown={(e) => { e.preventDefault(); handlePointerDown(student.id); }}
                   onPointerEnter={() => handlePointerEnter(student.id)}
-                  className={`aspect-[5/6] sm:aspect-square border rounded-[1.25rem] flex flex-col items-center justify-center cursor-pointer transition-all ${isSelected ? 'bg-[#512B88] border-[#A880FF] shadow-[0_0_20px_rgba(168,128,255,0.2)]' : (isDark ? 'bg-white/[0.02] border-white/20 hover:bg-white/10' : 'bg-black/5 border-black/10 hover:bg-black/10')}`}
+                  className={`aspect-[5/6] sm:aspect-square border rounded-[1.25rem] flex flex-col items-center justify-center cursor-pointer transition-all p-2 ${isSelected ? 'bg-[#512B88] border-[#A880FF] shadow-[0_0_20px_rgba(168,128,255,0.2)]' : (isDark ? 'bg-white/[0.02] border-white/20 hover:bg-white/10' : 'bg-black/5 border-black/10 hover:bg-black/10')}`}
                 >
-                  <h2 className={`text-2xl md:text-3xl font-black mb-1 ${isSelected ? 'text-white' : (isDark ? 'text-white' : 'text-neutral-900')}`}>{student.rollNo || "?"}</h2>
-                  <p className={`text-xs text-center line-clamp-1 px-1 ${isSelected ? 'text-white/80' : (isDark ? 'text-white/80' : 'text-neutral-600')}`}>{student.fullName.split(' ')[0]}</p>
+                  <h2 className={`text-2xl md:text-3xl font-black mb-1 ${isSelected ? 'text-white' : (isDark ? 'text-white' : 'text-neutral-900')}`}>
+                    {displayNumber}
+                  </h2>
+                  <p className={`text-[10px] sm:text-xs text-center leading-tight px-1 ${isSelected ? 'text-white/90' : (isDark ? 'text-white/80' : 'text-neutral-600')}`}>
+                    {displayName}
+                  </p>
                 </div>
               );
             })
