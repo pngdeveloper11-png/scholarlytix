@@ -20,31 +20,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'fileName is required' }, { status: 400 });
     }
 
-    // Sanitize the file name and append a unique timestamp to prevent collisions
     const cleanFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
     const objectKey = `materials/${Date.now()}_${cleanFileName}`;
 
     const command = new PutObjectCommand({
       Bucket: process.env.R2_BUCKET_NAME,
       Key: objectKey,
-      ContentType: fileType || 'application/octet-stream',
+      ContentType: fileType || 'application/pdf', // Default to PDF
+      ContentDisposition: 'inline', // <-- THIS FIXES THE DOWNLOAD ISSUE
     });
 
-    // Generate a temporary upload URL valid for 15 minutes (900 seconds)
     const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 900 });
-    
-    // Construct the public URL that students will use to view/download the file
     const publicDomain = (process.env.R2_PUBLIC_DOMAIN || '').replace(/\/$/, '');
     const downloadUrl = `${publicDomain}/${objectKey}`;
 
-    return NextResponse.json(
-      {
-        uploadUrl,
-        downloadUrl,
-        key: objectKey,
-      },
-      { status: 200 }
-    );
+    return NextResponse.json({ uploadUrl, downloadUrl, key: objectKey }, { status: 200 });
   } catch (error: any) {
     console.error('R2 Presigned URL Error:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
