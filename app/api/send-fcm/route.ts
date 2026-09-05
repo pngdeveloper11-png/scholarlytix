@@ -18,21 +18,32 @@ if (!getApps().length) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { targetToken, targetTopic, title, message, channelId } = body;
+    const { targetToken, targetTopic, title, message, channelId, targetTab, download_link } = body;
+
+    if (!title || !message) {
+      return NextResponse.json({ error: 'Missing title or message' }, { status: 400 });
+    }
 
     // CRITICAL: We send a DATA-ONLY payload with HIGH priority.
-    // If you send a "notification" block, Android suppresses onMessageReceived in the background!
+    // All values inside the "data" object MUST be strings for FCM to process them correctly.
     const messagePayload: any = {
       data: {
-        title: title || 'New Alert',
-        message: message || '',
-        channelId: channelId || 'security_alerts',
+        title: String(title),
+        message: String(message),
+        channelId: String(channelId || 'general_alerts'),
+        targetTab: String(targetTab || 'Notice Board') // The crucial Deep Link variable
       },
       android: {
-        priority: 'high',
+        priority: 'high', // Wakes the Android device in the background
       },
     };
 
+    // If there is an app update link, attach it
+    if (download_link) {
+      messagePayload.data.download_link = String(download_link);
+    }
+
+    // Route to either a single device (Token) or an entire Class/Branch (Topic)
     if (targetToken) {
       messagePayload.token = targetToken;
     } else if (targetTopic) {
