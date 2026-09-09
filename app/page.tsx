@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { GraduationCap, User, ArrowRight } from 'lucide-react';
+import { GraduationCap, User, ArrowRight, ShieldCheck } from 'lucide-react';
 import Image from 'next/image';
 import DownloadAppButton from '@/components/DownloadAppButton';
 import { useRouter } from 'next/navigation';
@@ -159,6 +159,22 @@ export default function Home() {
               <div className="text-left">
                 <h3 className="text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors">Parents' Portal</h3>
                 <p className="text-sm text-neutral-400">Monitor attendance and academic progress</p>
+              </div>
+            </div>
+            <ArrowRight className="w-6 h-6 text-neutral-400 group-hover:text-[#D0BCFF] group-hover:translate-x-1 transition-all" />
+          </div>
+        </button>
+
+        {/* --- NEW SECURITY PORTAL BUTTON --- */}
+        <button onClick={() => router.push('/guard')} className="block w-full text-left group">
+          <div className="p-6 rounded-2xl bg-white/5 backdrop-blur-md border border-white/15 hover:border-[#D0BCFF]/50 hover:bg-white/10 transition-all duration-300 shadow-xl flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <div className="p-3 rounded-xl bg-[#D0BCFF]/20 text-[#D0BCFF]">
+                <ShieldCheck className="w-8 h-8" />
+              </div>
+              <div className="text-left">
+                <h3 className="text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors">Security Portal</h3>
+                <p className="text-sm text-neutral-400">Guard scanner for digital gate passes</p>
               </div>
             </div>
             <ArrowRight className="w-6 h-6 text-neutral-400 group-hover:text-[#D0BCFF] group-hover:translate-x-1 transition-all" />
