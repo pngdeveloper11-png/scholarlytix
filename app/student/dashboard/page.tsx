@@ -2,20 +2,21 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { collection, query, where, onSnapshot, doc, getDocs, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, addDoc, updateDoc } from 'firebase/firestore';
 import { signOut, onAuthStateChanged } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase';
 import { motion } from 'framer-motion';
 import { 
   Settings, LogOut, ChevronLeft, Bell, BookOpen, 
   FileQuestion, ExternalLink, Loader2, User, 
-  Plus, ShieldAlert, UploadCloud, Smartphone, Download, 
+  Plus, ShieldAlert, Smartphone, Download, 
   Lock, Edit, Clock 
 } from 'lucide-react';
 import DynamicHueBackground from '@/components/DynamicHueBackground';
 import CursorGlow from '@/components/CursorGlow';
 
-const TABS = ["Attendance", "Timetable", "Notice Board", "Materials", "Tests", "Gate Pass", "Leave", "Grievances"];
+// FIXED: Removed Grievances Tab
+const TABS = ["Attendance", "Timetable", "Notice Board", "Materials", "Tests", "Gate Pass", "Leave"];
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 export default function StudentDashboard() {
@@ -45,57 +46,60 @@ export default function StudentDashboard() {
     if (savedDark !== null) setIsDarkTheme(savedDark === "true");
     if (savedHue !== null) setIsDynamicHue(savedHue === "true");
 
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    // FIXED: Real-time Profile Sync
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (!user) {
         router.replace('/student/login');
         return;
       }
-
       const q = query(collection(db, "students_directory"), where("email", "==", user.email?.toLowerCase().trim()));
-      const snap = await getDocs(q);
-      
-      if (snap.empty) {
-        alert("Your email is not registered in the student directory. Contact administration.");
-        signOut(auth);
-        router.replace('/student/login');
-        return;
-      }
-
-      const profile = { id: snap.docs[0].id, ...(snap.docs[0].data() as any) };
-      setStudentProfile(profile);
-
-      const classRef = `${profile.semester}_${profile.branch}`.replace(/\s+/g, '').replace(/&/g, 'and');
-      
-      const unsubAtt = onSnapshot(collection(db, "attendance_history"), (histSnap) => {
-        const records = histSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-        setAttendanceHistory(records.filter((r: any) => r.branchName === profile.branch && r.semester === profile.semester));
+      onSnapshot(q, (snap) => {
+        if (snap.empty) {
+          signOut(auth);
+          router.replace('/student/login');
+          return;
+        }
+        setStudentProfile({ id: snap.docs[0].id, ...(snap.docs[0].data() as any) });
       });
-
-      const unsubTime = onSnapshot(doc(db, "branch_timetables", classRef), (ttSnap) => {
-        if (ttSnap.exists() && ttSnap.data().entries) setTimetable(ttSnap.data().entries);
-      });
-
-      const unsubNotices = onSnapshot(collection(db, "announcements"), (nSnap) => {
-        const allNotices = nSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-        setNotices(allNotices.filter((n: any) => n.targetAudience === "All Students" || n.targetAudience === profile.branch).sort((a: any, b: any) => b.timestamp - a.timestamp));
-      });
-
-      const unsubMat = onSnapshot(collection(db, "study_materials"), (mSnap) => {
-        const allMats = mSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-        setMaterials(allMats.filter((m: any) => m.branch === profile.branch && m.semester === profile.semester).sort((a: any, b: any) => b.timestamp - a.timestamp));
-      });
-
-      const unsubPass = onSnapshot(query(collection(db, "gate_passes"), where("studentId", "==", profile.id)), (pSnap) => {
-        setGatePasses(pSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).sort((a: any, b: any) => b.issuedAt - a.issuedAt));
-      });
-
-      setLoading(false);
-
-      return () => { unsubAtt(); unsubTime(); unsubNotices(); unsubMat(); unsubPass(); };
     });
 
-    return () => unsubscribe();
+    return () => unsubscribeAuth();
   }, [router]);
+
+  // FIXED: Real-time Database Sync (Triggered whenever Profile updates)
+  useEffect(() => {
+    if (!studentProfile) return;
+
+    const classRef = `${studentProfile.semester}_${studentProfile.branch}`.replace(/\s+/g, '').replace(/&/g, 'and');
+    
+    const unsubAtt = onSnapshot(collection(db, "attendance_history"), (histSnap) => {
+      const records = histSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+      setAttendanceHistory(records.filter((r: any) => r.branchName === studentProfile.branch && r.semester === studentProfile.semester));
+    });
+
+    const unsubTime = onSnapshot(doc(db, "branch_timetables", classRef), (ttSnap) => {
+      if (ttSnap.exists() && ttSnap.data().entries) setTimetable(ttSnap.data().entries);
+      else setTimetable([]);
+    });
+
+    const unsubNotices = onSnapshot(collection(db, "announcements"), (nSnap) => {
+      const allNotices = nSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+      setNotices(allNotices.filter((n: any) => n.targetAudience === "All Students" || n.targetAudience === studentProfile.branch).sort((a: any, b: any) => b.timestamp - a.timestamp));
+    });
+
+    const unsubMat = onSnapshot(collection(db, "study_materials"), (mSnap) => {
+      const allMats = mSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+      setMaterials(allMats.filter((m: any) => m.branch === studentProfile.branch && m.semester === studentProfile.semester).sort((a: any, b: any) => b.timestamp - a.timestamp));
+    });
+
+    const unsubPass = onSnapshot(query(collection(db, "gate_passes"), where("studentId", "==", studentProfile.id)), (pSnap) => {
+      setGatePasses(pSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).sort((a: any, b: any) => b.issuedAt - a.issuedAt));
+    });
+
+    setLoading(false);
+
+    return () => { unsubAtt(); unsubTime(); unsubNotices(); unsubMat(); unsubPass(); };
+  }, [studentProfile?.id, studentProfile?.branch, studentProfile?.semester]);
 
   const handleLogout = () => {
     signOut(auth);
@@ -114,6 +118,7 @@ export default function StudentDashboard() {
       {isDynamicHue && <DynamicHueBackground theme={theme} />}
       <CursorGlow />
 
+      {/* SETTINGS OVERLAY */}
       {showSettings && (
         <StudentSettingsOverlay 
           student={studentProfile} 
@@ -164,7 +169,6 @@ export default function StudentDashboard() {
           {activeTab === "Tests" && <TestsView student={studentProfile} cardBg={cardBg} />}
           {activeTab === "Gate Pass" && <GatePassView passes={gatePasses} cardBg={cardBg} />}
           {activeTab === "Leave" && <LeaveView cardBg={cardBg} />}
-          {activeTab === "Grievances" && <GrievancesView />}
         </div>
       </div>
     </main>
@@ -303,6 +307,7 @@ function MaterialsView({ materials, cardBg }: any) {
 
 function TestsView({ student, cardBg }: any) {
   const [marks, setMarks] = useState<any[]>([]);
+  
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "test_marks"), (snap) => {
       const classKey = `${student.semester}_${student.branch}`.replace(/\s+/g, '').replace(/&/g, 'and');
@@ -319,8 +324,11 @@ function TestsView({ student, cardBg }: any) {
       ) : (
         <div className="space-y-4">
           {marks.map(m => {
-            const subjectName = m.id.split('_').pop()?.replace(/and/g, ' & ') || "Subject";
+            // FIXED: Regex separates CamelCase into spaces (e.g., MathematicsForComputerEngineering -> Mathematics For Computer Engineering)
+            const rawName = m.id.split('_').pop() || "Subject";
+            const subjectName = rawName.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/and/gi, ' & ');
             const studentMarks = m.marks?.[student.id] || {};
+            
             return (
               <div key={m.id} className={`p-6 rounded-[2rem] border ${cardBg}`}>
                 <h4 className="font-bold text-lg mb-4">{subjectName}</h4>
@@ -349,13 +357,18 @@ function GatePassView({ passes, cardBg }: any) {
       ) : (
         passes.map((p: any) => (
           <div key={p.id} className={`p-5 rounded-2xl border ${cardBg}`}>
-             <div className="flex justify-between items-start mb-3">
+             <div className="flex justify-between items-start mb-4">
                <div><h3 className="font-bold text-lg">{p.reason}</h3><p className="text-xs opacity-60 mt-1">Issued by {p.issuedBy}</p></div>
                <span className={`px-2.5 py-1 text-[10px] font-black uppercase rounded-md border ${p.status === 'ACTIVE' ? 'bg-green-500/20 text-green-400 border-green-500/30' : p.status === 'USED' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'}`}>{p.status}</span>
              </div>
-             <div className="bg-black/20 p-3 rounded-xl border border-white/5 text-center">
-               <p className="text-xs opacity-50 uppercase font-bold mb-1">Pass ID</p>
-               <p className="font-mono text-xl font-bold tracking-widest">{p.passId}</p>
+             
+             {/* FIXED: Scalable QR Code generator replacing raw string */}
+             <div className="bg-black/20 p-5 rounded-xl border border-white/5 flex flex-col items-center justify-center">
+               <div className="bg-white p-2 rounded-xl mb-3 shadow-lg">
+                 <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${p.passId}&bgcolor=ffffff`} alt="Gate Pass QR" className="w-28 h-28 mix-blend-multiply" />
+               </div>
+               <p className="text-[10px] opacity-50 uppercase font-bold mb-1">Pass ID</p>
+               <p className="font-mono text-sm font-bold tracking-widest">{p.passId}</p>
              </div>
           </div>
         ))
@@ -372,29 +385,6 @@ function LeaveView({ cardBg }: any) {
         <button className="px-4 py-2 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold text-sm flex items-center shadow-[0_0_15px_rgba(208,188,255,0.4)]"><Plus className="w-4 h-4 mr-1" /> Apply</button>
       </div>
       <div className="py-20 text-center opacity-50">No leave applications found.</div>
-    </div>
-  );
-}
-
-function GrievancesView() {
-  const [title, setTitle] = useState(""); const [desc, setDesc] = useState(""); const [isSubmitting, setIsSubmitting] = useState(false);
-  const handleSubmit = async () => {
-    if (!title || !desc) return alert("Fill all fields.");
-    setIsSubmitting(true);
-    try {
-      await addDoc(collection(db, "student_grievances"), { title, description: desc, timestamp: Date.now(), status: "Open" });
-      alert("Grievance submitted securely."); setTitle(""); setDesc("");
-    } catch (e) { alert("Failed to submit."); } finally { setIsSubmitting(false); }
-  };
-  return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div><h3 className="font-bold text-2xl mb-2 text-red-400">Anonymous Grievances</h3><p className="text-sm opacity-70">Report bullying, ragging, or facility issues. Your device, email, and identity are fully stripped before sending.</p></div>
-      <div className="space-y-4">
-        <input type="text" placeholder="Incident Title" value={title} onChange={e => setTitle(e.target.value)} className="w-full bg-white/[0.05] border border-white/20 rounded-2xl p-5 text-white outline-none focus:ring-2 focus:ring-red-400" />
-        <textarea placeholder="Detailed Description" value={desc} onChange={e => setDesc(e.target.value)} className="w-full h-40 bg-white/[0.05] border border-white/20 rounded-2xl p-5 text-white outline-none focus:ring-2 focus:ring-red-400 resize-none" />
-        <button className="w-full py-4 bg-white/5 border border-white/10 rounded-2xl font-bold flex justify-center items-center hover:bg-white/10 transition-colors text-white/70"><UploadCloud className="w-5 h-5 mr-2" /> Attach Evidence (Photo / Video)</button>
-        <button onClick={handleSubmit} disabled={isSubmitting || !title || !desc} className="w-full py-4 bg-red-500 text-white rounded-2xl font-bold flex justify-center items-center hover:bg-red-600 disabled:opacity-50 transition-all shadow-[0_0_20px_rgba(239,68,68,0.4)]">{isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : "Submit Securely"}</button>
-      </div>
     </div>
   );
 }
@@ -454,7 +444,11 @@ function StudentSettingsOverlay({ student, isDark, isDynamicHue, theme, onClose,
 
   return (
     <div className="fixed inset-0 z-[100] flex flex-col bg-black/80 backdrop-blur-xl">
-      <div className={`flex-1 m-4 sm:m-8 rounded-[2rem] border border-white/10 shadow-2xl flex flex-col overflow-hidden ${modalBg}`}>
+      
+      {/* FIXED: Dynamic Hue Background injected into Settings overlay */}
+      {isDynamicHue && <div className="absolute inset-0 z-0 opacity-40"><DynamicHueBackground theme={theme} /></div>}
+      
+      <div className={`relative z-10 flex-1 m-4 sm:m-8 rounded-[2rem] border border-white/10 shadow-2xl flex flex-col overflow-hidden ${modalBg}`}>
         
         <div className="p-6 border-b border-white/10 flex justify-between items-center bg-black/20">
           <div className="flex items-center gap-4">
