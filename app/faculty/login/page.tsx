@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
+import { signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 import { Loader2, ArrowLeft } from 'lucide-react';
@@ -12,58 +12,83 @@ export default function FacultyLogin() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
 
+  // Security measure: Clear any lingering broken sessions when the login page loads
+  useEffect(() => {
+    signOut(auth).catch(() => {});
+    localStorage.removeItem("academiq_faculty_id");
+    localStorage.removeItem("academiq_faculty_name");
+  }, []);
+
   const handleGoogleLogin = async () => {
     setIsLoading(true);
     try {
       const provider = new GoogleAuthProvider();
+      // Force account selection so you don't get stuck on an unauthorized default account
+      provider.setCustomParameters({ prompt: 'select_account' }); 
+      
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
 
       if (user.email) {
         const email = user.email.toLowerCase().trim();
-        let userRole = "teacher";
         
-        // 1. Check if email is approved by Super Admin
-        const roleDoc = await getDoc(doc(db, "approved_faculty_emails", email));
-        
-        if (!roleDoc.exists()) {
-          // DEVELOPER BYPASS: Auto-approve you as SUPER_ADMIN if you aren't in the system yet
-          await setDoc(doc(db, "approved_faculty_emails", email), { 
-            role: "SUPER_ADMIN",
-            addedAt: Date.now() 
-          });
-          userRole = "SUPER_ADMIN";
-          console.log("Auto-approved as SUPER_ADMIN for testing.");
-        } else {
-          userRole = roleDoc.data().role || "teacher";
+        try {
+          // 1. STRICT SECURITY CHECK: Read the approved list
+          const roleDoc = await getDoc(doc(db, "approved_faculty_emails", email));
+          
+          if (!roleDoc.exists()) {
+            // Not on the approved list -> Instant rejection and sign out
+            await signOut(auth);
+            alert("Access Denied: Your email is not registered as authorized Faculty. Please contact the Principal or HOD to add your email.");
+            setIsLoading(false);
+            return;
+          }
+
+          const userRole = roleDoc.data().role || "teacher";
+
+          // 2. Setup Local Storage for Dashboard
+          localStorage.setItem("academiq_faculty_id", user.uid);
+          localStorage.setItem("academiq_faculty_name", user.displayName || "Faculty");
+          
+          // 3. Update the faculty directory with latest login time
+          await setDoc(doc(db, "faculty_directory", user.uid), {
+            name: user.displayName,
+            email: user.email,
+            photoUrl: user.photoURL,
+            role: userRole,
+            lastLogin: Date.now()
+          }, { merge: true });
+
+          // 4. Secure Navigation
+          router.replace('/faculty/dashboard');
+
+        } catch (firestoreError: any) {
+          // This catches the exact "Missing or insufficient permissions" error from your screenshot
+          console.error("Firestore Security Error:", firestoreError);
+          await signOut(auth);
+          localStorage.removeItem("academiq_faculty_id");
+          localStorage.removeItem("academiq_faculty_name");
+          alert("Authentication Failed: You do not have the required database permissions. Make sure you are using an authorized account.");
+          setIsLoading(false);
         }
-
-        // 2. Save local session variables 
-        localStorage.setItem("academiq_faculty_id", user.uid);
-        localStorage.setItem("academiq_faculty_name", user.displayName || "Faculty");
-        
-        // 3. Ensure user document exists in faculty directory
-        await setDoc(doc(db, "faculty_directory", user.uid), {
-          name: user.displayName,
-          email: user.email,
-          photoUrl: user.photoURL,
-          role: userRole,
-          lastLogin: Date.now()
-        }, { merge: true });
-
-        // 4. Force Navigation
-        router.replace('/faculty/dashboard');
       }
-    } catch (error: any) {
-      console.error("Login failed:", error);
-      alert(`Sign in failed: ${error.message}`);
+    } catch (authError: any) {
+      console.error("Auth failed:", authError);
+      // Only show error if the user didn't intentionally close the popup
+      if (authError.code !== 'auth/popup-closed-by-user') {
+         alert(`Sign in failed: ${authError.message}`);
+      }
+      await signOut(auth);
       setIsLoading(false);
     }
   };
 
   return (
-    <main className="relative min-h-screen w-full flex flex-col items-center justify-center p-4 bg-[#0a0a0a] text-white overflow-hidden">
-      <DynamicHueBackground theme="indigo" />
+    <main className="relative min-h-screen w-full flex flex-col items-center justify-center p-4 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#1f103b] via-[#0a0a0a] to-black text-white overflow-hidden">
+      
+      <div className="absolute inset-0 z-0">
+        <DynamicHueBackground theme="indigo" />
+      </div>
       
       <button onClick={() => router.push('/')} className="absolute top-8 left-8 p-3 rounded-full bg-white/10 hover:bg-white/20 transition backdrop-blur-md z-50">
         <ArrowLeft className="w-6 h-6" />
