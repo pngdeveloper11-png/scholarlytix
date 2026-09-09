@@ -12,7 +12,6 @@ export default function FacultyLogin() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
 
-  // Security measure: Clear any lingering broken sessions when the login page loads
   useEffect(() => {
     signOut(auth).catch(() => {});
     localStorage.removeItem("academiq_faculty_id");
@@ -23,7 +22,6 @@ export default function FacultyLogin() {
     setIsLoading(true);
     try {
       const provider = new GoogleAuthProvider();
-      // Force account selection so you don't get stuck on an unauthorized default account
       provider.setCustomParameters({ prompt: 'select_account' }); 
       
       const result = await signInWithPopup(auth, provider);
@@ -31,26 +29,34 @@ export default function FacultyLogin() {
 
       if (user.email) {
         const email = user.email.toLowerCase().trim();
+        let userRole = "teacher";
         
+        // 1. CRITICAL CHECK: Verify against the approved emails collection
         try {
-          // 1. STRICT SECURITY CHECK: Read the approved list
           const roleDoc = await getDoc(doc(db, "approved_faculty_emails", email));
           
           if (!roleDoc.exists()) {
-            // Not on the approved list -> Instant rejection and sign out
             await signOut(auth);
-            alert("Access Denied: Your email is not registered as authorized Faculty. Please contact the Principal or HOD to add your email.");
+            alert("Access Denied: Your email is not registered as authorized Faculty. Please contact the Principal or HOD.");
             setIsLoading(false);
-            return;
+            return; // Stop login process
           }
 
-          const userRole = roleDoc.data().role || "teacher";
+          userRole = roleDoc.data().role || "teacher";
+        } catch (readError) {
+          console.error("Firestore Read Error:", readError);
+          await signOut(auth);
+          alert("Authentication Failed: Could not verify authorization. Please check Firebase rules.");
+          setIsLoading(false);
+          return;
+        }
 
-          // 2. Setup Local Storage for Dashboard
-          localStorage.setItem("academiq_faculty_id", user.uid);
-          localStorage.setItem("academiq_faculty_name", user.displayName || "Faculty");
-          
-          // 3. Update the faculty directory with latest login time
+        // 2. Setup Local Storage for Dashboard Access
+        localStorage.setItem("academiq_faculty_id", user.uid);
+        localStorage.setItem("academiq_faculty_name", user.displayName || "Faculty");
+        
+        // 3. NON-CRITICAL WRITE: Update profile data (Isolated so it NEVER blocks login)
+        try {
           await setDoc(doc(db, "faculty_directory", user.uid), {
             name: user.displayName,
             email: user.email,
@@ -58,23 +64,17 @@ export default function FacultyLogin() {
             role: userRole,
             lastLogin: Date.now()
           }, { merge: true });
-
-          // 4. Secure Navigation
-          router.replace('/faculty/dashboard');
-
-        } catch (firestoreError: any) {
-          // This catches the exact "Missing or insufficient permissions" error from your screenshot
-          console.error("Firestore Security Error:", firestoreError);
-          await signOut(auth);
-          localStorage.removeItem("academiq_faculty_id");
-          localStorage.removeItem("academiq_faculty_name");
-          alert("Authentication Failed: You do not have the required database permissions. Make sure you are using an authorized account.");
-          setIsLoading(false);
+        } catch (writeError) {
+          // If Rule 8 fails, we just log it to the console and IGNORE it. 
+          // The user is still granted access to the dashboard.
+          console.warn("Ignored: Could not update faculty directory.", writeError);
         }
+
+        // 4. Secure Navigation to Dashboard
+        router.replace('/faculty/dashboard');
       }
     } catch (authError: any) {
       console.error("Auth failed:", authError);
-      // Only show error if the user didn't intentionally close the popup
       if (authError.code !== 'auth/popup-closed-by-user') {
          alert(`Sign in failed: ${authError.message}`);
       }
