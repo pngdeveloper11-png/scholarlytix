@@ -5,20 +5,24 @@ import { useRouter } from 'next/navigation';
 import { doc, getDoc } from 'firebase/firestore';
 import { signInWithEmailAndPassword, signInWithPopup, signOut } from 'firebase/auth';
 import { auth, db, googleProvider } from '@/lib/firebase';
+import { useAuth } from '../../context/AuthContext';
 import { ArrowLeft, School, Loader2, Lock, User as UserIcon } from 'lucide-react';
 
 export default function FacultyLogin() {
   const [rawName, setRawName] = useState("");
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  
   const router = useRouter();
+  const { user, role, loading } = useAuth();
 
+  // Auto-redirect if already logged in and authorized
   useEffect(() => {
-    const uid = localStorage.getItem("academiq_faculty_id");
-    if (uid) router.replace('/faculty/dashboard');
-  }, [router]);
+    if (!loading && user && role) {
+      router.replace('/faculty/dashboard');
+    }
+  }, [user, role, loading, router]);
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,7 +30,7 @@ export default function FacultyLogin() {
       setErrorMessage("Please enter both name and password.");
       return;
     }
-    setIsLoading(true);
+    setIsLoggingIn(true);
     setErrorMessage("");
 
     try {
@@ -34,67 +38,60 @@ export default function FacultyLogin() {
         ? rawName.trim().toLowerCase() 
         : rawName.trim().toLowerCase().replace(/\s+/g, '.') + "@mitmumbai.png.edu";
 
-      const userCredential = await signInWithEmailAndPassword(auth, formattedEmail, password);
-      const user = userCredential.user;
-
-      localStorage.setItem("academiq_faculty_id", user.uid);
-      localStorage.setItem("academiq_faculty_name", user.displayName || rawName);
-      localStorage.setItem("userRole", "faculty"); 
-      
-      router.replace('/faculty/dashboard');
+      await signInWithEmailAndPassword(auth, formattedEmail, password);
+      // The AuthContext will automatically pick up the state change and trigger the useEffect redirect
     } catch (error: any) {
       const msg = error.message || "Login Failed";
       setErrorMessage(msg.includes("invalid-credential") ? "Incorrect Name or Password." : msg);
-    } finally {
-      setIsLoading(false);
+      setIsLoggingIn(false);
     }
   };
 
   const handleGoogleLogin = async () => {
-    setIsGoogleLoading(true);
+    setIsLoggingIn(true);
     setErrorMessage("");
 
     try {
       const result = await signInWithPopup(auth, googleProvider);
-      const user = result.user;
-      const email = user.email?.toLowerCase().trim();
+      const loggedInUser = result.user;
+      const email = loggedInUser.email?.toLowerCase().trim();
 
       if (!email) throw new Error("No email found from Google.");
 
+      if (email === 'pngdeveloper11@gmail.com') return; // Master override allowed instantly
+
+      // Check authorization before allowing them to stay logged in
       const docRef = doc(db, "approved_faculty_emails", email);
       const docSnap = await getDoc(docRef);
 
-      if (docSnap.exists()) {
-        localStorage.setItem("academiq_faculty_id", user.uid);
-        localStorage.setItem("academiq_faculty_name", user.displayName || email);
-        localStorage.setItem("userRole", "faculty"); 
-        
-        router.replace('/faculty/dashboard');
-      } else {
+      if (!docSnap.exists()) {
         await signOut(auth);
         setErrorMessage(`Access Pending: ${email} is not registered by Admin.`);
+        setIsLoggingIn(false);
       }
+      // If authorized, AuthContext takes over and redirects
     } catch (error: any) {
       setErrorMessage(error.message || "Google Sign-In failed.");
-    } finally {
-      setIsGoogleLoading(false);
+      setIsLoggingIn(false);
     }
   };
 
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-black">
+        <Loader2 className="w-10 h-10 animate-spin text-[#D0BCFF]" />
+      </div>
+    );
+  }
+
   return (
     <main className="min-h-screen w-full flex flex-col items-center p-6 text-white overflow-y-auto [&::-webkit-scrollbar]:hidden">
-      
       <div className="flex-1 min-h-[4vh]" />
 
       <div className="w-full max-w-md flex flex-col items-center z-50 relative">
         <div className="w-full flex items-center mb-8 relative">
-          
-          {/* SAFE BACK BUTTON */}
           <button 
-            onClick={() => {
-              localStorage.removeItem('userRole'); 
-              router.replace('/'); 
-            }}
+            onClick={() => router.replace('/')}
             className="absolute left-0 p-3 rounded-2xl bg-white/[0.05] border border-white/[0.1] hover:bg-white/[0.1] transition-colors backdrop-blur-xl shadow-lg"
           >
             <ArrowLeft className="w-6 h-6 text-white" />
@@ -110,7 +107,6 @@ export default function FacultyLogin() {
         </div>
 
         <div className="w-full p-8 rounded-[2rem] bg-white/[0.03] backdrop-blur-[40px] border border-white/[0.08] shadow-[0_8px_32px_0_rgba(0,0,0,0.4)] space-y-6">
-          
           <form onSubmit={handleEmailLogin} className="space-y-5">
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-2 ml-1">Full Name</label>
@@ -148,10 +144,10 @@ export default function FacultyLogin() {
 
             <button 
               type="submit" 
-              disabled={isLoading || isGoogleLoading} 
+              disabled={isLoggingIn} 
               className="w-full py-4 bg-[#D0BCFF] text-[#2A1B4E] rounded-2xl font-bold text-lg flex items-center justify-center disabled:opacity-50 transition-all hover:scale-[1.02] shadow-[0_0_20px_rgba(208,188,255,0.25)]"
             >
-              {isLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : "Sign In"}
+              {isLoggingIn ? <Loader2 className="w-6 h-6 animate-spin" /> : "Sign In"}
             </button>
           </form>
 
@@ -164,10 +160,10 @@ export default function FacultyLogin() {
           <button 
             type="button"
             onClick={handleGoogleLogin} 
-            disabled={isLoading || isGoogleLoading} 
+            disabled={isLoggingIn} 
             className="w-full py-4 bg-transparent border border-white/20 text-white rounded-2xl font-bold text-lg flex items-center justify-center space-x-3 disabled:opacity-50 transition-all hover:bg-white/5 hover:border-white/40 shadow-lg"
           >
-            {isGoogleLoading ? (
+            {isLoggingIn ? (
               <Loader2 className="w-6 h-6 animate-spin" />
             ) : (
               <>
@@ -187,7 +183,6 @@ export default function FacultyLogin() {
               {errorMessage}
             </p>
           )}
-
         </div>
       </div>
 

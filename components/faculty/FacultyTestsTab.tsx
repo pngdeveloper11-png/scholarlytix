@@ -2,14 +2,15 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { collection, doc, setDoc, onSnapshot } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { db } from '../../lib/firebase';
+import { useAuth } from '../../app/context/AuthContext';
 import { Loader2, AlertTriangle, UploadCloud, Sparkles, Image as ImageIcon } from 'lucide-react';
-import GlassDropdown from '@/components/GlassDropdown';
+import GlassDropdown from '../GlassDropdown';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // --- BROWSER IMAGE COMPRESSOR ---
 const compressImage = async (file: File): Promise<File> => {
-  if (!file.type.startsWith('image/')) return file; // Ignore PDFs and CSVs
+  if (!file.type.startsWith('image/')) return file;
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
@@ -18,7 +19,7 @@ const compressImage = async (file: File): Promise<File> => {
       img.src = event.target?.result as string;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_DIM = 1800; // Big enough for OCR, small enough for Vercel
+        const MAX_DIM = 1800; 
         let { width, height } = img;
         if (width > height) {
           if (width > MAX_DIM) { height = Math.round((height * MAX_DIM) / width); width = MAX_DIM; }
@@ -30,7 +31,7 @@ const compressImage = async (file: File): Promise<File> => {
         canvas.toBlob((blob) => {
           if (blob) resolve(new File([blob], file.name.replace(/\.[^/.]+$/, ".jpg"), { type: 'image/jpeg' }));
           else resolve(file);
-        }, 'image/jpeg', 0.85); // Compress to 85% quality
+        }, 'image/jpeg', 0.85); 
       };
       img.onerror = () => resolve(file);
     };
@@ -39,10 +40,12 @@ const compressImage = async (file: File): Promise<File> => {
 };
 
 export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean }) {
+  const { user, role } = useAuth();
+  const isHod = role?.startsWith("HOD|") || role === "SUPER_ADMIN" || role === "DIRECTOR" || role === "PRINCIPAL" || role === "REGISTRAR";
+
   const [teachingConfig, setTeachingConfig] = useState<Record<string, string[]>>({});
   const [roster, setRoster] = useState<any[]>([]);
   const [fullMarksMap, setFullMarksMap] = useState<Record<string, any>>({});
-  const [isHod, setIsHod] = useState(false);
 
   const [selectedSemester, setSelectedSemester] = useState("");
   const [selectedBranch, setSelectedBranch] = useState("");
@@ -56,17 +59,13 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4"];
-  const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE"];
+  const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
 
   useEffect(() => {
-    const uid = localStorage.getItem("academiq_faculty_id");
-    const name = (localStorage.getItem("academiq_faculty_name") || "").toLowerCase();
-    setIsHod(name.includes("pratosh") || name.includes("admin"));
-
     const unsubRoster = onSnapshot(collection(db, "students_directory"), (snap) => setRoster(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     
-    if (!uid) return;
-    const unsubConfig = onSnapshot(doc(db, "teacher_configs", uid), (docSnap) => {
+    if (!user?.uid) return;
+    const unsubConfig = onSnapshot(doc(db, "teacher_configs", user.uid), (docSnap) => {
       if (docSnap.exists() && docSnap.get("config")) {
         const config = docSnap.get("config");
         setTeachingConfig(config);
@@ -77,19 +76,19 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
     });
 
     return () => { unsubRoster(); unsubConfig(); };
-  }, []);
+  }, [user?.uid]);
 
   useEffect(() => {
     if (isHod) return;
     const branches = Array.from(new Set(Object.keys(teachingConfig).filter(k => k.startsWith(selectedSemester)).map(k => k.split("|")[1])));
     if (!branches.includes(selectedBranch)) setSelectedBranch(branches[0] || "");
-  }, [selectedSemester, teachingConfig, isHod]);
+  }, [selectedSemester, teachingConfig, isHod, selectedBranch]);
 
   useEffect(() => {
     if (isHod) return;
     const subjects = teachingConfig[`${selectedSemester}|${selectedBranch}`] || [];
     if (!subjects.includes(selectedSubject)) setSelectedSubject(subjects[0] || "");
-  }, [selectedSemester, selectedBranch, teachingConfig, isHod]);
+  }, [selectedSemester, selectedBranch, teachingConfig, isHod, selectedSubject]);
 
   useEffect(() => {
     if (!selectedSubject) return;
@@ -106,7 +105,7 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
   const textColor = isDark ? 'text-white' : 'text-neutral-900';
   const cardBg = isDark ? 'bg-white/[0.08] border-white/20' : 'bg-black/5 border-black/10 shadow-sm';
 
-  // --- HANDLER 1: AI CSV TEXT IMPORT (Runs completely in browser) ---
+  // --- HANDLER 1: AI CSV TEXT IMPORT ---
   const handleAiCsvImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -117,7 +116,6 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
       const API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY as string;
       const genAI = new GoogleGenerativeAI(API_KEY);
       
-      // Using generationConfig to force strict JSON output to prevent errors
       const model = genAI.getGenerativeModel({ 
           model: "gemini-1.5-flash",
           generationConfig: { responseMimeType: "application/json" }
@@ -157,20 +155,17 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
     }
   };
 
-  // --- HANDLER 2: AI IMAGE IMPORT (Compresses, then sends to backend) ---
+  // --- HANDLER 2: AI IMAGE IMPORT ---
   const handleAiImageImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setIsAiAnalyzing(true);
     try {
-      // 1. Compress the image so Vercel doesn't block it!
       const compressedFile = await compressImage(file);
 
-      // 2. Send to backend route
       const formData = new FormData();
       formData.append('file', compressedFile);
-      // We pass maxMarks so the AI knows what the test is out of
       formData.append('maxMarks', '20'); 
 
       const res = await fetch('/api/extract-marks', { method: 'POST', body: formData });
@@ -180,9 +175,7 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
       
       if (data.error) throw new Error(data.error);
 
-      // The backend returns an object mapping { "101": "18", "102": "AB" }
       const extractedMarksMap = data.marks || {};
-
       const newMap = { ...fullMarksMap };
       
       classRoster.forEach((student) => {
@@ -221,12 +214,10 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
         </div>
       </div>
 
-      {/* Header with Dual AI Import Buttons */}
       <div className="flex flex-col md:flex-row md:justify-between md:items-center mb-6 space-y-4 md:space-y-0">
         <h3 className={`text-lg font-bold ${textColor}`}>Student Scores</h3>
         
         <div className="flex space-x-2">
-          {/* CSV Input */}
           <input type="file" accept=".csv, .txt" onChange={handleAiCsvImport} ref={csvInputRef} className="hidden" />
           <button 
             onClick={() => csvInputRef.current?.click()}
@@ -237,7 +228,6 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
             Auto CSV
           </button>
 
-          {/* Image Input */}
           <input type="file" accept="image/*" capture="environment" onChange={handleAiImageImport} ref={imageInputRef} className="hidden" />
           <button 
             onClick={() => imageInputRef.current?.click()}
@@ -273,7 +263,7 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
                   onChange={(e) => {
                     const newMap = { ...fullMarksMap };
                     if (!newMap[student.id]) newMap[student.id] = {};
-                    newMap[student.id][selectedTest] = e.target.value.toUpperCase(); // Allow 'AB' for absent
+                    newMap[student.id][selectedTest] = e.target.value.toUpperCase(); 
                     setFullMarksMap(newMap);
                   }}
                   className={`w-20 p-3 rounded-xl border text-center font-bold outline-none focus:ring-2 focus:ring-[#D0BCFF] ${isDark ? 'bg-black/20 border-white/10 text-white' : 'bg-white border-black/10 text-neutral-900'}`}
@@ -291,6 +281,19 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
           try {
             const docId = `${selectedSemester}_${selectedBranch}_${selectedSubject}`.replace(/\s+/g, '').replace(/&/g, 'and');
             await setDoc(doc(db, "test_marks", docId), { marks: fullMarksMap, isPublished: true }, { merge: true });
+            
+            // Broadcast Push Notification
+            await fetch('/api/send-fcm', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                targetTopic: `topic_${selectedSemester.replace(/ /g, "_")}_${selectedBranch.replace(/[ ()]/g, "_")}`,
+                title: "📊 Test Results Published",
+                message: `Marks for ${selectedSubject} (${selectedTest}) have been published to your portal.`,
+                targetTab: "Academics"
+              })
+            });
+
             alert("Marks published to students!");
           } catch (e) { alert("Error saving marks."); } finally { setIsLoading(false); }
         }} disabled={isLoading} className="w-full mt-6 py-4 bg-[#D0BCFF] text-[#2A1B4E] rounded-2xl font-bold flex justify-center items-center hover:scale-[1.02] transition-transform">

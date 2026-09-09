@@ -12,6 +12,7 @@
     "@aws-sdk/client-s3": "^3.1127.0",
     "@aws-sdk/s3-request-presigner": "^3.1127.0",
     "@google/generative-ai": "^0.24.1",
+    "@yudiel/react-qr-scanner": "^2.6.0",
     "firebase": "^12.16.0",
     "firebase-admin": "^14.3.0",
     "framer-motion": "^13.1.0",

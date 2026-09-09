@@ -1,0 +1,31 @@
+importScripts('https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging-compat.js');
+
+firebase.initializeApp({
+  apiKey: "AIzaSyApz5hnCLN4ZgG87cjkvztj_qlTHt5dizU",
+  authDomain: "attendance-app-f3968.firebaseapp.com",
+  projectId: "attendance-app-f3968",
+  storageBucket: "attendance-app-f3968.firebasestorage.app",
+  messagingSenderId: "1054968600634",
+  appId: "1:1054968600634:web:ad9a66e50e26b98ccf7d03"
+});
+
+const messaging = firebase.messaging();
+
+// Intercept background notifications and fire native OS banners
+messaging.onBackgroundMessage((payload) => {
+  const title = payload.data?.title || payload.notification?.title || "Scholarlytix Alert";
+  const options = {
+    body: payload.data?.message || payload.notification?.body || "You have a new academic update.",
+    icon: '/favicon.ico',
+    // Passes the target tab so when the user clicks the banner, it routes them perfectly
+    data: { url: payload.data?.targetTab ? `/faculty/dashboard?tab=${encodeURIComponent(payload.data.targetTab)}` : '/faculty/dashboard' }
+  };
+  return self.registration.showNotification(title, options);
+});
+
+// Handle Banner Clicks
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(self.clients.openWindow(event.notification.data.url));
+});

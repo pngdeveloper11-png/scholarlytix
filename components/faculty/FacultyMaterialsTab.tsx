@@ -2,11 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import { collection, doc, addDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
-import { db } from '@/lib/firebase'; 
+import { db } from '../../lib/firebase'; 
+import { useAuth } from '../../app/context/AuthContext';
 import { Loader2, UploadCloud, Trash2, FileQuestion, BookOpen, ExternalLink } from 'lucide-react';
-import GlassDropdown from '@/components/GlassDropdown';
+import GlassDropdown from '../GlassDropdown';
 
-// Helper to convert Google Drive download links to Web Viewer links
 const getDriveViewUrl = (url: string) => {
   if (!url) return '';
   try {
@@ -22,9 +22,11 @@ const getDriveViewUrl = (url: string) => {
 };
 
 export default function FacultyMaterialsTab() {
+  const { user, role } = useAuth();
+  const isHod = role?.startsWith("HOD|") || role === "SUPER_ADMIN" || role === "DIRECTOR" || role === "PRINCIPAL" || role === "REGISTRAR";
+
   const [materials, setMaterials] = useState<any[]>([]);
   const [teachingConfig, setTeachingConfig] = useState<Record<string, string[]>>({});
-  const [isHod, setIsHod] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   const [viewSem, setViewSem] = useState("");
@@ -35,18 +37,13 @@ export default function FacultyMaterialsTab() {
   const [showUploadDialog, setShowUploadDialog] = useState(false);
 
   useEffect(() => {
-    setIsLoading(true);
-    const uid = localStorage.getItem("academiq_faculty_id");
-    const name = (localStorage.getItem("academiq_faculty_name") || "").toLowerCase();
-    setIsHod(name.includes("pratosh") || name.includes("admin"));
-
     const unsubMaterials = onSnapshot(collection(db, "study_materials"), (snap) => {
       const mats = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => b.timestamp - a.timestamp);
       setMaterials(mats);
     });
 
-    if (!uid) return;
-    const unsubConfig = onSnapshot(doc(db, "teacher_configs", uid), (docSnap) => {
+    if (!user?.uid) return;
+    const unsubConfig = onSnapshot(doc(db, "teacher_configs", user.uid), (docSnap) => {
       if (docSnap.exists() && docSnap.get("config")) {
         const config = docSnap.get("config");
         setTeachingConfig(config);
@@ -60,7 +57,7 @@ export default function FacultyMaterialsTab() {
     });
 
     return () => { unsubMaterials(); unsubConfig(); };
-  }, [viewSem]);
+  }, [user?.uid, viewSem]);
 
   const handleDelete = async (mat: any) => {
     if (confirm("Delete this material permanently from all student devices and Google Drive?")) {
@@ -86,7 +83,7 @@ export default function FacultyMaterialsTab() {
   const validBranches = Array.from(new Set(availableClasses.filter(c => c.startsWith(viewSem)).map(c => c.split("|")[1])));
   const validSubjects = teachingConfig[`${viewSem}|${viewBranch}`] || [];
 
-  const myUploads = materials.filter(m => isHod || m.facultyName === localStorage.getItem("academiq_faculty_name"));
+  const myUploads = materials.filter(m => isHod || m.facultyName === user?.displayName);
   const displayedMaterials = myUploads.filter(m => {
     const classMatch = m.semester === viewSem && m.branch === viewBranch && m.subject === viewSubject;
     const categoryMatch = categoryFilter === "All" || m.category === categoryFilter;
@@ -176,13 +173,13 @@ export default function FacultyMaterialsTab() {
       </div>
 
       {showUploadDialog && (
-        <UploadMaterialDialog isHod={isHod} teachingConfig={teachingConfig} initialSem={viewSem} initialBranch={viewBranch} initialSubject={viewSubject} initialCategory={categoryFilter === "All" ? "Notes" : categoryFilter} onDismiss={() => setShowUploadDialog(false)} />
+        <UploadMaterialDialog user={user} teachingConfig={teachingConfig} initialSem={viewSem} initialBranch={viewBranch} initialSubject={viewSubject} initialCategory={categoryFilter === "All" ? "Notes" : categoryFilter} onDismiss={() => setShowUploadDialog(false)} />
       )}
     </div>
   );
 }
 
-function UploadMaterialDialog({ isHod, teachingConfig, initialSem, initialBranch, initialSubject, initialCategory, onDismiss }: any) {
+function UploadMaterialDialog({ user, teachingConfig, initialSem, initialBranch, initialSubject, initialCategory, onDismiss }: any) {
   const [isUploading, setIsUploading] = useState(false);
   const [title, setTitle] = useState("");
   const [upSem, setUpSem] = useState(initialSem || "Semester 3");
@@ -216,10 +213,23 @@ function UploadMaterialDialog({ isHod, teachingConfig, initialSem, initialBranch
         branch: upBranch, 
         subject: upSubject, 
         category: upCategory, 
-        timestamp: Date.now() 
+        timestamp: Date.now(),
+        facultyName: user?.displayName || "Faculty"
       };
 
       await addDoc(collection(db, "study_materials"), newDoc);
+
+      // Broadcast Push Notification
+      await fetch('/api/send-fcm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetTopic: `topic_${upSem.replace(/ /g, "_")}_${upBranch.replace(/[ ()]/g, "_")}`,
+          title: "📚 New Study Material",
+          message: `${upCategory} for ${upSubject} has been uploaded.`,
+          targetTab: "Materials"
+        })
+      });
 
       alert("Material published to Google Drive and App successfully!");
       onDismiss();
@@ -232,7 +242,6 @@ function UploadMaterialDialog({ isHod, teachingConfig, initialSem, initialBranch
   };
 
   return (
-    // FIXED: Changed z-50 to z-[100] to sit above the dropdowns
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
       <div className="bg-white/[0.08] border border-white/20 p-8 rounded-[2rem] w-full max-w-sm backdrop-blur-[40px]">
         <h2 className="text-xl font-bold text-white mb-6">Upload Material</h2>
@@ -246,7 +255,7 @@ function UploadMaterialDialog({ isHod, teachingConfig, initialSem, initialBranch
                 options={["Notes", "Question Paper", "Assignment"]} 
                 onChange={(val) => setUpCategory(val)} 
                 isDark={true}
-                zIndex={110} // Boosted to ensure this dialog's own dropdown works perfectly
+                zIndex={110} 
               />
           </div>
 

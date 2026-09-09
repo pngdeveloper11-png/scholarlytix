@@ -2,29 +2,21 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { collection, onSnapshot, doc, writeBatch, getDocs, getDoc, deleteDoc } from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase'; 
-import { onAuthStateChanged } from 'firebase/auth'; 
+import { db } from '../../lib/firebase'; 
+import { useAuth } from '../../app/context/AuthContext';
 import { Loader2, UploadCloud, Users, Trash2, Check, Edit } from 'lucide-react'; 
-import GlassDropdown from '@/components/GlassDropdown';
+import GlassDropdown from '../GlassDropdown';
+import { CollegeStructureConfig, StudentData } from '../../types';
 
 const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4"];
-const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE"];
+const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
 
-const getStudentBatch = (branch: string, rollNo: number) => {
-    if (!rollNo || rollNo <= 0) return "Unknown";
-    switch (branch) {
-        case "CSE": return rollNo <= 35 ? "A1" : "A2";
-        case "CSE(AIML)": return rollNo <= 30 ? "B1" : "B2";
-        case "IT": return rollNo <= 32 ? "C1" : "C2";
-        case "EE": return rollNo <= 25 ? "D1" : "D2";
-        default: return rollNo <= 30 ? "Batch 1" : "Batch 2";
-    }
-};
-
-function ImportStudentsDialog({ isDynamicHue, onDismiss }: { isDynamicHue: boolean, onDismiss: () => void }) {
+// --- IMPORT STUDENTS DIALOG ---
+function ImportStudentsDialog({ isDynamicHue, onDismiss, globalStructure }: { isDynamicHue: boolean, onDismiss: () => void, globalStructure: CollegeStructureConfig }) {
   const [importMode, setImportMode] = useState<"Single" | "Master">("Single");
   const [selectedSemester, setSelectedSemester] = useState(AVAILABLE_SEMESTERS[2]);
   const [selectedBranch, setSelectedBranch] = useState(AVAILABLE_BRANCHES[0]);
+  const [selectedDivision, setSelectedDivision] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -32,9 +24,19 @@ function ImportStudentsDialog({ isDynamicHue, onDismiss }: { isDynamicHue: boole
   const textColor = isDynamicHue ? 'text-white' : 'text-neutral-900';
   const modalBg = isDynamicHue ? 'bg-black/90 border-white/20' : 'bg-white border-black/10';
 
+  const classKey = `${selectedSemester}|${selectedBranch}`;
+  const availableDivisions = globalStructure[classKey]?.map(d => d.divisionName) || [];
+
+  useEffect(() => {
+    if (!availableDivisions.includes(selectedDivision)) {
+      setSelectedDivision(availableDivisions[0] || "");
+    }
+  }, [selectedSemester, selectedBranch, globalStructure]);
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (importMode === "Single" && !selectedDivision) return alert("Please create a Division first.");
 
     setIsUploading(true);
     setUploadProgress("Reading file...");
@@ -48,14 +50,10 @@ function ImportStudentsDialog({ isDynamicHue, onDismiss }: { isDynamicHue: boole
       const existingSnapshot = await getDocs(collection(db, "students_directory"));
       
       const existingStudentsByEmail = new Map();
-      const existingStudentsByName = new Map();
       
       existingSnapshot.forEach(docSnap => {
         const data = docSnap.data();
         if (data.email) existingStudentsByEmail.set(data.email.trim().toLowerCase(), { id: docSnap.id, ...data });
-        if (data.fullName && data.branch) {
-            existingStudentsByName.set(`${data.fullName.trim().toLowerCase()}_${data.branch}`, { id: docSnap.id, ...data });
-        }
       });
 
       setUploadProgress("Updating Database...");
@@ -74,6 +72,8 @@ function ImportStudentsDialog({ isDynamicHue, onDismiss }: { isDynamicHue: boole
       const grIndex = headers.findIndex(h => h.includes('gr') || h.includes('prn'));
       const branchIndex = headers.findIndex(h => h === 'branch' || h.includes('course'));
       const semIndex = headers.findIndex(h => h.includes('semester') || h === 'sem');
+      const divIndex = headers.findIndex(h => h === 'division' || h === 'div');
+      const batchIndex = headers.findIndex(h => h === 'batch' || h === 'group');
 
       if (nameIndex === -1 || emailIndex === -1) {
         alert("CSV must contain 'Name' and 'Email' columns.");
@@ -100,20 +100,23 @@ function ImportStudentsDialog({ isDynamicHue, onDismiss }: { isDynamicHue: boole
 
         const rowBranchRaw = importMode === "Master" && branchIndex !== -1 && parts.length > branchIndex ? parts[branchIndex] : selectedBranch;
         const rowSemRaw = importMode === "Master" && semIndex !== -1 && parts.length > semIndex ? parts[semIndex] : selectedSemester;
+        const rowDivRaw = divIndex !== -1 && parts.length > divIndex ? parts[divIndex] : selectedDivision;
+        const rowBatchRaw = batchIndex !== -1 && parts.length > batchIndex ? parts[batchIndex] : "";
 
         const finalBranch = AVAILABLE_BRANCHES.find(b => b.toLowerCase() === rowBranchRaw.toLowerCase()) || rowBranchRaw;
         const finalSem = AVAILABLE_SEMESTERS.find(s => s.toLowerCase().includes(rowSemRaw.toLowerCase())) || rowSemRaw;
 
         if (fullName && email) {
-          let existingDoc = existingStudentsByEmail.get(email);
-          if (!existingDoc) existingDoc = existingStudentsByName.get(`${fullName.toLowerCase()}_${finalBranch}`);
+          const existingDoc = existingStudentsByEmail.get(email);
 
           if (existingDoc) {
             const studentRef = doc(db, "students_directory", existingDoc.id);
             const updates: any = {
                 email: email,
                 branch: finalBranch,
-                semester: finalSem
+                semester: finalSem,
+                division: rowDivRaw,
+                batch: rowBatchRaw
             };
             if (rollNo > 0) updates.rollNo = rollNo;
             if (grNumber) updates.grNumber = grNumber;
@@ -127,6 +130,8 @@ function ImportStudentsDialog({ isDynamicHue, onDismiss }: { isDynamicHue: boole
                 fullName,
                 branch: finalBranch,
                 semester: finalSem,
+                division: rowDivRaw,
+                batch: rowBatchRaw,
                 grNumber,
                 email,
                 admissionTimestamp: Date.now(),
@@ -186,11 +191,16 @@ function ImportStudentsDialog({ isDynamicHue, onDismiss }: { isDynamicHue: boole
 
         {importMode === "Single" ? (
           <div className="space-y-4 mb-6">
-            <p className="text-sm opacity-80 text-white">Uploading for a specific class. The CSV only needs Name and Email. Roll No and GR Number are optional.</p>
+            <p className="text-sm opacity-80 text-white">Uploading for a specific class. The CSV only needs Name and Email.</p>
             <div className="flex space-x-3">
               <GlassDropdown label="Semester" value={selectedSemester} options={AVAILABLE_SEMESTERS} onChange={setSelectedSemester} isDark={isDynamicHue} zIndex={100} />
               <GlassDropdown label="Branch" value={selectedBranch} options={AVAILABLE_BRANCHES} onChange={setSelectedBranch} isDark={isDynamicHue} zIndex={90} />
             </div>
+            {availableDivisions.length > 0 ? (
+              <GlassDropdown label="Division" value={selectedDivision} options={availableDivisions} onChange={setSelectedDivision} isDark={isDynamicHue} zIndex={80} />
+            ) : (
+              <p className="text-red-500 text-sm font-bold">No divisions built for this class.</p>
+            )}
           </div>
         ) : (
           <p className="text-sm opacity-80 text-white mb-6">Uploading the entire college directory.<br/><br/>⚠️ Your CSV MUST contain 'Branch' and 'Semester' columns to sort students correctly.<br/><br/>Large files ({">"}500 students) are safely processed in chunks to prevent crashes.</p>
@@ -206,7 +216,7 @@ function ImportStudentsDialog({ isDynamicHue, onDismiss }: { isDynamicHue: boole
         <div className="flex space-x-3 mt-auto">
           <button onClick={onDismiss} disabled={isUploading} className="flex-1 py-3.5 bg-white/10 rounded-xl font-bold text-white disabled:opacity-50">Cancel</button>
           <input type="file" accept=".csv" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
-          <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="flex-1 py-3.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold hover:scale-[1.02] transition-transform disabled:opacity-50">
+          <button onClick={() => fileInputRef.current?.click()} disabled={isUploading || (importMode === "Single" && !selectedDivision)} className="flex-1 py-3.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold hover:scale-[1.02] transition-transform disabled:opacity-50">
             {isUploading ? "Processing..." : "Select CSV File"}
           </button>
         </div>
@@ -215,66 +225,51 @@ function ImportStudentsDialog({ isDynamicHue, onDismiss }: { isDynamicHue: boole
   );
 }
 
+// --- FACULTY METRICS TAB ---
 export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean }) {
+  const { user, role } = useAuth();
+  
   const [teachingConfig, setTeachingConfig] = useState<Record<string, string[]>>({});
-  const [roster, setRoster] = useState<any[]>([]);
+  const [globalStructure, setGlobalStructure] = useState<CollegeStructureConfig>({});
+  const [roster, setRoster] = useState<StudentData[]>([]);
   const [history, setHistory] = useState<any[]>([]);
-  const [isHod, setIsHod] = useState(false);
+
+  const isHod = role?.startsWith("HOD|") || role === "SUPER_ADMIN" || role === "DIRECTOR" || role === "PRINCIPAL" || role === "REGISTRAR";
 
   const [selectedSemester, setSelectedSemester] = useState("");
   const [selectedBranch, setSelectedBranch] = useState("");
+  const [selectedDivision, setSelectedDivision] = useState("");
   const [selectedSubject, setSelectedSubject] = useState("");
   
   const [isEditMode, setIsEditMode] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
 
-  // --- SECURE DATABASE-DRIVEN ROLE CHECK ---
+  // 1. Listeners
   useEffect(() => {
-    const uid = localStorage.getItem("academiq_faculty_id");
-
-    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
-      if (user && user.email) {
-        const email = user.email.toLowerCase().trim();
-        try {
-          const roleDoc = await getDoc(doc(db, "approved_faculty_emails", email));
-          if (roleDoc.exists()) {
-            const role = roleDoc.data().role || "teacher";
-            if (["hod", "principal", "admin", "owner", "developer"].includes(role.toLowerCase())) {
-              setIsHod(true);
-            } else {
-              setIsHod(false);
-            }
-          }
-        } catch (e) {
-          console.error("Failed to verify user role:", e);
-        }
+    if (!user?.uid) return;
+    
+    const unsubConfig = onSnapshot(doc(db, "teacher_configs", user.uid), (docSnap) => {
+      if (docSnap.exists() && docSnap.get("config")) {
+        const config = docSnap.get("config");
+        setTeachingConfig(config);
+        const validSems = Array.from(new Set(Object.keys(config).map(k => k.split("|")[0])));
+        if (!selectedSemester) setSelectedSemester(validSems[0] || "Semester 3");
       }
     });
-
-    if (uid) {
-      const unsubConfig = onSnapshot(doc(db, "teacher_configs", uid), (docSnap) => {
-        if (docSnap.exists() && docSnap.get("config")) {
-          const config = docSnap.get("config");
-          setTeachingConfig(config);
-          const validSems = Array.from(new Set(Object.keys(config).map(k => k.split("|")[0])));
-          if (!selectedSemester) setSelectedSemester(validSems[0] || "Semester 3");
-        }
-      });
-      return () => { unsubscribeAuth(); unsubConfig(); };
-    }
-    return () => unsubscribeAuth();
-  }, [selectedSemester]);
-
-  useEffect(() => {
+    const unsubStruct = onSnapshot(doc(db, "app_config", "college_structure"), (snap) => {
+      if (snap.exists()) setGlobalStructure(snap.data() as CollegeStructureConfig);
+    });
     const unsubRoster = onSnapshot(collection(db, "students_directory"), (snap) => {
-      setRoster(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setRoster(snap.docs.map(d => ({ id: d.id, ...d.data() } as StudentData)));
     });
     const unsubHistory = onSnapshot(collection(db, "attendance_history"), (snap) => {
       setHistory(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
-    return () => { unsubRoster(); unsubHistory(); };
-  }, []);
 
+    return () => { unsubConfig(); unsubStruct(); unsubRoster(); unsubHistory(); };
+  }, [user?.uid]);
+
+  // 2. Cascade Dropdowns
   useEffect(() => {
     if (isHod) {
       if (!selectedBranch) setSelectedBranch(AVAILABLE_BRANCHES[0]);
@@ -285,20 +280,37 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
     if (!branches.includes(selectedBranch)) setSelectedBranch(branches[0] || "");
   }, [selectedSemester, teachingConfig, isHod, selectedBranch]);
 
+  const classKey = `${selectedSemester}|${selectedBranch}`;
+  const availableDivisions = isHod 
+    ? (globalStructure[classKey]?.map(d => d.divisionName) || [])
+    : Array.from(new Set(Object.keys(teachingConfig).filter(k => k.startsWith(classKey)).map(k => k.split("|")[2]).filter(Boolean)));
+
+  useEffect(() => {
+    if (!availableDivisions.includes(selectedDivision)) setSelectedDivision(availableDivisions[0] || "");
+  }, [selectedSemester, selectedBranch, globalStructure, teachingConfig, isHod]);
+
+  const configKey = `${selectedSemester}|${selectedBranch}|${selectedDivision}`;
+  
   useEffect(() => {
     if (isHod) return;
-    const subjects = teachingConfig[`${selectedSemester}|${selectedBranch}`] || [];
+    const subjects = teachingConfig[configKey] || [];
     if (!subjects.includes(selectedSubject)) setSelectedSubject(subjects[0] || "");
-  }, [selectedSemester, selectedBranch, teachingConfig, isHod, selectedSubject]);
+  }, [configKey, teachingConfig, isHod, selectedSubject]);
 
-  const branchRoster = roster.filter(s => s.branch === selectedBranch && s.semester === selectedSemester).sort((a, b) => a.fullName.localeCompare(b.fullName));
-  const matchingLectures = history.filter(h => h.semester === selectedSemester && h.branchName === selectedBranch && (isHod ? true : h.subjectName === selectedSubject));
+  // 3. Analytics Computations
+  const branchRoster = roster.filter(s => s.branch === selectedBranch && s.semester === selectedSemester && s.division === selectedDivision).sort((a, b) => a.rollNo - b.rollNo);
+  const matchingLectures = history.filter(h => h.semester === selectedSemester && h.branchName === selectedBranch && h.divisionName === selectedDivision && (isHod ? true : h.subjectName === selectedSubject));
   const totalConducted = matchingLectures.length;
 
   const studentStats = branchRoster.map((student) => {
-    const studentBatch = getStudentBatch(student.branch, parseInt(student.rollNo) || 0);
-    
-    // Only count theory lectures + their specific lab batch lectures
+    let studentBatch = student.batch;
+    // Fallback dynamic resolver if student has no explicitly saved batch
+    if (!studentBatch && globalStructure[classKey]) {
+      const divDef = globalStructure[classKey].find(d => d.divisionName === selectedDivision);
+      const matched = divDef?.batches.find(b => student.rollNo >= b.startRoll && student.rollNo <= b.endRoll);
+      studentBatch = matched?.name || "Unknown";
+    }
+
     const validLectures = matchingLectures.filter(l => 
         l.timestamp >= (student.admissionTimestamp || 0) &&
         (l.batch === "All" || l.batch === studentBatch)
@@ -330,7 +342,7 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
     <div className="w-full flex flex-col h-full overflow-y-auto pr-2 pb-24 [&::-webkit-scrollbar]:hidden">
       
       {showImportDialog && (
-          <ImportStudentsDialog isDynamicHue={isDark} onDismiss={() => setShowImportDialog(false)} />
+          <ImportStudentsDialog isDynamicHue={isDark} onDismiss={() => setShowImportDialog(false)} globalStructure={globalStructure} />
       )}
 
       {isHod && (
@@ -352,10 +364,14 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
       <div className="flex space-x-3 mb-4 z-50 relative">
         <GlassDropdown label="Sem" value={selectedSemester} options={isHod ? AVAILABLE_SEMESTERS : Array.from(new Set(Object.keys(teachingConfig).map(k => k.split("|")[0])))} onChange={setSelectedSemester} isDark={isDark} zIndex={60} />
         <GlassDropdown label="Branch" value={selectedBranch} options={isHod ? AVAILABLE_BRANCHES : Array.from(new Set(Object.keys(teachingConfig).filter(k => k.startsWith(selectedSemester)).map(k => k.split("|")[1])))} onChange={setSelectedBranch} isDark={isDark} zIndex={50} />
+        {availableDivisions.length > 0 && (
+           <GlassDropdown label="Division" value={selectedDivision} options={availableDivisions} onChange={setSelectedDivision} isDark={isDark} zIndex={45} />
+        )}
       </div>
+      
       {!isHod && (
         <div className="mb-6 z-40 relative">
-            <GlassDropdown label="Subject" value={selectedSubject} options={teachingConfig[`${selectedSemester}|${selectedBranch}`] || []} onChange={setSelectedSubject} isDark={isDark} zIndex={40} />
+            <GlassDropdown label="Subject" value={selectedSubject} options={teachingConfig[configKey] || []} onChange={setSelectedSubject} isDark={isDark} zIndex={40} />
         </div>
       )}
 
@@ -385,14 +401,14 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
                 onClick={() => setIsEditMode(!isEditMode)}
                 className={`flex items-center text-sm font-bold ${isEditMode ? 'text-[#34C759]' : 'text-[#D0BCFF]'}`}
             >
-                {isEditMode ? <Check className="w-4 h-4 mr-1" /> : <Edit className="w-4 h-4 mr-1" />}
-                {isEditMode ? "Done Editing" : "Edit Roster"}
+              {isEditMode ? <Check className="w-4 h-4 mr-1" /> : <Edit className="w-4 h-4 mr-1" />}
+              {isEditMode ? "Done Editing" : "Edit Roster"}
             </button>
         )}
       </div>
 
       {branchRoster.length === 0 ? (
-        <p className="text-center py-10 text-white/40">No students found for this class.</p>
+        <p className="text-center py-10 text-white/40">No students found for this class division.</p>
       ) : (
         <div className="space-y-3">
           {studentStats.map((student) => {

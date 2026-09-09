@@ -72,7 +72,7 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
     return ["All", "Batch 1", "Batch 2"];
   })();
 
-  // THE FIX: Strict Roster Filtering with string cleanup
+  // Strict Roster Filtering with string cleanup
   const classStudents = roster
     .filter(s => 
       s.branch?.toLowerCase().trim() === selectedBranch.toLowerCase().trim() && 
@@ -80,7 +80,7 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
     )
     .sort((a, b) => (a.rollNo || 0) - (b.rollNo || 0));
 
-  // THE FIX: Precise Batch Logic matching the Android App
+  // Precise Batch Logic matching the Android App
   const filteredStudents = classStudents.filter(student => {
     const r = student.rollNo || 0;
     if (selectedBatch === "All" || r === 0) return true;
@@ -133,7 +133,7 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
     setShowSummaryDialog(true);
   };
 
-  // THE FIX: Batch Write to instantly sync metrics across all devices
+  // Batch Write to instantly sync metrics across all devices
   const finalizeAttendanceSave = async (aiSummary: string | null = null) => {
     setIsLoading(true);
     try {
@@ -224,13 +224,9 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
           {filteredStudents.length === 0 ? (
             <div className="col-span-full py-20 text-center"><p className={`text-[15px] ${isDark ? 'text-white/50' : 'text-neutral-500'}`}>No students found for {selectedBranch} ({selectedSem}). Check your Cloud Roster.</p></div>
           ) : (
-            filteredStudents.map((student, index) => { // Added 'index' here!
+            filteredStudents.map((student, index) => {
               const isSelected = presentStudentIds.includes(student.id);
-              
-              // If they don't have a roll number, give them a sequential grid number
               const displayNumber = student.rollNo > 0 ? student.rollNo : (index + 1);
-
-              // Split the full name into two lines if it's long, otherwise just show it
               const nameParts = student.fullName.split(' ');
               const displayName = nameParts.length > 1 
                 ? <>{nameParts[0]}<br/>{nameParts[nameParts.length - 1]}</> 

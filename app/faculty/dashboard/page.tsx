@@ -9,16 +9,23 @@ import GlassDropdown from '@/components/GlassDropdown';
 import { 
   Settings, Lock, Edit, Download, 
   Smartphone, Fingerprint, CloudUpload, LogOut, 
-  Clock, Zap, Loader2, Check, ChevronLeft, CalendarDays, AlertCircle
+  Clock, Zap, Loader2, Check, ChevronLeft, CalendarDays, AlertCircle,
+  ShieldAlert, Bug, KeyRound
 } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import DynamicHueBackground from '@/components/DynamicHueBackground';
 import CursorGlow from '@/components/CursorGlow';
+
+// Tab Components
 import FacultyAttendanceTab from '@/components/faculty/FacultyAttendanceTab';
 import FacultyTestsTab from '@/components/faculty/FacultyTestsTab';
 import FacultyMetricsTab from '@/components/faculty/FacultyMetricsTab';
 import FacultyHistoryTab from '@/components/faculty/FacultyHistoryTab';
 import FacultyMaterialsTab from '@/components/faculty/FacultyMaterialsTab';
+import FacultyNoticeBoardTab from '@/components/faculty/FacultyNoticeBoardTab';
+import FacultyGatePassTab from '@/components/faculty/FacultyGatePassTab';
+import FacultyLeavesAndTransfersTab from '@/components/faculty/FacultyLeavesAndTransfersTab';
+import SuperAdminPanel from '@/components/faculty/SuperAdminPanel';
 
 const SUBJECTS_DICT: Record<string, string[]> = {
   "Semester 3_IT": ["Applied Mathematics Thinking-I", "Advance Data Structure and Analysis", "Database Management System and Application", "Automata Theory", "Full Stack Java Programming", "Entrepreneurship Development", "Environmental Science", "Financial Management"],
@@ -48,7 +55,11 @@ export default function FacultyDashboard() {
   const [facultyName, setFacultyName] = useState("");
   const [facultyId, setFacultyId] = useState("");
   const [isHod, setIsHod] = useState(false);
+  
+  // Tab State matches the exact order of the video
   const [activeTab, setActiveTab] = useState("Classes");
+  const tabs = ["Classes", "Metrics", "Materials", "Notice Board", "History", "Tests", "Gate Pass", "Leaves & Transfers"];
+  
   const [teachingConfig, setTeachingConfig] = useState<Record<string, string[]>>({});
   const [facultySchedule, setFacultySchedule] = useState<any[]>([]);
   const [showProxyMode, setShowProxyMode] = useState(false);
@@ -72,6 +83,11 @@ export default function FacultyDashboard() {
   const [showPinModal, setShowPinModal] = useState(false);
   const [newPin, setNewPin] = useState("");
   
+  // HOD Settings Modals
+  const [showSuperAdminPanel, setShowSuperAdminPanel] = useState(false);
+  const [showGuardPinModal, setShowGuardPinModal] = useState(false);
+  const [guardPin, setGuardPin] = useState("");
+  
   const [showTimetableModal, setShowTimetableModal] = useState(false);
   const [showManageTimetableModal, setShowManageTimetableModal] = useState(false);
 
@@ -92,6 +108,7 @@ export default function FacultyDashboard() {
       setShowEditClasses(false);
       setShowManageTimetableModal(false);
       setShowTimetableModal(false);
+      setShowSuperAdminPanel(false);
       setDirectMarkData(null);
     };
     window.addEventListener("popstate", handlePopState);
@@ -145,7 +162,9 @@ export default function FacultyDashboard() {
           const roleDoc = await getDoc(doc(db, "approved_faculty_emails", email));
           if (roleDoc.exists()) {
             const role = roleDoc.data().role || "teacher";
-            if (["hod", "principal", "admin", "owner", "developer"].includes(role.toLowerCase())) {
+            if (["hod", "principal", "admin", "owner", "developer", "director", "registrar"].includes(role.toLowerCase())) {
+              setIsHod(true);
+            } else if (role.startsWith("HOD|") || role.startsWith("CLASS_TEACHER|")) {
               setIsHod(true);
             } else {
               setIsHod(false);
@@ -213,6 +232,18 @@ export default function FacultyDashboard() {
     if (facultyId) { await setDoc(doc(db, "teacher_configs", facultyId), { config: draftConfig }); }
     setIsSavingClasses(false);
     setShowEditClasses(false);
+  };
+
+  const handleSaveGuardPin = async () => {
+    if (guardPin.length !== 6) return showAlert("Invalid Format", "Gate PIN must be exactly 6 digits.");
+    try {
+      await setDoc(doc(db, "app_config", "guard_settings"), { accessPin: guardPin }, { merge: true });
+      setShowGuardPinModal(false);
+      setGuardPin("");
+      showAlert("Success", "Guard Gate PIN updated successfully. Guards can now use this PIN to log in.");
+    } catch (e) {
+      showAlert("Error", "Failed to update Guard PIN. Check your permissions.");
+    }
   };
 
   const handleDirectMarkClick = (slot: any) => {
@@ -351,6 +382,35 @@ export default function FacultyDashboard() {
               </div>
             </div>
 
+            {/* --- NEW HOD SETTINGS --- */}
+            {isHod && (
+              <SettingsRow 
+                icon={<ShieldAlert className="text-green-400" />} 
+                title="Management Control Panel" 
+                subtitle="Add, remove, and manage HODs & Teachers." 
+                isDark={isDark}
+                onClick={() => { window.history.pushState(null, ""); setShowSuperAdminPanel(true); }} 
+              />
+            )}
+            
+            <SettingsRow 
+              icon={<Bug className="text-blue-400" />} 
+              title="User Reports & Bug Center" 
+              subtitle="Inspect user bug reports, attachments, and change ticket statuses." 
+              isDark={isDark}
+              onClick={() => showAlert("Bug Center", "Navigating to Bug Center... (Full UI Pending Deployment)")} 
+            />
+
+            {isHod && (
+              <SettingsRow 
+                icon={<KeyRound className="text-orange-400" />} 
+                title="Manage Gate PIN" 
+                subtitle="Change the 6-digit access code for campus guards." 
+                isDark={isDark}
+                onClick={() => setShowGuardPinModal(true)} 
+              />
+            )}
+
             <div className={`flex items-center justify-between p-5 hover:bg-red-500/10 transition-colors cursor-pointer group`} onClick={handleLogout}>
               <div className="flex-1 pr-4">
                 <h3 className="font-semibold text-lg text-red-400">Sign Out</h3>
@@ -413,6 +473,20 @@ export default function FacultyDashboard() {
           </div>
         )}
 
+        {showGuardPinModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <div className={`border p-8 rounded-[2rem] w-full max-w-sm ${modalBg}`}>
+              <h2 className="text-xl font-bold mb-2 text-orange-400">Set Gate PIN</h2>
+              <p className="text-sm opacity-70 mb-6">Create the 6-digit access code guards use to log in to the Security Portal.</p>
+              <input type="text" maxLength={6} value={guardPin} onChange={(e) => setGuardPin(e.target.value.replace(/\D/g, ''))} className={`w-full text-center text-3xl tracking-[0.5em] border rounded-2xl p-4 outline-none mb-6 ${isDark ? 'bg-white/[0.08] border-white/20 text-white focus:border-orange-400' : 'bg-black/5 border-black/10 text-neutral-900 focus:border-orange-400'}`} placeholder="••••••" />
+              <div className="flex space-x-3">
+                <button onClick={() => setShowGuardPinModal(false)} className={`flex-1 py-3.5 rounded-xl font-bold ${isDark ? 'bg-white/[0.05] border border-white/20' : 'bg-black/5 border border-black/10'}`}>Cancel</button>
+                <button onClick={handleSaveGuardPin} className="flex-1 py-3.5 bg-orange-500 text-white rounded-xl font-bold hover:scale-[1.02]">Update PIN</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {showDevicesDialog && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
             <div className={`border p-8 rounded-[2rem] w-full max-w-md ${modalBg} max-h-[80vh] overflow-y-auto`}>
@@ -434,11 +508,15 @@ export default function FacultyDashboard() {
             </div>
           </div>
         )}
+
+        {/* Phase 3 Admin Panel Injection */}
+        {showSuperAdminPanel && (
+          <SuperAdminPanel isDark={isDark} onClose={() => { setShowSuperAdminPanel(false); window.history.back(); }} />
+        )}
       </main>
     );
   }
 
-  const tabs = ["Classes", "Metrics", "History", "Materials", "Tests"];
   const dayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
 
   return (
@@ -587,10 +665,14 @@ export default function FacultyDashboard() {
           </div>
         )}
 
-        {activeTab === "Metrics" && <div className="flex-1 flex flex-col pb-10"><FacultyMetricsTab /></div>}
-        {activeTab === "History" && <div className="flex-1 flex flex-col pb-10"><FacultyHistoryTab /></div>}
+        {/* --- INJECTED TABS --- */}
+        {activeTab === "Metrics" && <div className="flex-1 flex flex-col pb-10"><FacultyMetricsTab isDark={isDark} /></div>}
         {activeTab === "Materials" && <div className="flex-1 flex flex-col pb-10 relative"><FacultyMaterialsTab /></div>}
-        {activeTab === "Tests" && <div className="flex-1 flex flex-col pb-10 relative"><FacultyTestsTab /></div>}
+        {activeTab === "Notice Board" && <div className="flex-1 flex flex-col pb-10"><FacultyNoticeBoardTab isDark={isDark} /></div>}
+        {activeTab === "History" && <div className="flex-1 flex flex-col pb-10"><FacultyHistoryTab isDark={isDark} /></div>}
+        {activeTab === "Tests" && <div className="flex-1 flex flex-col pb-10 relative"><FacultyTestsTab isDark={isDark} /></div>}
+        {activeTab === "Gate Pass" && <div className="flex-1 flex flex-col pb-10"><FacultyGatePassTab isDark={isDark} /></div>}
+        {activeTab === "Leaves & Transfers" && <div className="flex-1 flex flex-col pb-10"><FacultyLeavesAndTransfersTab isDark={isDark} userTimetable={facultySchedule} /></div>}
       </div>
 
       {showEditClasses && (
@@ -656,9 +738,6 @@ function ToggleSwitch({ checked, onChange }: { checked: boolean, onChange: (val:
   );
 }
 
-// ============================================================================
-// AI UPLOAD MODAL - NOW EQUIPPED WITH BROWSER-SIDE CANVAS COMPRESSION
-// ============================================================================
 function ManageTimetableModal({ onDismiss, modalBg, onShowAlert }: { onDismiss: () => void, modalBg: string, onShowAlert: (title: string, msg: string) => void }) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -667,11 +746,8 @@ function ManageTimetableModal({ onDismiss, modalBg, onShowAlert }: { onDismiss: 
     if (!selectedFile) return onShowAlert("Missing File", "Please select a timetable image or PDF.");
     setIsAnalyzing(true);
     try {
-      // OVERRIDE: Silently compress the image before sending to bypass Vercel limits
-      const optimizedFile = await compressImage(selectedFile);
-
       const formData = new FormData();
-      formData.append('file', optimizedFile);
+      formData.append('file', selectedFile);
 
       const res = await fetch('/api/extract-timetable', { method: 'POST', body: formData });
       if (!res.ok) throw new Error("Google Gemini AI extraction failed or timed out.");
@@ -709,9 +785,6 @@ function ManageTimetableModal({ onDismiss, modalBg, onShowAlert }: { onDismiss: 
   );
 }
 
-// ============================================================================
-// TIMETABLE UPLOAD MODAL - ALSO EQUIPPED WITH COMPRESSION
-// ============================================================================
 function UploadTimetableModal({ onDismiss, modalBg, isDark, onShowAlert }: { onDismiss: () => void, modalBg: string, isDark: boolean, onShowAlert: (title: string, msg: string) => void }) {
   const [upSem, setUpSem] = useState("Semester 3");
   const [upBranch, setUpBranch] = useState("IT");
@@ -722,11 +795,8 @@ function UploadTimetableModal({ onDismiss, modalBg, isDark, onShowAlert }: { onD
     if (!selectedFile) return onShowAlert("Missing File", "Please select a timetable file.");
     setIsUploading(true);
     try {
-      // OVERRIDE: Silently compress the image before uploading to Drive
-      const optimizedFile = await compressImage(selectedFile);
-
       const formData = new FormData();
-      formData.append('file', optimizedFile);
+      formData.append('file', selectedFile);
       formData.append('fileName', `${upSem}_${upBranch}_Timetable`);
       formData.append('path', `timetables`);
 
@@ -785,61 +855,3 @@ function SettingsRow({ icon, title, subtitle, titleColor, onClick, isDark }: any
     </div>
   );
 }
-
-// ============================================================================
-// THE MAGIC FIX: BROWSER-SIDE SILENT COMPRESSOR
-// ============================================================================
-const compressImage = async (file: File): Promise<File> => {
-  if (!file.type.startsWith('image/')) return file; // Ignore PDFs
-
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target?.result as string;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 1800; // Large enough for OCR to still read clearly
-        const MAX_HEIGHT = 1800;
-        let width = img.width;
-        let height = img.height;
-
-        if (width > height) {
-          if (width > MAX_WIDTH) {
-            height = Math.round((height * MAX_WIDTH) / width);
-            width = MAX_WIDTH;
-          }
-        } else {
-          if (height > MAX_HEIGHT) {
-            width = Math.round((width * MAX_HEIGHT) / height);
-            height = MAX_HEIGHT;
-          }
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0, width, height);
-
-        canvas.toBlob(
-          (blob) => {
-            if (blob) {
-              const compressedFile = new File([blob], file.name.replace(/\.[^/.]+$/, ".jpg"), {
-                type: 'image/jpeg',
-                lastModified: Date.now(),
-              });
-              resolve(compressedFile);
-            } else {
-              resolve(file); // Fallback
-            }
-          },
-          'image/jpeg',
-          0.85 // 85% quality reduces 10MB down to ~300KB
-        );
-      };
-      img.onerror = () => resolve(file);
-    };
-    reader.onerror = () => resolve(file);
-  });
-};

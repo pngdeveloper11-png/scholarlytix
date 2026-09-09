@@ -5,7 +5,7 @@ export const maxDuration = 60;
 export async function POST(request: Request) {
   try {
     const API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-    if (!API_KEY) throw new Error("API Key is missing in Vercel.");
+    if (!API_KEY) throw new Error("API Key is missing.");
 
     const formData = await request.formData();
     const file = formData.get('file') as File;
@@ -20,9 +20,9 @@ export async function POST(request: Request) {
       Keys must strictly be: 'dayOfWeek', 'startTime', 'endTime', 'semester', 'branch', 'subject', 'batch'.
       
       CRITICAL INFERENCE RULES:
-      1. MERGED CELLS / SPANNING SLOTS: Look very closely at the grid structure. If a single class block (like "DBMS") visually spans across multiple time rows (e.g., it covers both 8:30 to 9:30 AND 9:30 to 10:30), you MUST create a single entry that covers the entire duration (startTime: "8:30 AM", endTime: "10:30 AM").
-      2. BATCH PRACTICALS: If a cell contains a batch name alongside the branch (e.g., "IT - C1", "CSE - A2", "EE - D1") inside brackets, YOU MUST extract that specific batch name (e.g., "C1", "A2", "D1") into the 'batch' key. 
-      3. BRANCH EXTRACTION: Extract the branch (e.g., IT, CSE, EE, AIML) from the brackets next to the subject.
+      1. MERGED CELLS / SPANNING SLOTS: Look very closely at the grid structure. If a single class block visually spans across multiple time rows, you MUST create a single entry that covers the entire duration (startTime: "8:30 AM", endTime: "10:30 AM").
+      2. BATCH PRACTICALS: If a cell contains a batch name alongside the branch (e.g., "IT - C1", "CSE - A2") inside brackets, YOU MUST extract that specific batch name into the 'batch' key. 
+      3. BRANCH EXTRACTION: Extract the branch from the brackets next to the subject.
       4. Normal theory lectures for everyone should have 'batch': 'All'.
       
       SUBJECT NAME NORMALIZATION:
@@ -45,7 +45,6 @@ export async function POST(request: Request) {
       Return ONLY a pure JSON array.
     `;
 
-    // 100% BULLETPROOF FETCH CALL (Bypassing the buggy SDK)
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -62,13 +61,12 @@ export async function POST(request: Request) {
     if (!response.ok) {
         const errorData = await response.text();
         console.error("Google API Rejection:", errorData);
-        throw new Error("Google servers rejected the image.");
+        throw new Error("Google servers rejected the request.");
     }
 
     const data = await response.json();
     let text = data.candidates[0].content.parts[0].text;
 
-    // SAFE JSON PARSER
     text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
     const startIndex = text.indexOf('[');
     const endIndex = text.lastIndexOf(']');
