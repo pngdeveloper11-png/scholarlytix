@@ -48,7 +48,6 @@ export default function Home() {
           const isRevoked = !rawDbEmail || rawDbEmail.toLowerCase().trim() !== localEmail;
 
           if (isRevoked) {
-             // Start a 2.5s grace period. If it's a stale cache, the server will override this in ~100ms.
              kickoutTimer = setTimeout(() => {
                  alert("Your access was revoked by the student.");
                  localStorage.removeItem('userRole');
@@ -58,7 +57,6 @@ export default function Home() {
                  setStudentSession(null);
              }, 2500);
           } else {
-             // Valid server data arrived! Cancel the kickout.
              if (kickoutTimer) clearTimeout(kickoutTimer);
           }
         }
@@ -77,7 +75,7 @@ export default function Home() {
     if (userRole === 'parent' && currentUser) {
       if (studentSession) router.replace('/student/dashboard');
       else router.replace('/parent/linking');
-    } else if (userRole === 'student' && studentSession) {
+    } else if (userRole === 'student' && currentUser) { // FIXED: Checking currentUser, not studentSession
       router.replace('/student/dashboard');
     } else if (userRole === 'faculty' && currentUser) {
       if (localStorage.getItem("academiq_faculty_id")) {
@@ -92,7 +90,7 @@ export default function Home() {
 
   const isRedirecting = 
     (userRole === 'parent' && currentUser) ||
-    (userRole === 'student' && studentSession) ||
+    (userRole === 'student' && currentUser) || // FIXED
     (userRole === 'faculty' && currentUser && localStorage.getItem("academiq_faculty_id"));
 
   if (isRedirecting) {
@@ -165,7 +163,6 @@ export default function Home() {
           </div>
         </button>
 
-        {/* --- NEW SECURITY PORTAL BUTTON --- */}
         <button onClick={() => router.push('/guard')} className="block w-full text-left group">
           <div className="p-6 rounded-2xl bg-white/5 backdrop-blur-md border border-white/15 hover:border-[#D0BCFF]/50 hover:bg-white/10 transition-all duration-300 shadow-xl flex items-center justify-between">
             <div className="flex items-center space-x-4">

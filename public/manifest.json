@@ -9,8 +9,9 @@
   "icons": [
     {
       "src": "/favicon.ico",
-      "sizes": "64x64",
-      "type": "image/x-icon"
+      "sizes": "64x64 192x192 512x512",
+      "type": "image/x-icon",
+      "purpose": "any maskable"
     }
   ]
 }

@@ -1,299 +1,166 @@
-"use client";
+'use client';
 
-import React, { useState, useEffect } from 'react';
-import { db, auth, googleProvider } from '@/lib/firebase';
-import { collection, query, where, getDocs, doc, setDoc, deleteDoc, updateDoc, onSnapshot } from 'firebase/firestore';
-import { v4 as uuidv4 } from 'uuid';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { onAuthStateChanged, signInWithPopup } from 'firebase/auth';
-import { ArrowLeft, Loader2, Users } from 'lucide-react';
-import Image from 'next/image';
+import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth';
+import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { auth, db } from '@/lib/firebase';
+import { Loader2, ArrowLeft, User, Link as LinkIcon } from 'lucide-react';
+import DynamicHueBackground from '@/components/DynamicHueBackground';
 
-export default function ParentLinkingScreen({ onLinkSuccess }: { onLinkSuccess?: any }) {
+export default function ParentLinking() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
-  const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [generatedOtp, setGeneratedOtp] = useState('');
-  const [timeLeft, setTimeLeft] = useState(120);
-  const [requestId, setRequestId] = useState('');
+  const [user, setUser] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [children, setChildren] = useState<any[]>([]);
 
-  // Handle Google Auth state internally so parents don't need a separate login page
-  const [parentData, setParentData] = useState<{ uid: string; email: string } | null>(null);
-  const [isAuthenticating, setIsAuthenticating] = useState(true);
+  // Link Form State
+  const [showLinkForm, setShowLinkForm] = useState(false);
+  const [rollNo, setRollNo] = useState("");
+  const [semester, setSemester] = useState("Semester 3");
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user && user.email) {
-        setParentData({ uid: user.uid, email: user.email });
+    const unsub = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser && currentUser.email) {
+        setUser(currentUser);
+        localStorage.setItem("userRole", "parent");
+        await fetchLinkedChildren(currentUser.email.toLowerCase().trim());
+      } else {
+        setUser(null);
+        setChildren([]);
       }
-      setIsAuthenticating(false);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  const handleGoogleLogin = async () => {
-    setIsAuthenticating(true);
-    setError("");
-    try {
-        await signInWithPopup(auth, googleProvider);
-    } catch (e: any) {
-        setError("Sign-in failed. Please try again.");
-    } finally {
-        setIsAuthenticating(false);
-    }
-  };
-
-  useEffect(() => {
-    if (generatedOtp && timeLeft > 0) {
-      const timerId = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
-      return () => clearTimeout(timerId);
-    } else if (timeLeft === 0 && requestId) {
-      updateDoc(doc(db, "link_requests", requestId), { status: "expired" }).catch(console.error);
-      setGeneratedOtp('');
-      setError("Code expired. Please request a new one.");
-    }
-  }, [generatedOtp, timeLeft, requestId]);
-
-  useEffect(() => {
-    if (!requestId || !parentData) return;
-    const unsub = onSnapshot(doc(db, "link_requests", requestId), async (docSnap) => {
-      if (docSnap.exists()) {
-        const status = docSnap.data().status;
-        if (status === "approved") {
-          const sId = docSnap.data().studentId;
-          const studentDoc = await getDocs(query(collection(db, "students_directory"), where("__name__", "==", sId)));
-          if (!studentDoc.empty) {
-            const sData = studentDoc.docs[0].data();
-            const sessionData = { studentId: sId, name: sData.fullName, branch: sData.branch, semester: sData.semester, grNumber: sData.grNumber };
-            
-            await setDoc(doc(db, "parent_links", parentData.uid), {
-               linkedStudentId: sId,
-               parentEmail: parentData.email,
-               linkedAt: Date.now()
-            });
-
-            localStorage.setItem('academiq_student_session', JSON.stringify(sessionData));
-            if(onLinkSuccess) onLinkSuccess(sessionData);
-            
-            deleteDoc(doc(db, "link_requests", requestId)).catch(console.error);
-            router.replace('/student/dashboard');
-          }
-        } else if (status === "rejected") {
-          setError("Request Rejected: Your child declined the connection.");
-          setGeneratedOtp('');
-          setRequestId('');
-        } else if (status === "failed") {
-          setError("Request Cancelled: Too many incorrect code attempts.");
-          setGeneratedOtp('');
-          setRequestId('');
-        }
-      }
+      setIsLoading(false);
     });
     return () => unsub();
-  }, [requestId, onLinkSuccess, parentData, router]);
+  }, []);
 
-  const generateCode = async () => {
-    if (!email) { setError("Email cannot be empty"); return; }
-    if (!parentData) { setError("Please sign in first."); return; }
-    
-    setIsLoading(true); setError('');
+  const fetchLinkedChildren = async (email: string) => {
+    const q = query(collection(db, "students_directory"), where("linkedParentEmail", "==", email));
+    const snap = await getDocs(q);
+    setChildren(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+  };
 
+  const handleGoogleLogin = async () => {
+    setIsProcessing(true);
     try {
-        const q = query(collection(db, "students_directory"), where("email", "==", email.trim().toLowerCase()));
-        const snapshot = await getDocs(q);
-
-        if (!snapshot.empty) {
-          const studentDoc = snapshot.docs[0];
-          const newOtp = Math.floor(100000 + Math.random() * 900000).toString(); 
-          const reqId = uuidv4();
-          
-          await setDoc(doc(db, "link_requests", reqId), {
-            otp: newOtp,
-            studentId: studentDoc.id,
-            studentEmail: email.trim().toLowerCase(),
-            parentUid: parentData.uid,
-            parentEmail: parentData.email,
-            deviceModel: navigator.userAgent, 
-            status: "pending",
-            expiresAt: Date.now() + 120000
-          });
-
-          setRequestId(reqId);
-          setGeneratedOtp(newOtp);
-          setTimeLeft(120);
-        } else {
-          setError("No student found with this email.");
-        }
-    } catch(e: any) {
-        setError(e.message || "An error occurred.");
-    } finally {
-        setIsLoading(false);
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' }); 
+      await signInWithPopup(auth, provider);
+    } catch (e) {
+      console.error(e);
+      setIsProcessing(false);
     }
   };
 
-  const handleBack = () => {
-      auth.signOut();
-      localStorage.removeItem('userRole');
-      router.replace('/');
+  const handleLinkChild = async () => {
+    if (!rollNo || !semester) return alert("Fill all fields.");
+    setIsProcessing(true);
+    try {
+      // Security Check: To prevent brute force linking, a real app would require a unique PIN here.
+      // For this demo, we match exactly by Roll No & Sem.
+      const q = query(collection(db, "students_directory"), 
+        where("rollNo", "==", parseInt(rollNo)), 
+        where("semester", "==", semester)
+      );
+      const snap = await getDocs(q);
+      
+      if (snap.empty) {
+        alert("No student found matching this criteria.");
+      } else {
+        const studentDoc = snap.docs[0];
+        if (studentDoc.data().linkedParentEmail) {
+           alert("This student is already linked to another parent account.");
+        } else {
+           await updateDoc(doc(db, "students_directory", studentDoc.id), {
+             linkedParentEmail: user.email.toLowerCase().trim()
+           });
+           alert("Child successfully linked!");
+           setShowLinkForm(false);
+           fetchLinkedChildren(user.email.toLowerCase().trim());
+        }
+      }
+    } catch (e) {
+      alert("Linking failed.");
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
-  if (isAuthenticating) {
-      return <div className="min-h-screen flex flex-col items-center justify-center text-white">Loading...</div>;
-  }
+  const selectChild = (child: any) => {
+    localStorage.setItem("academiq_student_session", JSON.stringify({
+      studentId: child.id,
+      name: child.fullName,
+      semester: child.semester,
+      branch: child.branch
+    }));
+    router.push('/parent/dashboard');
+  };
 
-  // --- STATE 1: PARENT GOOGLE SIGN-IN ---
-  if (!parentData) {
-      return (
-        <main className="min-h-screen w-full flex flex-col items-center p-6 text-white overflow-y-auto [&::-webkit-scrollbar]:hidden">
-          
-          <div className="flex-1 min-h-[4vh]" />
+  if (isLoading) return <div className="min-h-screen bg-black flex items-center justify-center"><Loader2 className="w-10 h-10 animate-spin text-[#D0BCFF]"/></div>;
 
-          <div className="w-full max-w-md flex flex-col items-center z-50 relative">
-            <div className="w-full flex items-center mb-10 relative">
-              
-              <button 
-                onClick={handleBack}
-                className="absolute left-0 p-3 rounded-2xl bg-white/[0.05] border border-white/[0.1] hover:bg-white/[0.1] transition-colors backdrop-blur-xl shadow-lg"
-              >
-                <ArrowLeft className="w-6 h-6 text-white" />
-              </button>
+  return (
+    <main className="relative min-h-screen w-full flex flex-col items-center justify-center p-4 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#1f103b] via-[#0a0a0a] to-black text-white overflow-hidden">
+      <div className="absolute inset-0 z-0"><DynamicHueBackground theme="indigo" /></div>
+      
+      <button onClick={() => { if(user) { signOut(auth); localStorage.removeItem("userRole"); } else router.push('/'); }} className="absolute top-8 left-8 p-3 rounded-full bg-white/10 hover:bg-white/20 transition backdrop-blur-md z-50">
+        <ArrowLeft className="w-6 h-6" />
+      </button>
 
-              <div className="w-full flex flex-col items-center mt-4">
-                <div className="p-4 rounded-[1.25rem] bg-white/[0.03] border border-white/[0.08] backdrop-blur-[40px] shadow-[0_8px_32px_0_rgba(0,0,0,0.3)] mb-5">
-                  {/* Users Icon for Parents */}
-                  <Users className="w-12 h-12 text-[#D0BCFF]" />
-                </div>
-                <h1 className="text-3xl font-bold tracking-tight">Parents' Portal</h1>
-                <p className="text-white/50 text-sm mt-2 text-center px-4">Sign in with Google to link and monitor your child's progress.</p>
-              </div>
+      <div className="z-10 flex flex-col items-center max-w-md w-full">
+        {!user ? (
+          // --- LOGIN SCREEN ---
+          <>
+            <div className="w-20 h-20 bg-[#D0BCFF]/20 border border-[#D0BCFF]/30 rounded-3xl flex items-center justify-center mb-6 shadow-2xl backdrop-blur-xl">
+              <User className="w-10 h-10 text-[#D0BCFF]" />
             </div>
-
-            <div className="w-full p-8 rounded-[2rem] bg-white/[0.03] backdrop-blur-[40px] border border-white/[0.08] shadow-[0_8px_32px_0_rgba(0,0,0,0.4)] space-y-6">
-              
-              <button 
-                onClick={handleGoogleLogin} 
-                disabled={isAuthenticating} 
-                className="w-full py-4 bg-transparent border border-white/20 text-white rounded-2xl font-bold text-lg flex items-center justify-center space-x-3 disabled:opacity-50 transition-all hover:bg-white/5 hover:border-white/40 shadow-lg"
-              >
-                {isAuthenticating ? (
-                  <Loader2 className="w-6 h-6 animate-spin" />
-                ) : (
-                  <>
-                    <svg className="w-6 h-6" viewBox="0 0 24 24">
-                        <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                    </svg>
-                    <span>Sign in with Google</span>
-                  </>
-                )}
+            <h1 className="text-3xl font-black mb-2 text-center tracking-tight">Parents' Portal</h1>
+            <p className="text-white/60 text-sm mb-10 text-center">Sign in with Google to monitor your children's academic progress.</p>
+            <div className="w-full bg-white/[0.03] backdrop-blur-[40px] border border-white/10 p-8 rounded-[2.5rem] shadow-2xl">
+              <button onClick={handleGoogleLogin} disabled={isProcessing} className="w-full py-4 bg-white text-black rounded-2xl font-bold flex justify-center items-center hover:scale-[1.02] transition-transform disabled:opacity-50">
+                {isProcessing ? <Loader2 className="w-6 h-6 animate-spin" /> : "Sign in with Google"}
               </button>
+            </div>
+          </>
+        ) : (
+          // --- SELECT CHILD SCREEN ---
+          <>
+            <h1 className="text-3xl font-black mb-2 text-center tracking-tight">Select Child Profile</h1>
+            <p className="text-white/60 text-sm mb-10 text-center">Logged in as {user.email}</p>
+            
+            <div className="w-full space-y-4">
+              {children.map(child => (
+                <button key={child.id} onClick={() => selectChild(child)} className="w-full p-5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl flex items-center gap-4 transition-all text-left backdrop-blur-md">
+                  <div className="w-12 h-12 rounded-full bg-[#D0BCFF]/20 flex items-center justify-center"><User className="w-6 h-6 text-[#D0BCFF]" /></div>
+                  <div>
+                    <h3 className="font-bold text-lg">{child.fullName}</h3>
+                    <p className="text-xs text-[#D0BCFF]">{child.semester} • {child.branch}</p>
+                  </div>
+                </button>
+              ))}
 
-              {error && (
-                <p className="text-red-400 text-sm text-center font-medium bg-red-500/10 py-3 px-4 rounded-xl border border-red-500/20">
-                  {error}
-                </p>
+              {showLinkForm ? (
+                <div className="p-6 bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-[2rem] space-y-4">
+                  <input type="number" placeholder="Enter Roll Number" value={rollNo} onChange={e => setRollNo(e.target.value)} className="w-full bg-black/20 border border-white/10 rounded-xl p-4 outline-none" />
+                  <select value={semester} onChange={e => setSemester(e.target.value)} className="w-full bg-black/20 border border-white/10 rounded-xl p-4 outline-none">
+                    {["Semester 1", "Semester 2", "Semester 3", "Semester 4"].map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                  <div className="flex gap-3 pt-2">
+                    <button onClick={() => setShowLinkForm(false)} className="flex-1 py-3 bg-white/5 rounded-xl font-bold">Cancel</button>
+                    <button onClick={handleLinkChild} disabled={isProcessing} className="flex-[2] py-3 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold flex justify-center items-center">
+                      {isProcessing ? <Loader2 className="w-5 h-5 animate-spin"/> : "Link Account"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => setShowLinkForm(true)} className="w-full py-4 bg-transparent border-2 border-dashed border-white/20 text-white/70 rounded-2xl font-bold flex justify-center items-center hover:bg-white/5 transition-all mt-4">
+                  <LinkIcon className="w-5 h-5 mr-2" /> Link Another Child
+                </button>
               )}
             </div>
-          </div>
-
-          <div className="flex-1 min-h-[10vh]" />
-
-          <div className="flex flex-col items-center text-center space-y-1 z-10 relative pb-6">
-            <p className="text-xs font-medium text-white/70">Developed by - Pratosh Gharat</p>
-            <div className="relative h-14 w-44 flex items-center justify-center">
-              <Image src="/signature.png" alt="Pratosh Gharat Signature" fill sizes="176px" className="object-contain brightness-0 invert" />
-            </div>
-          </div>
-        </main>
-      );
-  }
-
-  // --- STATE 2: LINKING CHILD (AFTER SIGN IN) ---
-  return (
-    <main className="min-h-screen w-full flex flex-col items-center p-6 text-white overflow-y-auto [&::-webkit-scrollbar]:hidden">
-      
-      <div className="flex-1 min-h-[4vh]" />
-
-      <div className="w-full max-w-md flex flex-col items-center z-50 relative">
-        <div className="w-full flex items-center mb-10 relative">
-          
-          <button 
-            onClick={handleBack}
-            className="absolute left-0 p-3 rounded-2xl bg-white/[0.05] border border-white/[0.1] hover:bg-white/[0.1] transition-colors backdrop-blur-xl shadow-lg"
-          >
-            <ArrowLeft className="w-6 h-6 text-white" />
-          </button>
-
-          <div className="w-full flex flex-col items-center mt-4">
-            <div className="p-4 rounded-[1.25rem] bg-white/[0.03] border border-white/[0.08] backdrop-blur-[40px] shadow-[0_8px_32px_0_rgba(0,0,0,0.3)] mb-5">
-              <Users className="w-12 h-12 text-[#D0BCFF]" />
-            </div>
-            <h1 className="text-3xl font-bold tracking-tight">Link Your Child</h1>
-            <p className="text-white/50 text-sm mt-2 text-center px-4">
-              {!generatedOtp 
-                ? "Enter your child's official college email address to request a secure link."
-                : "A notification has been sent to your child's portal."}
-            </p>
-          </div>
-        </div>
-
-        {!generatedOtp ? (
-          <div className="w-full p-8 rounded-[2rem] bg-white/[0.03] backdrop-blur-[40px] border border-white/[0.08] shadow-[0_8px_32px_0_rgba(0,0,0,0.4)] space-y-6">
-            
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-2 ml-1">Student Email</label>
-              <input 
-                type="email" 
-                value={email} 
-                onChange={e => setEmail(e.target.value)} 
-                placeholder="" 
-                className="w-full bg-black/20 border border-white/10 rounded-2xl py-4 px-4 text-white focus:ring-2 focus:ring-[#D0BCFF]/50 outline-none transition-all placeholder:text-white/20"
-              />
-            </div>
-
-            <button 
-              onClick={generateCode} 
-              disabled={isLoading || !parentData}
-              className="w-full py-4 bg-[#D0BCFF] text-[#2A1B4E] rounded-2xl font-bold text-lg flex items-center justify-center disabled:opacity-50 transition-all hover:scale-[1.02] shadow-[0_0_20px_rgba(208,188,255,0.25)]"
-            >
-              {isLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : "Generate Link Code"}
-            </button>
-
-            {error && <p className="text-red-400 text-sm text-center font-medium bg-red-500/10 py-3 px-4 rounded-xl border border-red-500/20">{error}</p>}
-          </div>
-        ) : (
-          <div className="w-full p-8 rounded-[2rem] bg-white/[0.03] backdrop-blur-[40px] border border-white/[0.08] shadow-[0_8px_32px_0_rgba(0,0,0,0.4)] space-y-6 text-center">
-            
-            <p className="text-white/70 text-sm">Ask them to accept it and enter this code:</p>
-            
-            <div className="py-6 bg-black/30 rounded-2xl border border-white/10 my-4">
-              <h1 className="text-5xl font-extrabold tracking-[12px] text-[#D0BCFF] ml-3">{generatedOtp}</h1>
-            </div>
-
-            <div className="flex items-center justify-center space-x-2 text-sm">
-              <span className="text-white/50">Code expires in:</span>
-              <span className="font-bold text-[#FF453A] bg-[#FF453A]/10 px-3 py-1 rounded-lg border border-[#FF453A]/20">
-                {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
-              </span>
-            </div>
-
-            {error && <p className="text-red-400 text-sm text-center font-medium bg-red-500/10 py-3 px-4 rounded-xl border border-red-500/20">{error}</p>}
-          </div>
+          </>
         )}
       </div>
-
-      <div className="flex-1 min-h-[10vh]" />
-
-      <div className="flex flex-col items-center text-center space-y-1 z-10 relative pb-6">
-        <p className="text-xs font-medium text-white/70">Developed by - Pratosh Gharat</p>
-        <div className="relative h-14 w-44 flex items-center justify-center">
-          <Image src="/signature.png" alt="Pratosh Gharat Signature" fill sizes="176px" className="object-contain brightness-0 invert" />
-        </div>
-      </div>
-
     </main>
   );
 }

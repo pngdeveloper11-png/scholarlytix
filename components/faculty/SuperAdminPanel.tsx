@@ -40,7 +40,8 @@ export default function SuperAdminPanel({ isDark, onClose }: { isDark: boolean, 
     const unsubFaculty = onSnapshot(collection(db, 'approved_faculty_emails'), (snap) => {
       const list = snap.docs
         .filter(doc => doc.id !== "pngdeveloper11@gmail.com")
-        .map(doc => ({ email: doc.id, ...doc.data() }))
+        // FIXED: Added (doc.data() as any)
+        .map(doc => ({ email: doc.id, ...(doc.data() as any) }))
         .sort((a: any, b: any) => a.name?.localeCompare(b.name));
       setFacultyList(list);
     });

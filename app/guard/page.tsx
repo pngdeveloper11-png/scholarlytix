@@ -122,8 +122,8 @@ export default function GuardPortal() {
         <div className="absolute inset-0 z-0 opacity-60"><DynamicHueBackground theme="indigo" /></div>
         
         <div className="z-10 flex flex-col items-center max-w-sm w-full bg-[#111]/80 backdrop-blur-2xl border border-white/10 p-8 rounded-[2rem] shadow-2xl">
-          <div className="w-16 h-16 bg-orange-500/20 border border-orange-500/30 rounded-2xl flex items-center justify-center mb-6">
-            <Lock className="w-8 h-8 text-orange-400" />
+          <div className="w-16 h-16 bg-[#D0BCFF]/20 border border-[#D0BCFF]/30 rounded-2xl flex items-center justify-center mb-6">
+            <Lock className="w-8 h-8 text-[#D0BCFF]" />
           </div>
           <h2 className="text-2xl font-black mb-2 text-center">Security Portal</h2>
           <p className="opacity-60 mb-8 text-sm text-center">Enter the 6-digit guard access code to unlock the scanner.</p>
@@ -133,14 +133,14 @@ export default function GuardPortal() {
             maxLength={6} 
             value={pinInput} 
             onChange={(e) => setPinInput(e.target.value.replace(/\D/g, ''))} 
-            className="w-full text-center text-3xl tracking-[0.5em] bg-black/50 border border-white/10 rounded-2xl p-5 focus:ring-2 focus:ring-orange-500 outline-none mb-6 text-white placeholder:text-white/20" 
+            className="w-full text-center text-3xl tracking-[0.5em] bg-black/50 border border-white/10 rounded-2xl p-5 focus:ring-2 focus:ring-[#D0BCFF] outline-none mb-6 text-white placeholder:text-white/20" 
             placeholder="••••••" 
           />
           
           <button 
             onClick={handleUnlock} 
             disabled={isVerifying || pinInput.length !== 6}
-            className="w-full py-4 bg-orange-500 text-white rounded-2xl font-bold text-lg hover:bg-orange-600 transition-all shadow-[0_0_20px_rgba(249,115,22,0.4)] disabled:opacity-50 flex justify-center items-center"
+            className="w-full py-4 bg-[#D0BCFF] text-[#2A1B4E] rounded-2xl font-bold text-lg hover:scale-[1.02] transition-transform shadow-[0_0_20px_rgba(208,188,255,0.4)] disabled:opacity-50 flex justify-center items-center"
           >
             {isVerifying ? <Loader2 className="w-6 h-6 animate-spin" /> : "Unlock"}
           </button>
@@ -159,12 +159,12 @@ export default function GuardPortal() {
       
       <header className="w-full bg-[#111] border-b border-white/10 p-4 flex justify-between items-center z-50 shadow-lg">
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-orange-500/20 rounded-xl border border-orange-500/30">
-            <ShieldCheck className="w-6 h-6 text-orange-500" />
+          <div className="p-2 bg-[#D0BCFF]/20 rounded-xl border border-[#D0BCFF]/30">
+            <ShieldCheck className="w-6 h-6 text-[#D0BCFF]" />
           </div>
           <div>
             <h1 className="font-bold text-lg leading-tight">Security Portal</h1>
-            <p className="text-xs text-orange-500 font-medium">Gate Pass Scanner</p>
+            <p className="text-xs text-[#D0BCFF] font-medium">Gate Pass Scanner</p>
           </div>
         </div>
         <button onClick={lockPortal} className="p-2 bg-white/10 text-white hover:bg-red-500/20 hover:text-red-500 rounded-xl transition-colors">
@@ -190,7 +190,7 @@ export default function GuardPortal() {
               </div>
               <div className="absolute bottom-6 left-0 right-0 flex justify-center">
                 <div className="px-5 py-3 bg-black/60 backdrop-blur-md rounded-full border border-white/10 flex items-center gap-2">
-                  <ScanLine className="w-5 h-5 text-orange-400" />
+                  <ScanLine className="w-5 h-5 text-[#D0BCFF]" />
                   <span className="text-sm font-bold text-white">Point at Gate Pass QR</span>
                 </div>
               </div>

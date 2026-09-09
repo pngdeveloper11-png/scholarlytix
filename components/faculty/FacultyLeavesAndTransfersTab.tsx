@@ -6,6 +6,7 @@ import { db } from '../../lib/firebase';
 import { useAuth } from '../../app/context/AuthContext';
 import { FacultyLeaveApplication, ProxyRequest, TimetableEntry } from '../../types';
 import { FileText, Plus, CheckCircle, XCircle, Clock, ShieldAlert, Loader2, Calendar } from 'lucide-react';
+import GlassDropdown from '../GlassDropdown';
 
 const LEAVE_OPTIONS = ["Casual Leave", "Earned Leave", "Medical Leave", "Duty Leave", "Study Leave", "Compensatory Off", "Without Pay Leave"];
 
@@ -68,7 +69,8 @@ export default function FacultyLeavesAndTransfersTab({
 
     // 1. My Leaves
     const unsubMyLeaves = onSnapshot(query(collection(db, "faculty_leaves"), where("facultyUid", "==", currentUid)), (snap) => {
-      setMyLeaves(snap.docs.map(d => ({ id: d.id, ...d.data() } as FacultyLeaveApplication)).sort((a, b) => b.appliedAt - a.appliedAt));
+      // FIXED: Added (d.data() as any)
+      setMyLeaves(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as FacultyLeaveApplication)).sort((a, b) => b.appliedAt - a.appliedAt));
     });
 
     // 2. Admin Views
@@ -79,7 +81,8 @@ export default function FacultyLeavesAndTransfersTab({
         : role?.replace("HOD|", "").split(",") || [];
 
       unsubAdmin = onSnapshot(collection(db, "faculty_leaves"), (snap) => {
-        const allLeaves = snap.docs.map(d => ({ id: d.id, ...d.data() } as FacultyLeaveApplication));
+        // FIXED: Added (d.data() as any)
+        const allLeaves = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as FacultyLeaveApplication));
         
         setPendingLeaves(allLeaves.filter(app => {
           if (app.status !== "PENDING") return false;
@@ -96,14 +99,15 @@ export default function FacultyLeavesAndTransfersTab({
 
     // 3. Proxy Market
     const unsubProxies = onSnapshot(collection(db, "proxy_requests"), (snap) => {
-      const allReqs = snap.docs.map(d => ({ id: d.id, ...d.data() } as ProxyRequest));
+      // FIXED: Added (d.data() as any)
+      const allReqs = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as ProxyRequest));
       setOpenProxies(allReqs.filter(req => myBranches.includes(req.branch) || myBranches.length === 0).sort((a, b) => b.timestamp - a.timestamp));
     });
 
     return () => { unsubMyLeaves(); unsubAdmin(); unsubProxies(); };
   }, [currentUid, role, isAnyAdmin]);
 
-  // Helper: Trigger Push Notification (Hits our Next.js API route that we will build in Phase 5)
+  // Helper: Trigger Push Notification
   const triggerPush = async (topic: string, title: string, message: string) => {
     try {
       await fetch('/api/send-fcm', {
@@ -493,7 +497,8 @@ function AuditLogCard({ app, cardBg, textStyle, formatDate }: { app: FacultyLeav
       import('firebase/firestore').then(({ getDocs, query, collection, where }) => {
         const q = query(collection(db, "proxy_requests"), where("requestedByUid", "==", app.facultyUid), where("lectureDate", "==", app.startDate));
         getDocs(q).then(snap => {
-          setClaimedProxies(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProxyRequest)));
+          // FIXED: Added (d.data() as any)
+          setClaimedProxies(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as ProxyRequest)));
         });
       });
     };
