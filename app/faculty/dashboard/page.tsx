@@ -26,6 +26,7 @@ import FacultyNoticeBoardTab from '@/components/faculty/FacultyNoticeBoardTab';
 import FacultyGatePassTab from '@/components/faculty/FacultyGatePassTab';
 import FacultyLeavesAndTransfersTab from '@/components/faculty/FacultyLeavesAndTransfersTab';
 import SuperAdminPanel from '@/components/faculty/SuperAdminPanel';
+import BugCenterPanel from '@/components/faculty/BugCenterPanel';
 
 const SUBJECTS_DICT: Record<string, string[]> = {
   "Semester 3_IT": ["Applied Mathematics Thinking-I", "Advance Data Structure and Analysis", "Database Management System and Application", "Automata Theory", "Full Stack Java Programming", "Entrepreneurship Development", "Environmental Science", "Financial Management"],
@@ -47,6 +48,37 @@ const parseTimeToMinutes = (timeStr: String) => {
   if (isPm && h < 12) h += 12;
   if (!isPm && h === 12) h = 0;
   return (h * 60) + m;
+};
+
+// COMPRESSOR FOR TIMETABLE EXTRACTOR
+const compressImage = async (file: File): Promise<File> => {
+  if (!file.type.startsWith('image/')) return file; 
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_DIM = 1800; 
+        let { width, height } = img;
+        if (width > height) {
+          if (width > MAX_DIM) { height = Math.round((height * MAX_DIM) / width); width = MAX_DIM; }
+        } else {
+          if (height > MAX_DIM) { width = Math.round((width * MAX_DIM) / height); height = MAX_DIM; }
+        }
+        canvas.width = width; canvas.height = height;
+        canvas.getContext('2d')?.drawImage(img, 0, 0, width, height);
+        canvas.toBlob((blob) => {
+          if (blob) resolve(new File([blob], file.name.replace(/\.[^/.]+$/, ".jpg"), { type: 'image/jpeg' }));
+          else resolve(file);
+        }, 'image/jpeg', 0.85); 
+      };
+      img.onerror = () => resolve(file);
+    };
+    reader.onerror = () => resolve(file);
+  });
 };
 
 export default function FacultyDashboard() {
@@ -85,6 +117,7 @@ export default function FacultyDashboard() {
   
   // HOD Settings Modals
   const [showSuperAdminPanel, setShowSuperAdminPanel] = useState(false);
+  const [showBugCenter, setShowBugCenter] = useState(false);
   const [showGuardPinModal, setShowGuardPinModal] = useState(false);
   const [guardPin, setGuardPin] = useState("");
   
@@ -109,6 +142,7 @@ export default function FacultyDashboard() {
       setShowManageTimetableModal(false);
       setShowTimetableModal(false);
       setShowSuperAdminPanel(false);
+      setShowBugCenter(false);
       setDirectMarkData(null);
     };
     window.addEventListener("popstate", handlePopState);
@@ -398,7 +432,7 @@ export default function FacultyDashboard() {
               title="User Reports & Bug Center" 
               subtitle="Inspect user bug reports, attachments, and change ticket statuses." 
               isDark={isDark}
-              onClick={() => showAlert("Bug Center", "Navigating to Bug Center... (Full UI Pending Deployment)")} 
+              onClick={() => { window.history.pushState(null, ""); setShowBugCenter(true); }} 
             />
 
             {isHod && (
@@ -512,6 +546,11 @@ export default function FacultyDashboard() {
         {/* Phase 3 Admin Panel Injection */}
         {showSuperAdminPanel && (
           <SuperAdminPanel isDark={isDark} onClose={() => { setShowSuperAdminPanel(false); window.history.back(); }} />
+        )}
+
+        {/* Bug Center Injection */}
+        {showBugCenter && (
+          <BugCenterPanel isDark={isDark} onClose={() => { setShowBugCenter(false); window.history.back(); }} />
         )}
       </main>
     );
@@ -747,7 +786,7 @@ function ManageTimetableModal({ onDismiss, modalBg, onShowAlert }: { onDismiss: 
     setIsAnalyzing(true);
     try {
       const formData = new FormData();
-      formData.append('file', selectedFile);
+      formData.append('file', await compressImage(selectedFile));
 
       const res = await fetch('/api/extract-timetable', { method: 'POST', body: formData });
       if (!res.ok) throw new Error("Google Gemini AI extraction failed or timed out.");
@@ -796,7 +835,7 @@ function UploadTimetableModal({ onDismiss, modalBg, isDark, onShowAlert }: { onD
     setIsUploading(true);
     try {
       const formData = new FormData();
-      formData.append('file', selectedFile);
+      formData.append('file', await compressImage(selectedFile));
       formData.append('fileName', `${upSem}_${upBranch}_Timetable`);
       formData.append('path', `timetables`);
 
