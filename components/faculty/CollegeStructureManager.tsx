@@ -21,7 +21,7 @@ export default function CollegeStructureManager({ isDark, onClose }: { isDark: b
     
     const unsubscribe = onSnapshot(docRef, (snap) => {
       if (snap.exists()) {
-        const data = snap.data();
+        const data = snap.data() as any;
         const rawList = data[classKey] || [];
         setCurrentDivisions(rawList);
       } else {

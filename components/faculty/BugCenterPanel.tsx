@@ -4,14 +4,18 @@ import React, { useState, useEffect } from 'react';
 import { collection, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { Bug, X, CheckCircle, Clock, Trash2, ShieldAlert } from 'lucide-react';
-import { motion } from 'framer-motion';
 
 export default function BugCenterPanel({ isDark, onClose }: { isDark: boolean, onClose: () => void }) {
   const [reports, setReports] = useState<any[]>([]);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "user_reports"), (snap) => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => b.timestamp - a.timestamp);
+      const data = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).sort((a: any, b: any) => {
+        // Safe timestamp fallback parser
+        const timeA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp || 0);
+        const timeB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp || 0);
+        return timeB - timeA;
+      });
       setReports(data);
     });
     return () => unsub();
@@ -59,42 +63,45 @@ export default function BugCenterPanel({ isDark, onClose }: { isDark: boolean, o
               <p className="text-sm">Everything is running smoothly.</p>
             </div>
           ) : (
-            reports.map((report) => (
-              <div key={report.id} className={`p-6 rounded-2xl border ${cardBg} flex flex-col md:flex-row gap-6`}>
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border ${
-                      report.status === 'Resolved' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
-                      report.status === 'In Progress' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' :
-                      'bg-red-500/20 text-red-400 border-red-500/30'
-                    }`}>
-                      {report.status || 'Open'}
-                    </span>
-                    <span className="text-xs opacity-50">{new Date(report.timestamp).toLocaleString()}</span>
+            reports.map((report) => {
+              const timestampMs = report.timestamp?.seconds ? report.timestamp.seconds * 1000 : (report.timestamp || Date.now());
+              return (
+                <div key={report.id} className={`p-6 rounded-2xl border ${cardBg} flex flex-col md:flex-row gap-6`}>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-2">
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border ${
+                        report.status === 'Resolved' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
+                        report.status === 'In Progress' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' :
+                        'bg-red-500/20 text-red-400 border-red-500/30'
+                      }`}>
+                        {report.status || 'Open'}
+                      </span>
+                      <span className="text-xs opacity-50">{new Date(timestampMs).toLocaleString()}</span>
+                    </div>
+                    <h3 className="text-xl font-bold mb-2">{report.title}</h3>
+                    <p className="text-sm opacity-80 whitespace-pre-line bg-black/20 p-4 rounded-xl border border-white/5">{report.description}</p>
+                    
+                    <div className="mt-4 flex items-center gap-2 text-xs opacity-60">
+                      <span>Reported by: <strong>{report.reportedBy}</strong></span>
+                      <span>•</span>
+                      <span>{report.userRole}</span>
+                    </div>
                   </div>
-                  <h3 className="text-xl font-bold mb-2">{report.title}</h3>
-                  <p className="text-sm opacity-80 whitespace-pre-line bg-black/20 p-4 rounded-xl border border-white/5">{report.description}</p>
-                  
-                  <div className="mt-4 flex items-center gap-2 text-xs opacity-60">
-                    <span>Reported by: <strong>{report.reportedBy}</strong></span>
-                    <span>•</span>
-                    <span>{report.userRole}</span>
-                  </div>
-                </div>
 
-                <div className="flex md:flex-col gap-2 justify-center border-t md:border-t-0 md:border-l border-white/10 pt-4 md:pt-0 md:pl-6 min-w-[140px]">
-                  <button onClick={() => updateStatus(report.id, 'In Progress')} className="flex-1 md:flex-none flex items-center justify-center gap-2 py-3 px-4 bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 rounded-xl font-bold text-sm transition-colors border border-orange-500/20">
-                    <Clock className="w-4 h-4" /> In Progress
-                  </button>
-                  <button onClick={() => updateStatus(report.id, 'Resolved')} className="flex-1 md:flex-none flex items-center justify-center gap-2 py-3 px-4 bg-green-500/10 text-green-400 hover:bg-green-500/20 rounded-xl font-bold text-sm transition-colors border border-green-500/20">
-                    <CheckCircle className="w-4 h-4" /> Resolve
-                  </button>
-                  <button onClick={() => deleteReport(report.id)} className="flex-1 md:flex-none flex items-center justify-center gap-2 py-3 px-4 bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded-xl font-bold text-sm transition-colors border border-red-500/20">
-                    <Trash2 className="w-4 h-4" /> Delete
-                  </button>
+                  <div className="flex md:flex-col gap-2 justify-center border-t md:border-t-0 md:border-l border-white/10 pt-4 md:pt-0 md:pl-6 min-w-[140px]">
+                    <button onClick={() => updateStatus(report.id, 'In Progress')} className="flex-1 md:flex-none flex items-center justify-center gap-2 py-3 px-4 bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 rounded-xl font-bold text-sm transition-colors border border-orange-500/20">
+                      <Clock className="w-4 h-4" /> In Progress
+                    </button>
+                    <button onClick={() => updateStatus(report.id, 'Resolved')} className="flex-1 md:flex-none flex items-center justify-center gap-2 py-3 px-4 bg-green-500/10 text-green-400 hover:bg-green-500/20 rounded-xl font-bold text-sm transition-colors border border-green-500/20">
+                      <CheckCircle className="w-4 h-4" /> Resolve
+                    </button>
+                    <button onClick={() => deleteReport(report.id)} className="flex-1 md:flex-none flex items-center justify-center gap-2 py-3 px-4 bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded-xl font-bold text-sm transition-colors border border-red-500/20">
+                      <Trash2 className="w-4 h-4" /> Delete
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>

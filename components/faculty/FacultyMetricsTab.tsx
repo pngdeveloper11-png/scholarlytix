@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { collection, onSnapshot, doc, writeBatch, getDocs, getDoc, deleteDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, writeBatch, getDocs, deleteDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase'; 
 import { useAuth } from '../../app/context/AuthContext';
 import { Loader2, UploadCloud, Users, Trash2, Check, Edit } from 'lucide-react'; 
@@ -260,10 +260,10 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
       if (snap.exists()) setGlobalStructure(snap.data() as CollegeStructureConfig);
     });
     const unsubRoster = onSnapshot(collection(db, "students_directory"), (snap) => {
-      setRoster(snap.docs.map(d => ({ id: d.id, ...d.data() } as StudentData)));
+      setRoster(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as StudentData)));
     });
     const unsubHistory = onSnapshot(collection(db, "attendance_history"), (snap) => {
-      setHistory(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setHistory(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })));
     });
 
     return () => { unsubConfig(); unsubStruct(); unsubRoster(); unsubHistory(); };
@@ -311,10 +311,12 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
       studentBatch = matched?.name || "Unknown";
     }
 
-    const validLectures = matchingLectures.filter(l => 
-        l.timestamp >= (student.admissionTimestamp || 0) &&
-        (l.batch === "All" || l.batch === studentBatch)
-    );
+    const validLectures = matchingLectures.filter(l => {
+        // FIXED: Added (as any) to conductedAt fallback to resolve strict TypeScript interface errors
+        const lTime = (l as any).timestamp?.seconds ? (l as any).timestamp.seconds * 1000 : ((l as any).timestamp || (l as any).conductedAt || 0);
+        const sTime = (student as any).admissionTimestamp?.seconds ? (student as any).admissionTimestamp.seconds * 1000 : ((student as any).admissionTimestamp || 0);
+        return lTime >= sTime && (l.batch === "All" || l.batch === studentBatch);
+    });
     
     const studentTotalConducted = validLectures.length;
     const attended = validLectures.filter(l => (l.presentStudentIds || []).includes(student.id)).length;

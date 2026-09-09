@@ -23,7 +23,6 @@ export async function POST(request: Request) {
   } catch (error: any) { return NextResponse.json({ error: error.message }, { status: 500 }); }
 }
 
-// Added to match Android's sync deletion
 export async function DELETE(request: Request) {
   try {
     const { url } = await request.json();

@@ -3,9 +3,9 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth';
-import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, addDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
-import { Loader2, ArrowLeft, User, Link as LinkIcon } from 'lucide-react';
+import { Loader2, ArrowLeft, User, Link as LinkIcon, CheckCircle } from 'lucide-react';
 import DynamicHueBackground from '@/components/DynamicHueBackground';
 
 export default function ParentLinking() {
@@ -15,7 +15,6 @@ export default function ParentLinking() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [children, setChildren] = useState<any[]>([]);
 
-  // Link Form State
   const [showLinkForm, setShowLinkForm] = useState(false);
   const [rollNo, setRollNo] = useState("");
   const [semester, setSemester] = useState("Semester 3");
@@ -47,52 +46,55 @@ export default function ParentLinking() {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' }); 
       await signInWithPopup(auth, provider);
-    } catch (e) {
-      console.error(e);
-      setIsProcessing(false);
-    }
+    } catch (e) { setIsProcessing(false); }
   };
 
   const handleLinkChild = async () => {
     if (!rollNo || !semester) return alert("Fill all fields.");
     setIsProcessing(true);
     try {
-      // Security Check: To prevent brute force linking, a real app would require a unique PIN here.
-      // For this demo, we match exactly by Roll No & Sem.
-      const q = query(collection(db, "students_directory"), 
-        where("rollNo", "==", parseInt(rollNo)), 
-        where("semester", "==", semester)
-      );
+      // Find the target student
+      const q = query(collection(db, "students_directory"), where("rollNo", "==", parseInt(rollNo)), where("semester", "==", semester));
       const snap = await getDocs(q);
       
       if (snap.empty) {
-        alert("No student found matching this criteria.");
+        alert("No student found matching this Roll No and Semester.");
       } else {
         const studentDoc = snap.docs[0];
-        if (studentDoc.data().linkedParentEmail) {
-           alert("This student is already linked to another parent account.");
+        const studentData = studentDoc.data();
+
+        if (studentData.linkedParentEmail) {
+           alert("This student is already linked to a parent account.");
         } else {
-           await updateDoc(doc(db, "students_directory", studentDoc.id), {
-             linkedParentEmail: user.email.toLowerCase().trim()
-           });
-           alert("Child successfully linked!");
-           setShowLinkForm(false);
-           fetchLinkedChildren(user.email.toLowerCase().trim());
+           // Check if a request already exists
+           const reqQ = query(collection(db, "link_requests"), where("studentId", "==", studentDoc.id), where("parentEmail", "==", user.email.toLowerCase().trim()), where("status", "==", "PENDING"));
+           const reqSnap = await getDocs(reqQ);
+           
+           if (!reqSnap.empty) {
+             alert("A link request is already pending for this student.");
+           } else {
+             // Submit formal link request to student
+             await addDoc(collection(db, "link_requests"), {
+               studentId: studentDoc.id,
+               studentName: studentData.fullName,
+               parentEmail: user.email.toLowerCase().trim(),
+               rollNo: parseInt(rollNo),
+               semester: semester,
+               status: "PENDING",
+               timestamp: Date.now()
+             });
+             alert("Link request successfully sent! Please wait for the student to approve it in their portal.");
+             setShowLinkForm(false);
+           }
         }
       }
-    } catch (e) {
-      alert("Linking failed.");
-    } finally {
-      setIsProcessing(false);
-    }
+    } catch (e) { alert("Linking failed. Check connection."); } 
+    finally { setIsProcessing(false); }
   };
 
   const selectChild = (child: any) => {
     localStorage.setItem("academiq_student_session", JSON.stringify({
-      studentId: child.id,
-      name: child.fullName,
-      semester: child.semester,
-      branch: child.branch
+      studentId: child.id, name: child.fullName, semester: child.semester, branch: child.branch, rollNo: child.rollNo
     }));
     router.push('/parent/dashboard');
   };
@@ -109,7 +111,6 @@ export default function ParentLinking() {
 
       <div className="z-10 flex flex-col items-center max-w-md w-full">
         {!user ? (
-          // --- LOGIN SCREEN ---
           <>
             <div className="w-20 h-20 bg-[#D0BCFF]/20 border border-[#D0BCFF]/30 rounded-3xl flex items-center justify-center mb-6 shadow-2xl backdrop-blur-xl">
               <User className="w-10 h-10 text-[#D0BCFF]" />
@@ -123,7 +124,6 @@ export default function ParentLinking() {
             </div>
           </>
         ) : (
-          // --- SELECT CHILD SCREEN ---
           <>
             <h1 className="text-3xl font-black mb-2 text-center tracking-tight">Select Child Profile</h1>
             <p className="text-white/60 text-sm mb-10 text-center">Logged in as {user.email}</p>
@@ -148,7 +148,7 @@ export default function ParentLinking() {
                   <div className="flex gap-3 pt-2">
                     <button onClick={() => setShowLinkForm(false)} className="flex-1 py-3 bg-white/5 rounded-xl font-bold">Cancel</button>
                     <button onClick={handleLinkChild} disabled={isProcessing} className="flex-[2] py-3 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold flex justify-center items-center">
-                      {isProcessing ? <Loader2 className="w-5 h-5 animate-spin"/> : "Link Account"}
+                      {isProcessing ? <Loader2 className="w-5 h-5 animate-spin"/> : "Request Access"}
                     </button>
                   </div>
                 </div>

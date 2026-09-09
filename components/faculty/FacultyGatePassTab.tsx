@@ -1,282 +1,209 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { collection, onSnapshot, doc, setDoc, query, where, getDocs } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
-import { useAuth } from '../../app/context/AuthContext';
-import { Search, User, ShieldCheck, Clock, Ticket, Loader2, X, AlertTriangle } from 'lucide-react';
-import GlassDropdown from '../GlassDropdown';
-import { StudentData } from '../../types';
+import React, { useState, useEffect } from 'react';
+import { collection, query, onSnapshot, doc, setDoc, updateDoc } from 'firebase/firestore';
+import { db, auth } from '@/lib/firebase';
+import { ShieldCheck, Search, Loader2, CheckCircle, XCircle, FileText } from 'lucide-react';
 
-const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4"];
-const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
+const DURATION_OPTIONS = [
+  { label: "1 Hour", ms: 3600000 },
+  { label: "2 Hours", ms: 7200000 },
+  { label: "4 Hours", ms: 14400000 },
+  { label: "Full Day", ms: 28800000 }
+];
 
-export default function FacultyGatePassTab({ isDark = true }: { isDark?: boolean }) {
-  const { user, role } = useAuth();
-  const isHod = role?.startsWith("HOD|") || role === "SUPER_ADMIN" || role === "DIRECTOR" || role === "PRINCIPAL" || role === "REGISTRAR";
-
-  const [activeTab, setActiveTab] = useState<"Issue" | "Audit">("Issue");
-  const [roster, setRoster] = useState<StudentData[]>([]);
-  const [auditLogs, setAuditLogs] = useState<any[]>([]);
-
-  // Issue Tab State
+export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
+  // Added "leaves" to review student leave applications
+  const [activeSubTab, setActiveSubTab] = useState<"issue" | "history" | "leaves">("issue");
+  
+  const [students, setStudents] = useState<any[]>([]);
+  const [issuedHistory, setIssuedHistory] = useState<any[]>([]);
+  const [studentLeaves, setStudentLeaves] = useState<any[]>([]);
+  
+  const [selectedStudent, setSelectedStudent] = useState<any | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedSem, setSelectedSem] = useState(AVAILABLE_SEMESTERS[2]);
-  const [selectedBranch, setSelectedBranch] = useState(AVAILABLE_BRANCHES[0]);
-
-  // Dialog State
-  const [selectedStudent, setSelectedStudent] = useState<StudentData | null>(null);
-  const [passReason, setPassReason] = useState("Medical Emergency");
+  const [reason, setReason] = useState("Medical Emergency");
+  const [customReason, setCustomReason] = useState("");
+  const [durationMs, setDurationMs] = useState(DURATION_OPTIONS[1].ms);
   const [isIssuing, setIsIssuing] = useState(false);
 
-  const textColor = isDark ? 'text-white' : 'text-gray-900';
-  const cardBg = isDark ? 'bg-white/[0.05] border-white/10' : 'bg-gray-50 border-gray-200';
+  const currentUser = auth.currentUser;
+  const facultyName = currentUser?.displayName || localStorage.getItem("academiq_faculty_name") || "Faculty Mentor";
 
   useEffect(() => {
-    const unsubRoster = onSnapshot(collection(db, "students_directory"), (snap) => {
-      setRoster(snap.docs.map(d => ({ id: d.id, ...d.data() } as StudentData)));
+    const unsubStudents = onSnapshot(collection(db, "students_directory"), (snap) => {
+      setStudents(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })));
     });
 
-    // Only load today's logs for the Audit tab
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const q = query(collection(db, "gate_passes"), where("issuedAt", ">=", today.getTime()));
-    
-    const unsubAudit = onSnapshot(q, (snap) => {
-      setAuditLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => b.issuedAt - a.issuedAt));
+    const unsubPasses = onSnapshot(collection(db, "gate_passes"), (snap) => {
+      const allPasses = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+      const myPasses = allPasses.filter(p => p.facultyUid === currentUser?.uid || p.issuedByName === facultyName || p.issuedBy === facultyName);
+      myPasses.sort((a, b) => (b.issuedAt || 0) - (a.issuedAt || 0));
+      setIssuedHistory(myPasses);
     });
 
-    return () => { unsubRoster(); unsubAudit(); };
-  }, []);
+    // Real-time listener for Student Leave Applications
+    const unsubLeaves = onSnapshot(collection(db, "leave_applications"), (snap) => {
+      const allLeaves = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+      // We show pending and recent processed leaves
+      allLeaves.sort((a, b) => (b.appliedAt || 0) - (a.appliedAt || 0));
+      setStudentLeaves(allLeaves);
+    });
 
-  const filteredStudents = useMemo(() => {
-    return roster
-      .filter(s => s.semester === selectedSem && s.branch === selectedBranch)
-      .filter(s => {
-        if (!searchQuery) return true;
-        const q = searchQuery.toLowerCase();
-        return s.fullName.toLowerCase().includes(q) || String(s.rollNo).includes(q) || s.grNumber?.toLowerCase().includes(q);
-      })
-      .sort((a, b) => a.rollNo - b.rollNo);
-  }, [roster, selectedSem, selectedBranch, searchQuery]);
+    return () => { unsubStudents(); unsubPasses(); unsubLeaves(); };
+  }, [currentUser?.uid, facultyName]);
 
   const handleIssuePass = async () => {
-    if (!selectedStudent) return;
+    if (!selectedStudent) return alert("Please select a student.");
+    const finalReason = reason === "Other" ? customReason.trim() : reason;
+    if (!finalReason) return alert("Specify a reason.");
+
     setIsIssuing(true);
-
     try {
-      // Generate an 8-character secure alphanumeric pass ID
-      const passId = Math.random().toString(36).substring(2, 10).toUpperCase();
+      const passToken = Array.from({ length: 10 }, () => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".charAt(Math.floor(Math.random() * 32))).join('');
+      const now = Date.now();
       
-      const now = new Date();
-      const expiresAt = new Date(now);
-      expiresAt.setHours(23, 59, 59, 999); // Expires at 11:59 PM today
-
-      await setDoc(doc(db, "gate_passes", passId), {
-        passId,
+      await setDoc(doc(db, "gate_passes", passToken), {
+        passId: passToken,
         studentId: selectedStudent.id,
         studentName: selectedStudent.fullName,
+        rollNo: selectedStudent.rollNo,
         branch: selectedStudent.branch,
         semester: selectedStudent.semester,
-        rollNo: selectedStudent.rollNo,
-        reason: passReason,
-        issuedBy: user?.displayName || "Admin",
-        issuedAt: now.getTime(),
-        expiresAt: expiresAt.getTime(),
-        status: "ACTIVE" // Can be ACTIVE, USED, or EXPIRED
+        reason: finalReason,
+        issuedBy: facultyName,
+        issuedByName: facultyName,
+        facultyUid: currentUser?.uid || "",
+        issuedAt: now,
+        expiresAt: now + durationMs,
+        status: "ACTIVE"
       });
-
-      // Push Notification to the specific student (assuming we link by GR or Email in Phase 5 API)
-      await fetch('/api/send-fcm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          targetTopic: `student_${selectedStudent.id}`, // If individual routing is configured
-          title: "🎫 Gate Pass Issued",
-          message: `Your digital gate pass has been issued and is valid until 11:59 PM today.`,
-          targetTab: "GatePass"
-        })
-      });
-
-      alert(`Pass Issued! Pass ID: ${passId}`);
-      setSelectedStudent(null);
-      setSearchQuery("");
-    } catch (e) {
-      alert("Failed to issue pass.");
-    } finally {
-      setIsIssuing(false);
-    }
+      alert(`Gate Pass issued to ${selectedStudent.fullName}.`);
+      setSelectedStudent(null); setSearchQuery(""); setCustomReason(""); setActiveSubTab("history");
+    } catch (e) { alert("Failed to issue pass."); } finally { setIsIssuing(false); }
   };
 
-  if (!isHod) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center py-20 text-center">
-        <ShieldCheck className="w-16 h-16 text-white/10 mb-4" />
-        <h2 className="text-xl font-bold text-white/50">Restricted Access</h2>
-        <p className="text-sm text-white/40 mt-2">Only HODs and Principals can issue digital gate passes.</p>
-      </div>
-    );
-  }
+  const handleRevokePass = async (passId: string) => {
+    if (!confirm("Revoke this active gate pass?")) return;
+    try { await updateDoc(doc(db, "gate_passes", passId), { status: "EXPIRED" }); } catch (e) { alert("Failed to revoke pass."); }
+  };
+
+  const handleLeaveApproval = async (leaveId: string, status: "APPROVED" | "REJECTED") => {
+    try {
+      await updateDoc(doc(db, "leave_applications", leaveId), { 
+        status: status,
+        mentorApproval: status === "APPROVED" ? facultyName : "REJECTED"
+      });
+    } catch (e) { alert("Action failed."); }
+  };
+
+  const filteredStudents = students.filter(s => s.fullName?.toLowerCase().includes(searchQuery.toLowerCase()) || s.rollNo?.toString().includes(searchQuery)).slice(0, 5);
+  const cardBg = isDark ? 'bg-white/[0.08] border-white/20 backdrop-blur-2xl' : 'bg-white border-black/10 shadow-lg';
 
   return (
-    <div className="w-full flex flex-col h-full relative pb-24">
-      {/* Top Tabs */}
-      <div className="flex overflow-x-auto gap-2 pb-4 mb-4 border-b border-white/10 no-scrollbar">
-        {["Issue Passes", "Gate Pass Audit Log"].map(tab => (
-          <button key={tab} onClick={() => setActiveTab(tab.split(' ')[0] as any)}
-            className={`whitespace-nowrap px-5 py-2.5 rounded-full font-bold text-sm transition-all ${
-              activeTab === tab.split(' ')[0] ? 'bg-white text-black' : `bg-transparent ${isDark ? 'text-gray-400 hover:text-white hover:bg-white/5' : 'text-gray-600 hover:bg-gray-100'}`
-            }`}
-          >
-            {tab}
-          </button>
-        ))}
+    <div className="w-full flex flex-col space-y-6 animate-in fade-in duration-300">
+      <div className="flex space-x-3 bg-white/5 p-1.5 rounded-2xl border border-white/10 w-fit overflow-x-auto">
+        <button onClick={() => setActiveSubTab("issue")} className={`px-5 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${activeSubTab === "issue" ? 'bg-[#D0BCFF] text-[#2A1B4E]' : 'opacity-60 hover:opacity-100 text-white'}`}>Issue Pass</button>
+        <button onClick={() => setActiveSubTab("history")} className={`px-5 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${activeSubTab === "history" ? 'bg-[#D0BCFF] text-[#2A1B4E]' : 'opacity-60 hover:opacity-100 text-white'}`}>History & Active</button>
+        <button onClick={() => setActiveSubTab("leaves")} className={`px-5 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all flex items-center gap-2 ${activeSubTab === "leaves" ? 'bg-[#D0BCFF] text-[#2A1B4E]' : 'opacity-60 hover:opacity-100 text-white'}`}>
+          Student Leaves {studentLeaves.filter(l => l.status === 'PENDING').length > 0 && <span className="bg-red-500 text-white w-5 h-5 rounded-full flex items-center justify-center text-[10px]">{studentLeaves.filter(l => l.status === 'PENDING').length}</span>}
+        </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto space-y-4 pr-2 [&::-webkit-scrollbar]:hidden">
-        
-        {/* --- ISSUE TAB --- */}
-        {activeTab === "Issue" && (
-          <div className="space-y-6">
-            <div>
-              <h2 className={`text-2xl font-bold ${textColor}`}>Issue Digital Gate Pass</h2>
-              <p className="text-sm text-[#D0BCFF] mt-1">Passes expire at 11:59 PM today. Track student 15-day quota below.</p>
-            </div>
-
+      {activeSubTab === "issue" && (
+        <div className={`p-6 md:p-8 rounded-[2rem] border ${cardBg} max-w-2xl space-y-6`}>
+          <div><h3 className="text-xl font-bold">Issue Student Gate Pass</h3><p className="text-sm opacity-60">Authorize digital pass for instant scanner verification at gate.</p></div>
+          <div>
             <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                <User className="h-5 w-5 text-white/40" />
+              <input type="text" placeholder="Search Student by Name or Roll No..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full bg-black/30 border border-white/10 rounded-2xl p-4 outline-none focus:border-[#D0BCFF]" />
+              <Search className="w-5 h-5 absolute right-4 top-4 opacity-40" />
+            </div>
+            {searchQuery && !selectedStudent && (
+              <div className="mt-2 bg-[#1b1b1b] border border-white/10 rounded-2xl overflow-hidden divide-y divide-white/5 shadow-2xl">
+                {filteredStudents.length === 0 ? <p className="p-4 text-xs opacity-50">No students matched.</p> : filteredStudents.map(s => (
+                    <div key={s.id} onClick={() => { setSelectedStudent(s); setSearchQuery(""); }} className="p-3.5 hover:bg-white/10 cursor-pointer flex justify-between items-center">
+                      <div><p className="font-bold text-sm text-white">{s.fullName}</p><p className="text-xs opacity-60">{s.branch} • Semester {s.semester} • Roll {s.rollNo}</p></div>
+                      <span className="text-xs font-bold text-[#D0BCFF]">Select</span>
+                    </div>
+                  ))
+                }
               </div>
-              <input 
-                type="text" 
-                value={searchQuery} 
-                onChange={(e) => setSearchQuery(e.target.value)} 
-                placeholder="Search any student by Name, Roll No, or GR No..." 
-                className="w-full bg-black/20 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-white focus:ring-2 focus:ring-white/50 outline-none transition-all placeholder:text-white/40" 
-              />
-            </div>
-
-            <div className="flex space-x-3 z-50 relative">
-              <GlassDropdown label="Sem" value={selectedSem} options={AVAILABLE_SEMESTERS} onChange={setSelectedSem} isDark={isDark} zIndex={60} />
-              <GlassDropdown label="Branch" value={selectedBranch} options={AVAILABLE_BRANCHES} onChange={setSelectedBranch} isDark={isDark} zIndex={50} />
-            </div>
-
-            <div className="space-y-3 pt-4">
-              {filteredStudents.length === 0 ? (
-                <p className="text-center text-white/40 py-10">No students found in {selectedSem} {selectedBranch}.</p>
-              ) : (
-                filteredStudents.map(student => (
-                  <div key={student.id} onClick={() => setSelectedStudent(student)} className={`p-4 rounded-2xl border ${cardBg} flex justify-between items-center cursor-pointer hover:bg-white/10 transition-colors`}>
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center font-bold text-white border border-white/20">
-                        {student.rollNo > 0 ? student.rollNo : '?'}
-                      </div>
-                      <div>
-                        <h4 className={`font-bold ${textColor}`}>{student.fullName}</h4>
-                        <p className="text-xs text-white/50">{student.grNumber ? `GR: ${student.grNumber}` : 'No GR Configured'}</p>
-                      </div>
-                    </div>
-                    <button className="px-4 py-2 bg-white/10 text-white rounded-xl text-xs font-bold hover:bg-white text-black transition-colors">Issue Pass</button>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* --- AUDIT LOG TAB --- */}
-        {activeTab === "Audit" && (
-          <div className="space-y-4">
-            <h2 className={`text-2xl font-bold mb-4 ${textColor}`}>Today's Activity</h2>
-            
-            {auditLogs.length === 0 ? (
-              <div className="py-20 text-center flex flex-col items-center">
-                <Ticket className="w-12 h-12 text-white/20 mb-3" />
-                <p className="text-white/50 text-[15px]">No passes issued today.</p>
-              </div>
-            ) : (
-              auditLogs.map(log => {
-                const timeStr = new Date(log.issuedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-                return (
-                  <div key={log.id} className={`p-5 rounded-2xl border ${cardBg} flex flex-col`}>
-                    <div className="flex justify-between items-start mb-3">
-                      <div>
-                        <h3 className={`font-bold text-lg ${textColor} leading-tight`}>{log.studentName}</h3>
-                        <p className="text-xs text-[#D0BCFF] mt-1">{log.semester} • {log.branch} • Roll {log.rollNo}</p>
-                      </div>
-                      <span className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-md border ${
-                        log.status === 'ACTIVE' ? 'bg-green-500/20 text-green-400 border-green-500/30' : 
-                        log.status === 'USED' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 
-                        'bg-red-500/20 text-red-400 border-red-500/30'
-                      }`}>
-                        {log.status}
-                      </span>
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-2 mb-3 bg-black/20 p-3 rounded-xl border border-white/5">
-                      <div>
-                        <p className="text-[10px] text-white/50 uppercase font-bold">Pass ID</p>
-                        <p className="text-sm text-white font-mono">{log.passId}</p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] text-white/50 uppercase font-bold">Reason</p>
-                        <p className="text-sm text-white">{log.reason}</p>
-                      </div>
-                    </div>
-
-                    <div className="flex justify-between items-center text-xs text-white/50 border-t border-white/5 pt-3">
-                      <span>Issued at {timeStr}</span>
-                      <span>By {log.issuedBy}</span>
-                    </div>
-                  </div>
-                );
-              })
             )}
           </div>
-        )}
-      </div>
 
-      {/* --- ISSUE PASS MODAL --- */}
-      {selectedStudent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-          <div className={`border p-6 rounded-[2rem] w-full max-w-md flex flex-col bg-[#111] border-white/10 shadow-2xl`}>
-            <div className="flex justify-between items-center mb-6">
-              <h2 className={`text-xl font-bold ${textColor} flex items-center`}><Ticket className="w-5 h-5 mr-2 text-white"/> Issue Pass</h2>
-              <button onClick={() => !isIssuing && setSelectedStudent(null)} className="text-white/50 hover:text-red-500"><X className="w-6 h-6"/></button>
+          {selectedStudent && (
+            <div className="p-4 bg-[#D0BCFF]/10 border border-[#D0BCFF]/30 rounded-2xl flex justify-between items-center">
+              <div><p className="text-xs text-[#D0BCFF] font-bold">Target Student Confirmed</p><p className="font-bold text-lg text-white">{selectedStudent.fullName}</p><p className="text-xs opacity-70">{selectedStudent.branch} • Roll {selectedStudent.rollNo}</p></div>
+              <button onClick={() => setSelectedStudent(null)} className="text-xs text-red-400 hover:underline">Change</button>
             </div>
-            
-            <div className="bg-white/5 p-4 rounded-xl border border-white/10 mb-6 flex items-center gap-4">
-              <div className="w-12 h-12 rounded-full bg-[#D0BCFF] flex items-center justify-center font-black text-[#2A1B4E] text-lg">
-                {selectedStudent.rollNo > 0 ? selectedStudent.rollNo : '?'}
-              </div>
-              <div>
-                <h3 className="font-bold text-lg text-white leading-tight">{selectedStudent.fullName}</h3>
-                <p className="text-xs text-white/60">{selectedStudent.semester} • {selectedStudent.branch}</p>
-              </div>
-            </div>
+          )}
 
-            <div className="space-y-4 mb-8 z-50 relative">
-              <GlassDropdown 
-                label="Reason for Departure" 
-                value={passReason} 
-                options={["Medical Emergency", "Official College Work", "Family Emergency", "Event / Competition", "Other"]} 
-                onChange={setPassReason} 
-                isDark={isDark} zIndex={100} 
-              />
-              
-              <div className="flex items-center gap-3 p-3 bg-red-500/10 border border-red-500/30 rounded-xl mt-4">
-                <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0" />
-                <p className="text-xs text-red-300 font-medium">This pass will expire automatically at 11:59 PM today and can only be scanned by guards once.</p>
-              </div>
-            </div>
-
-            <div className="flex space-x-3 mt-auto">
-              <button onClick={() => setSelectedStudent(null)} disabled={isIssuing} className="flex-1 py-3.5 bg-white/10 rounded-xl font-bold text-white disabled:opacity-50">Cancel</button>
-              <button onClick={handleIssuePass} disabled={isIssuing} className="flex-1 py-3.5 bg-white text-black rounded-xl font-bold hover:scale-[1.02] transition-transform disabled:opacity-50 flex justify-center items-center">
-                {isIssuing ? <Loader2 className="w-5 h-5 animate-spin" /> : "Generate Pass"}
-              </button>
+          <div>
+            <label className="text-xs font-bold uppercase opacity-60 mb-2 block">Reason</label>
+            <select value={reason} onChange={e => setReason(e.target.value)} className="w-full bg-black/30 border border-white/10 rounded-2xl p-4 outline-none focus:border-[#D0BCFF]">
+              <option value="Medical Emergency">Medical Emergency</option><option value="Personal / Family Emergency">Personal / Family Emergency</option><option value="Academic Official Duty">Academic Official Duty</option><option value="Early Leave (Approved)">Early Leave (Approved)</option><option value="Other">Other (Type below)</option>
+            </select>
+          </div>
+          {reason === "Other" && <input type="text" placeholder="Specify custom reason..." value={customReason} onChange={e => setCustomReason(e.target.value)} className="w-full bg-black/30 border border-white/10 rounded-2xl p-4 outline-none focus:border-[#D0BCFF]" />}
+          
+          <div>
+            <label className="text-xs font-bold uppercase opacity-60 mb-2 block">Valid Window</label>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {DURATION_OPTIONS.map(opt => <button key={opt.label} type="button" onClick={() => setDurationMs(opt.ms)} className={`p-3 rounded-xl border text-xs font-bold transition-all ${durationMs === opt.ms ? 'bg-[#D0BCFF] text-[#2A1B4E] border-[#D0BCFF]' : 'border-white/10 bg-black/20 text-white opacity-70'}`}>{opt.label}</button>)}
             </div>
           </div>
+          <button onClick={handleIssuePass} disabled={isIssuing || !selectedStudent} className="w-full py-4 bg-[#D0BCFF] text-[#2A1B4E] rounded-2xl font-bold flex justify-center items-center hover:scale-[1.01] transition-transform disabled:opacity-50">
+            {isIssuing ? <Loader2 className="w-5 h-5 animate-spin" /> : "Issue Scannable Gate Pass"}
+          </button>
+        </div>
+      )}
+
+      {activeSubTab === "history" && (
+        <div className="space-y-4">
+          {issuedHistory.length === 0 ? <div className={`p-10 rounded-[2rem] border ${cardBg} text-center opacity-50`}>No gate passes issued yet.</div> : issuedHistory.map(pass => (
+            <div key={pass.id} className={`p-6 rounded-[2rem] border ${cardBg} flex flex-col md:flex-row justify-between items-start md:items-center gap-4`}>
+              <div className="flex items-start gap-4">
+                <div className={`p-3 rounded-2xl border ${pass.status === 'ACTIVE' ? 'bg-green-500/10 border-green-500/20 text-green-400' : pass.status === 'USED' ? 'bg-orange-500/10 border-orange-500/20 text-orange-400' : 'bg-red-500/10 border-red-500/20 text-red-400'}`}><ShieldCheck className="w-6 h-6" /></div>
+                <div>
+                  <h4 className="font-bold text-lg text-white">{pass.studentName}</h4>
+                  <p className="text-xs text-[#D0BCFF] font-semibold">{pass.branch} • Roll {pass.rollNo}</p>
+                  <p className="text-xs opacity-70 mt-1">Reason: <span className="text-white">{pass.reason}</span></p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 w-full md:w-auto justify-end">
+                <span className={`px-3 py-1 text-xs font-black uppercase rounded-lg border ${pass.status === 'ACTIVE' ? 'bg-green-500/20 text-green-400 border-green-500/30' : pass.status === 'USED' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'}`}>{pass.status}</span>
+                {pass.status === 'ACTIVE' && <button onClick={() => handleRevokePass(pass.id)} className="px-3 py-1 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-lg text-xs font-bold transition-colors">Revoke</button>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {activeSubTab === "leaves" && (
+        <div className="space-y-4">
+          {studentLeaves.length === 0 ? <div className={`p-10 rounded-[2rem] border ${cardBg} text-center opacity-50`}>No student leave applications.</div> : studentLeaves.map(leave => (
+            <div key={leave.id} className={`p-6 rounded-[2rem] border ${cardBg}`}>
+              <div className="flex justify-between items-start mb-4">
+                <div>
+                  <h4 className="font-bold text-lg text-white flex items-center gap-2"><FileText className="w-5 h-5 text-[#D0BCFF]"/> {leave.studentName}</h4>
+                  <p className="text-xs text-[#D0BCFF] font-semibold mt-0.5">{leave.branch} • Roll {leave.rollNo} • {leave.semester}</p>
+                </div>
+                <span className={`px-3 py-1 text-xs font-black uppercase rounded-lg border ${leave.status === 'APPROVED' ? 'bg-green-500/20 text-green-400 border-green-500/30' : leave.status === 'REJECTED' ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-orange-500/20 text-orange-400 border-orange-500/30'}`}>{leave.status}</span>
+              </div>
+              <div className="bg-black/20 p-4 rounded-xl border border-white/5 mb-4">
+                <p className="text-xs opacity-60 mb-1">{leave.leaveType} • {leave.startDate} to {leave.endDate}</p>
+                <p className="text-sm font-medium">{leave.reason}</p>
+              </div>
+              {leave.status === "PENDING" ? (
+                <div className="flex gap-3">
+                  <button onClick={() => handleLeaveApproval(leave.id, "REJECTED")} className="flex-1 py-2.5 bg-red-500/10 text-red-400 border border-red-500/20 rounded-xl font-bold hover:bg-red-500/20 transition-colors">Reject</button>
+                  <button onClick={() => handleLeaveApproval(leave.id, "APPROVED")} className="flex-1 py-2.5 bg-green-500 text-white rounded-xl font-bold hover:bg-green-600 transition-colors shadow-[0_0_15px_rgba(34,197,94,0.3)]">Approve</button>
+                </div>
+              ) : (
+                <p className="text-xs opacity-50 mt-2">Processed by {leave.mentorApproval}</p>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>

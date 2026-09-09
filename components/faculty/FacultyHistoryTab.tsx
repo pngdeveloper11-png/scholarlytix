@@ -71,12 +71,17 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
 
   useEffect(() => {
     const unsubHistory = onSnapshot(collection(db, "attendance_history"), (snap) => {
-      const records = snap.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecord)).sort((a, b) => b.timestamp - a.timestamp);
+      const records = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as AttendanceRecord)).sort((a, b) => {
+        // FIXED: Added (as any) to conductedAt fallbacks to resolve strict TypeScript interface errors
+        const timeA = (a as any).timestamp?.seconds ? (a as any).timestamp.seconds * 1000 : ((a as any).timestamp || (a as any).conductedAt || 0);
+        const timeB = (b as any).timestamp?.seconds ? (b as any).timestamp.seconds * 1000 : ((b as any).timestamp || (b as any).conductedAt || 0);
+        return timeB - timeA;
+      });
       setHistory(records);
     });
 
     const unsubRoster = onSnapshot(collection(db, "students_directory"), (snap) => {
-      setRoster(snap.docs.map(d => ({ id: d.id, ...d.data() } as StudentData)));
+      setRoster(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as StudentData)));
     });
 
     return () => { unsubHistory(); unsubRoster(); };
@@ -183,7 +188,8 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
     let generatedFileName = "Attendance_Export";
     if (scope === "single" && records.length > 0) {
       const r = records[0];
-      generatedFileName = `${r.subjectName} - ${r.branchName} (${r.divisionName}) - ${formatExportDate(new Date(r.timestamp))}`;
+      const rTime = (r as any).timestamp?.seconds ? (r as any).timestamp.seconds * 1000 : ((r as any).timestamp || (r as any).conductedAt || Date.now());
+      generatedFileName = `${r.subjectName} - ${r.branchName} (${r.divisionName}) - ${formatExportDate(new Date(rTime))}`;
     } else if (scope === "month") {
       generatedFileName = `${param1} - ${param2} - ${param3} Attendance Export`; 
     } else if (scope === "branch") {
@@ -205,7 +211,8 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
 
     if (exportScope === "single") {
       const r = exportRecords[0];
-      csvContent += `Class:,${r.semester} - ${r.branchName} (${r.divisionName})\nSubject:,${r.subjectName}\nBatch:,${r.batch}\nDate:,${formatExportDate(new Date(r.timestamp))}\n\nRoll No,Name,Status\n`;
+      const rTime = (r as any).timestamp?.seconds ? (r as any).timestamp.seconds * 1000 : ((r as any).timestamp || (r as any).conductedAt || Date.now());
+      csvContent += `Class:,${r.semester} - ${r.branchName} (${r.divisionName})\nSubject:,${r.subjectName}\nBatch:,${r.batch}\nDate:,${formatExportDate(new Date(rTime))}\n\nRoll No,Name,Status\n`;
       const classRoster = roster.filter(s => s.branch === r.branchName && s.semester === r.semester && s.division === r.divisionName).sort((a, b) => a.rollNo - b.rollNo);
       classRoster.forEach(stu => {
         const isPresent = r.presentStudentIds.includes(stu.id);
@@ -265,9 +272,10 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
 
   const handleDownloadPdf = () => {
     const record = exportRecords[0];
+    const rTime = (record as any).timestamp?.seconds ? (record as any).timestamp.seconds * 1000 : ((record as any).timestamp || (record as any).conductedAt || Date.now());
     const classRoster = roster.filter(s => s.branch === record.branchName && s.semester === record.semester && s.division === record.divisionName).sort((a, b) => a.rollNo - b.rollNo);
     
-    let html = `<html><head><title>${exportFileName}</title><style>body{font-family:sans-serif;padding:20px}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border:1px solid #ddd;padding:8px;text-align:left}th{background-color:#f2f2f2}.present{color:green;font-weight:bold}.absent{color:red;font-weight:bold}</style></head><body><h2>Lecture Attendance Report</h2><p><strong>Class:</strong> ${record.semester} - ${record.branchName} (${record.divisionName})</p><p><strong>Subject:</strong> ${record.subjectName}</p><p><strong>Batch:</strong> ${record.batch}</p><p><strong>Date:</strong> ${formatExportDate(new Date(record.timestamp))}</p><p><strong>Total Present:</strong> ${record.presentStudentIds?.length || 0} / ${classRoster.length}</p><table><tr><th>Roll No</th><th>Student Name</th><th>Status</th></tr>`;
+    let html = `<html><head><title>${exportFileName}</title><style>body{font-family:sans-serif;padding:20px}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border:1px solid #ddd;padding:8px;text-align:left}th{background-color:#f2f2f2}.present{color:green;font-weight:bold}.absent{color:red;font-weight:bold}</style></head><body><h2>Lecture Attendance Report</h2><p><strong>Class:</strong> ${record.semester} - ${record.branchName} (${record.divisionName})</p><p><strong>Subject:</strong> ${record.subjectName}</p><p><strong>Batch:</strong> ${record.batch}</p><p><strong>Date:</strong> ${formatExportDate(new Date(rTime))}</p><p><strong>Total Present:</strong> ${record.presentStudentIds?.length || 0} / ${classRoster.length}</p><table><tr><th>Roll No</th><th>Student Name</th><th>Status</th></tr>`;
     classRoster.forEach(stu => {
       const isPresent = record.presentStudentIds.includes(stu.id);
       html += `<tr><td>${stu.rollNo || '-'}</td><td>${stu.fullName}</td><td class="${isPresent ? 'present' : 'absent'}">${isPresent ? 'Present' : 'Absent'}</td></tr>`;
@@ -315,7 +323,8 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
             const isClassExpanded = expandedClasses.includes(classCombo);
 
             const groupedByMonth = classRecords.reduce((acc: any, record: AttendanceRecord) => {
-              const month = new Date(record.timestamp).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+              const rTime = (record as any).timestamp?.seconds ? (record as any).timestamp.seconds * 1000 : ((record as any).timestamp || (record as any).conductedAt || Date.now());
+              const month = new Date(rTime).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
               if (!acc[month]) acc[month] = [];
               acc[month].push(record);
               return acc;
@@ -374,7 +383,8 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
                               {isMonthExpanded && (
                                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="p-4 pt-0 space-y-3">
                                   {monthRecords.map((record: AttendanceRecord) => {
-                                    const dateObj = new Date(record.timestamp);
+                                    const rTime = (record as any).timestamp?.seconds ? (record as any).timestamp.seconds * 1000 : ((record as any).timestamp || (record as any).conductedAt || Date.now());
+                                    const dateObj = new Date(rTime);
                                     const dateStr = dateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
                                     const timeStr = dateObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }).toLowerCase();
                                     const isLectureExpanded = expandedLectures.includes(record.id);
@@ -608,7 +618,10 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
               if (!startDate || !endDate) return alert("Please select start and end dates.");
               const startMs = new Date(startDate).getTime();
               const endMs = new Date(endDate).getTime() + 86400000;
-              let filtered = filteredHistory.filter(r => r.timestamp >= startMs && r.timestamp <= endMs);
+              let filtered = filteredHistory.filter(r => {
+                const t = (r as any).timestamp?.seconds ? (r as any).timestamp.seconds * 1000 : ((r as any).timestamp || (r as any).conductedAt || 0);
+                return t >= startMs && t <= endMs;
+              });
               if (customBranchFilter !== "All") filtered = filtered.filter(r => r.branchName === customBranchFilter);
               triggerExportDialog(filtered, "custom", startDate, endDate, customBranchFilter);
               setShowCustomRangeModal(false);

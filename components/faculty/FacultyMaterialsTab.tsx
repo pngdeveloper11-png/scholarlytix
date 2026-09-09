@@ -38,7 +38,11 @@ export default function FacultyMaterialsTab() {
 
   useEffect(() => {
     const unsubMaterials = onSnapshot(collection(db, "study_materials"), (snap) => {
-      const mats = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => b.timestamp - a.timestamp);
+      const mats = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).sort((a: any, b: any) => {
+        const timeA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp || 0);
+        const timeB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp || 0);
+        return timeB - timeA;
+      });
       setMaterials(mats);
     });
 
@@ -118,7 +122,8 @@ export default function FacultyMaterialsTab() {
             <div className="py-20 text-center"><p className="text-white/50 text-[15px] font-medium">No {categoryFilter} found.</p></div>
           ) : (
             displayedMaterials.map((mat) => {
-              const dateStr = new Date(mat.timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+              const timestampMs = mat.timestamp?.seconds ? mat.timestamp.seconds * 1000 : (mat.timestamp || Date.now());
+              const dateStr = new Date(timestampMs).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
               return (
                 <div 
                   key={mat.id} 

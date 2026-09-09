@@ -38,7 +38,7 @@ export default function FacultyClassesTab({
 
   useEffect(() => {
     const unsub = onSnapshot(doc(db, 'app_config', 'college_structure'), (snap) => {
-      if (snap.exists()) setGlobalStructure(snap.data() as CollegeStructureConfig);
+      if (snap.exists()) setGlobalStructure(snap.data() as any);
     });
     return () => unsub();
   }, []);
@@ -55,7 +55,6 @@ export default function FacultyClassesTab({
 
     setIsUploading(true);
     try {
-      // THE FIX: Sending FormData instead of Base64 JSON
       const formData = new FormData();
       formData.append('file', file);
 

@@ -26,7 +26,11 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "announcements"), (snap) => {
-      const records = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => b.timestamp - a.timestamp);
+      const records = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).sort((a: any, b: any) => {
+        const timeA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp || 0);
+        const timeB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp || 0);
+        return timeB - timeA;
+      });
       setNotices(records);
     });
     return () => unsub();
@@ -99,7 +103,8 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
           </div>
         ) : (
           notices.map(notice => {
-            const dateStr = new Date(notice.timestamp).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+            const timestampMs = notice.timestamp?.seconds ? notice.timestamp.seconds * 1000 : (notice.timestamp || Date.now());
+            const dateStr = new Date(timestampMs).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
             return (
               <div key={notice.id} className={`p-5 rounded-2xl border ${cardBg} flex flex-col transition-all hover:bg-white/[0.08]`}>
                 <div className="flex justify-between items-start mb-3">

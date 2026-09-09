@@ -15,11 +15,17 @@ const messaging = firebase.messaging();
 // Intercept background notifications and fire native OS banners
 messaging.onBackgroundMessage((payload) => {
   const title = payload.data?.title || payload.notification?.title || "Scholarlytix Alert";
+  
+  // Dynamically determine the route based on the targetTab data
+  let targetUrl = '/';
+  if (payload.data?.targetTab) {
+      targetUrl = `/?tab=${encodeURIComponent(payload.data.targetTab)}`;
+  }
+
   const options = {
     body: payload.data?.message || payload.notification?.body || "You have a new academic update.",
     icon: '/favicon.ico',
-    // Passes the target tab so when the user clicks the banner, it routes them perfectly
-    data: { url: payload.data?.targetTab ? `/faculty/dashboard?tab=${encodeURIComponent(payload.data.targetTab)}` : '/faculty/dashboard' }
+    data: { url: targetUrl }
   };
   return self.registration.showNotification(title, options);
 });

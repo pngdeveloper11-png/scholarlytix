@@ -33,27 +33,56 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     if (savedHue !== null) setIsDynamicHue(savedHue === 'true');
     if (savedTheme) setCurrentTheme(savedTheme);
 
-    // Sync with Firebase
-    const uid = localStorage.getItem('academiq_faculty_id');
-    if (uid) {
-      getDoc(doc(db, 'teacher_configs', uid)).then((docSnap) => {
-        if (docSnap.exists() && docSnap.get('preferences')) {
-          const prefs = docSnap.get('preferences');
-          if (prefs.darkTheme !== undefined) setIsDarkTheme(prefs.darkTheme);
-          if (prefs.dynamicHue !== undefined) setIsDynamicHue(prefs.dynamicHue);
-          if (prefs.appTheme) setCurrentTheme(prefs.appTheme);
+    // Sync with Firebase intelligently based on role
+    const syncInit = async () => {
+      try {
+        const role = localStorage.getItem("userRole");
+        let collectionName = "";
+        let docId = "";
+
+        if (role === "student") {
+           const session = JSON.parse(localStorage.getItem("academiq_student_session") || "{}");
+           collectionName = "students_directory";
+           docId = session.studentId;
+        } else if (role === "faculty" || !role) {
+           collectionName = "teacher_configs";
+           docId = localStorage.getItem('academiq_faculty_id') || "";
         }
-      }).catch(() => {});
-    }
+
+        if (collectionName && docId) {
+          const docSnap = await getDoc(doc(db, collectionName, docId));
+          if (docSnap.exists() && docSnap.get('preferences')) {
+            const prefs = docSnap.get('preferences');
+            if (prefs.darkTheme !== undefined) setIsDarkTheme(prefs.darkTheme);
+            if (prefs.dynamicHue !== undefined) setIsDynamicHue(prefs.dynamicHue);
+            if (prefs.appTheme) setCurrentTheme(prefs.appTheme);
+          }
+        }
+      } catch (e) {}
+    };
+    syncInit();
   }, []);
 
   const syncPreferencesToFirebase = async (newDark: boolean, newHue: boolean, newTheme: string) => {
-    const uid = localStorage.getItem('academiq_faculty_id');
-    if (!uid) return;
     try {
-      await setDoc(doc(db, 'teacher_configs', uid), {
-        preferences: { darkTheme: newDark, dynamicHue: newHue, appTheme: newTheme }
-      }, { merge: true });
+      const role = localStorage.getItem("userRole");
+      let collectionName = "";
+      let docId = "";
+
+      if (role === "student") {
+         const session = JSON.parse(localStorage.getItem("academiq_student_session") || "{}");
+         collectionName = "students_directory";
+         docId = session.studentId;
+      } else if (role === "faculty" || !role) {
+         collectionName = "teacher_configs";
+         docId = localStorage.getItem('academiq_faculty_id') || "";
+      }
+
+      if (collectionName && docId) {
+        await setDoc(doc(db, collectionName, docId), {
+          preferences: { darkTheme: newDark, dynamicHue: newHue, appTheme: newTheme }
+        }, { merge: true });
+      }
     } catch (e) {}
   };
 

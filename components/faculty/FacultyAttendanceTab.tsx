@@ -1,285 +1,195 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { collection, doc, onSnapshot, writeBatch, increment } from 'firebase/firestore';
+import React, { useState, useEffect } from 'react';
+import { collection, query, where, getDocs, addDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Loader2, Sparkles, X } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
-import GlassDropdown from '@/components/GlassDropdown';
+import { CheckCircle, XCircle, Search, Loader2 } from 'lucide-react';
+import GlassDropdown from '../GlassDropdown';
 
 export default function FacultyAttendanceTab({ directMarkData, isDark }: { directMarkData?: any, isDark: boolean }) {
-  const [teachingConfig, setTeachingConfig] = useState<Record<string, string[]>>({});
-  const [roster, setRoster] = useState<any[]>([]);
+  const [selectedSem, setSelectedSem] = useState(directMarkData?.sem || "Semester 3");
+  const [selectedBranch, setSelectedBranch] = useState(directMarkData?.branch || "CSE");
+  const [selectedSubject, setSelectedSubject] = useState(directMarkData?.subject || "");
+  const [selectedBatch, setSelectedBatch] = useState(directMarkData?.batch || "All");
   
-  // States
-  const [selectedSem, setSelectedSem] = useState("Semester 3");
-  const [selectedBranch, setSelectedBranch] = useState("IT");
-  const [selectedSubject, setSelectedSubject] = useState("");
-  const [selectedBatch, setSelectedBatch] = useState("All");
-  
-  const [presentStudentIds, setPresentStudentIds] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isSelecting, setIsSelecting] = useState(false);
-  const [selectionMode, setSelectionMode] = useState<boolean | null>(null);
+  const [students, setStudents] = useState<any[]>([]);
+  const [attendance, setAttendance] = useState<Record<string, boolean>>({});
+  const [isLoadingStudents, setIsLoadingStudents] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [showSummaryDialog, setShowSummaryDialog] = useState(false);
-  const [summaryText, setSummaryText] = useState("");
-  const [isGeneratingAi, setIsGeneratingAi] = useState(false);
-
-  // Force snap to Direct Mark Data if provided by Dashboard
   useEffect(() => {
-    if (directMarkData) {
-      setSelectedSem(directMarkData.sem);
-      setSelectedBranch(directMarkData.branch);
-      setSelectedSubject(directMarkData.subject);
-      setSelectedBatch(directMarkData.batch);
-    }
+    if (directMarkData) fetchStudents();
   }, [directMarkData]);
 
-  useEffect(() => {
-    const uid = localStorage.getItem("academiq_faculty_id");
-    if (!uid) return;
+  const fetchStudents = async () => {
+    if (!selectedSubject) return alert("Please specify a subject to mark attendance.");
+    
+    setIsLoadingStudents(true);
+    try {
+      const q = query(
+        collection(db, "students_directory"), 
+        where("semester", "==", selectedSem), 
+        where("branch", "==", selectedBranch)
+      );
+      const snap = await getDocs(q);
+      
+      let fetchedStudents = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+      
+      if (selectedBatch !== "All") {
+        fetchedStudents = fetchedStudents.filter(s => s.batch === selectedBatch);
+      }
+      
+      fetchedStudents.sort((a, b) => a.rollNo - b.rollNo);
+      setStudents(fetchedStudents);
 
-    const unsubConfig = onSnapshot(doc(db, "teacher_configs", uid), (docSnap) => {
-      if (docSnap.exists() && docSnap.get("config")) {
-        const config = docSnap.get("config");
-        setTeachingConfig(config);
-        const classes = Object.keys(config);
-        if (classes.length > 0 && !directMarkData && !selectedSubject) {
-          const [s, b] = classes[0].split("|");
-          setSelectedSem(s); setSelectedBranch(b); setSelectedSubject(config[classes[0]][0] || "");
+      // Default all to Present
+      const initialAttendance: Record<string, boolean> = {};
+      fetchedStudents.forEach(s => initialAttendance[s.id] = true);
+      setAttendance(initialAttendance);
+      
+    } catch (e) {
+      alert("Failed to fetch student roster.");
+    } finally {
+      setIsLoadingStudents(false);
+    }
+  };
+
+  const toggleStudent = (id: string) => {
+    setAttendance(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const markAll = (status: boolean) => {
+    const newAtt: Record<string, boolean> = {};
+    students.forEach(s => newAtt[s.id] = status);
+    setAttendance(newAtt);
+  };
+
+  const handleSubmit = async () => {
+    if (students.length === 0) return;
+    setIsSubmitting(true);
+    
+    try {
+      const presentIds = Object.keys(attendance).filter(id => attendance[id]);
+      const absentIds = Object.keys(attendance).filter(id => !attendance[id]);
+      
+      const record = {
+        semester: selectedSem,
+        branch: selectedBranch,
+        branchName: selectedBranch,
+        subjectName: selectedSubject,
+        batch: selectedBatch,
+        presentStudentIds: presentIds,
+        absentStudentIds: absentIds,
+        conductedAt: Date.now(),
+        conductedBy: localStorage.getItem("academiq_faculty_name") || "Faculty Member"
+      };
+
+      await addDoc(collection(db, "attendance_history"), record);
+
+      // Dispatch FCM alerts to parents of absentees
+      for (const id of absentIds) {
+        const student = students.find(s => s.id === id);
+        if (student) {
+          try {
+            await fetch('/api/send-fcm', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                targetTopic: `parent_${id}`, 
+                title: "Attendance Alert 🚨", 
+                message: `${student.fullName} has been marked absent for ${selectedSubject}.`,
+                targetTab: 'Attendance'
+              })
+            });
+          } catch (e) {}
         }
       }
-    });
 
-    const unsubRoster = onSnapshot(collection(db, "students_directory"), (snap) => {
-      setRoster(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
-
-    return () => { unsubConfig(); unsubRoster(); };
-  }, [directMarkData]);
-
-  const availableClasses = Object.keys(teachingConfig);
-  const validSems = Array.from(new Set(availableClasses.map(c => c.split("|")[0])));
-  const validBranches = Array.from(new Set(availableClasses.filter(c => c.startsWith(selectedSem)).map(c => c.split("|")[1])));
-  const validSubjects = teachingConfig[`${selectedSem}|${selectedBranch}`] || [];
-
-  const availableBatches = (() => {
-    if (selectedBranch === "CSE") return ["All", "A1", "A2"];
-    if (selectedBranch === "CSE(AIML)") return ["All", "B1", "B2"];
-    if (selectedBranch === "IT") return ["All", "C1", "C2"];
-    if (selectedBranch === "EE") return ["All", "D1", "D2"];
-    return ["All", "Batch 1", "Batch 2"];
-  })();
-
-  // Strict Roster Filtering with string cleanup
-  const classStudents = roster
-    .filter(s => 
-      s.branch?.toLowerCase().trim() === selectedBranch.toLowerCase().trim() && 
-      s.semester?.toLowerCase().trim() === selectedSem.toLowerCase().trim()
-    )
-    .sort((a, b) => (a.rollNo || 0) - (b.rollNo || 0));
-
-  // Precise Batch Logic matching the Android App
-  const filteredStudents = classStudents.filter(student => {
-    const r = student.rollNo || 0;
-    if (selectedBatch === "All" || r === 0) return true;
-    switch (selectedBatch) {
-      case "A1": return r >= 1 && r <= 35;
-      case "A2": return r >= 36 && r <= 65;
-      case "B1": return r >= 1 && r <= 30;
-      case "B2": return r >= 31 && r <= 60;
-      case "C1": return r >= 1 && r <= 32;
-      case "C2": return r >= 33 && r <= 62;
-      case "D1": return r >= 1 && r <= 25;
-      case "D2": return r >= 26 && r <= 50;
-      default: return true;
-    }
-  });
-
-  const handleSelectAll = (checked: boolean) => {
-    if (checked) setPresentStudentIds(filteredStudents.map(s => s.id));
-    else setPresentStudentIds([]);
-  };
-
-  const toggleStudent = (id: string, forceState: boolean) => {
-    setPresentStudentIds(prev => {
-      const exists = prev.includes(id);
-      if (forceState && !exists) return [...prev, id];
-      if (!forceState && exists) return prev.filter(item => item !== id);
-      return prev;
-    });
-  };
-
-  const handlePointerDown = (id: string) => {
-    setIsSelecting(true);
-    const isPresent = presentStudentIds.includes(id);
-    setSelectionMode(!isPresent);
-    toggleStudent(id, !isPresent);
-  };
-
-  const handlePointerEnter = (id: string) => {
-    if (isSelecting && selectionMode !== null) toggleStudent(id, selectionMode);
-  };
-
-  useEffect(() => {
-    const handlePointerUp = () => { setIsSelecting(false); setSelectionMode(null); };
-    window.addEventListener('pointerup', handlePointerUp);
-    return () => window.removeEventListener('pointerup', handlePointerUp);
-  }, []);
-
-  const handleSaveAttendance = () => {
-    if (!selectedSubject) return alert("Please select a subject.");
-    setShowSummaryDialog(true);
-  };
-
-  // Batch Write to instantly sync metrics across all devices
-  const finalizeAttendanceSave = async (aiSummary: string | null = null) => {
-    setIsLoading(true);
-    try {
-      const batch = writeBatch(db);
-
-      // A. Update the metric counters for every student in the active roster view
-      filteredStudents.forEach(student => {
-        if (student.rollNo > 0 || student.grNumber) {
-          const studentRef = doc(db, 'students_directory', student.id);
-          const isPresent = presentStudentIds.includes(student.id);
-          
-          batch.update(studentRef, {
-            totalConducted: increment(1),
-            ...(isPresent ? { totalAttended: increment(1) } : {})
-          });
-        }
-      });
-
-      // B. Create the actual attendance history record
-      const newRecordRef = doc(collection(db, "attendance_history"));
-      batch.set(newRecordRef, {
-        semester: selectedSem, 
-        branchName: selectedBranch, 
-        subjectName: selectedSubject,
-        batch: selectedBatch, 
-        timestamp: Date.now(), 
-        presentStudentIds, 
-        summary: aiSummary
-      });
-
-      await batch.commit();
-
-      setShowSummaryDialog(false); 
-      setPresentStudentIds([]);
-      alert("Attendance & Metrics Saved Successfully!");
-    } catch (e) { 
-      console.error(e);
-      alert("Failed to save attendance."); 
-    } finally { 
-      setIsLoading(false); 
+      alert("Attendance marked securely! Records and dashboards updated globally.");
+      setStudents([]); 
+      setSelectedSubject("");
+    } catch (e) {
+      alert("Failed to record attendance.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const handleGenerateAiNotes = async () => {
-    if (!summaryText.trim()) return finalizeAttendanceSave(null);
-    setIsGeneratingAi(true);
-    try {
-      const res = await fetch('/api/summarize-lecture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ transcript: summaryText }) });
-      const data = await res.json();
-      await finalizeAttendanceSave(data.summary || summaryText);
-    } catch (e) { await finalizeAttendanceSave(summaryText); } finally { setIsGeneratingAi(false); }
-  };
-
-  const activeSems = Array.from(new Set([...validSems, selectedSem])).filter(Boolean);
-  const activeBranches = Array.from(new Set([...validBranches, selectedBranch])).filter(Boolean);
-  const activeSubjects = Array.from(new Set([...validSubjects, selectedSubject])).filter(Boolean);
+  const cardBg = isDark ? 'bg-white/[0.08] border-white/20 backdrop-blur-2xl' : 'bg-white border-black/10 shadow-lg';
 
   return (
-    <div className="w-full flex flex-col h-full relative pb-28">
+    <div className="w-full flex flex-col space-y-6 animate-in fade-in duration-300">
       
-      {/* PERFECTLY TRANSLUCENT DROPDOWNS */}
-      <div className="flex space-x-3 mb-8">
-        <GlassDropdown label="Sem" value={selectedSem} options={activeSems} onChange={setSelectedSem} isDark={isDark} zIndex={70} />
-        <GlassDropdown label="Branch" value={selectedBranch} options={activeBranches} onChange={setSelectedBranch} isDark={isDark} zIndex={60} />
-        <div className="flex-[1.5]">
-          <GlassDropdown label="Subject" value={selectedSubject} options={activeSubjects} onChange={setSelectedSubject} isDark={isDark} zIndex={50} />
+      {/* Configuration Panel */}
+      <div className={`p-6 rounded-[2rem] border ${cardBg}`}>
+        <h3 className="font-bold text-lg mb-4">Class Configuration</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+          <GlassDropdown label="Semester" value={selectedSem} options={["Semester 1", "Semester 2", "Semester 3", "Semester 4"]} onChange={setSelectedSem} isDark={isDark} />
+          <GlassDropdown label="Branch" value={selectedBranch} options={["CSE", "CSE(AIML)", "IT", "EE"]} onChange={setSelectedBranch} isDark={isDark} />
+          <GlassDropdown label="Batch (Optional)" value={selectedBatch} options={["All", "A", "B", "C"]} onChange={setSelectedBatch} isDark={isDark} />
         </div>
-      </div>
-
-      <div className="flex justify-between items-center mb-6">
-        <div className="flex-1 max-w-[200px]">
-          <GlassDropdown label="Batch (Lab/Theory)" value={selectedBatch} options={availableBatches} onChange={setSelectedBatch} isDark={isDark} zIndex={40} />
+        <div className="mb-4">
+          <label className="text-xs font-bold uppercase opacity-60 mb-2 block">Subject Name</label>
+          <input 
+            type="text" 
+            placeholder="e.g., Computer Organization and Architecture" 
+            value={selectedSubject} 
+            onChange={e => setSelectedSubject(e.target.value)} 
+            className="w-full bg-black/30 border border-white/10 rounded-2xl p-4 outline-none focus:border-[#D0BCFF]" 
+          />
         </div>
-        
-        <div className="flex flex-col items-center">
-          <span className={`text-xs font-bold mb-2 ${isDark ? 'text-white' : 'text-neutral-900'}`}>Mark All</span>
-          <div 
-            onClick={() => handleSelectAll(!(presentStudentIds.length > 0 && presentStudentIds.length === filteredStudents.length))}
-            className={`w-14 h-8 flex items-center rounded-full p-1 cursor-pointer transition-colors ${presentStudentIds.length > 0 && presentStudentIds.length === filteredStudents.length ? 'bg-[#D0BCFF]' : (isDark ? 'bg-white/10' : 'bg-black/10')}`}
-          >
-            <div className={`bg-white w-6 h-6 rounded-full shadow-md transform transition-transform ${presentStudentIds.length > 0 && presentStudentIds.length === filteredStudents.length ? 'translate-x-6' : 'translate-x-0'}`} />
-          </div>
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto w-full flex justify-center [&::-webkit-scrollbar]:hidden touch-none select-none">
-        <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-7 gap-3 w-full max-w-4xl place-content-start">
-          {filteredStudents.length === 0 ? (
-            <div className="col-span-full py-20 text-center"><p className={`text-[15px] ${isDark ? 'text-white/50' : 'text-neutral-500'}`}>No students found for {selectedBranch} ({selectedSem}). Check your Cloud Roster.</p></div>
-          ) : (
-            filteredStudents.map((student, index) => {
-              const isSelected = presentStudentIds.includes(student.id);
-              const displayNumber = student.rollNo > 0 ? student.rollNo : (index + 1);
-              const nameParts = student.fullName.split(' ');
-              const displayName = nameParts.length > 1 
-                ? <>{nameParts[0]}<br/>{nameParts[nameParts.length - 1]}</> 
-                : student.fullName;
-
-              return (
-                <div 
-                  key={student.id} 
-                  onPointerDown={(e) => { e.preventDefault(); handlePointerDown(student.id); }}
-                  onPointerEnter={() => handlePointerEnter(student.id)}
-                  className={`aspect-[5/6] sm:aspect-square border rounded-[1.25rem] flex flex-col items-center justify-center cursor-pointer transition-all p-2 ${isSelected ? 'bg-[#512B88] border-[#A880FF] shadow-[0_0_20px_rgba(168,128,255,0.2)]' : (isDark ? 'bg-white/[0.02] border-white/20 hover:bg-white/10' : 'bg-black/5 border-black/10 hover:bg-black/10')}`}
-                >
-                  <h2 className={`text-2xl md:text-3xl font-black mb-1 ${isSelected ? 'text-white' : (isDark ? 'text-white' : 'text-neutral-900')}`}>
-                    {displayNumber}
-                  </h2>
-                  <p className={`text-[10px] sm:text-xs text-center leading-tight px-1 ${isSelected ? 'text-white/90' : (isDark ? 'text-white/80' : 'text-neutral-600')}`}>
-                    {displayName}
-                  </p>
-                </div>
-              );
-            })
-          )}
-        </div>
-      </div>
-
-      <div className="absolute bottom-4 left-0 right-0 flex justify-center">
-        <button onClick={handleSaveAttendance} disabled={isLoading || filteredStudents.length === 0} className="w-full max-w-4xl py-4 bg-[#D0BCFF] text-[#1A103C] rounded-[1rem] font-bold text-[16px] tracking-wide shadow-[0_0_20px_rgba(208,188,255,0.4)] flex justify-center items-center hover:scale-[1.02] transition-transform disabled:opacity-50">
-          {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : `Save Attendance (${presentStudentIds.length} Present)`}
+        <button 
+          onClick={fetchStudents} 
+          disabled={isLoadingStudents || !selectedSubject} 
+          className="w-full py-4 bg-[#D0BCFF] text-[#2A1B4E] rounded-2xl font-bold flex justify-center items-center hover:scale-[1.01] transition-transform disabled:opacity-50"
+        >
+          {isLoadingStudents ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Search className="w-5 h-5 mr-2" /> Load Student Roster</>}
         </button>
       </div>
 
-      <AnimatePresence>
-        {showSummaryDialog && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
-            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className={`border p-6 rounded-[2rem] w-full max-w-md backdrop-blur-2xl shadow-[0_0_40px_rgba(0,0,0,0.5)] ${isDark ? 'bg-black/60 border-white/20 text-white' : 'bg-white/90 border-black/10 text-neutral-900'}`}>
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-xl font-bold flex items-center"><Sparkles className="w-5 h-5 mr-2 text-[#D0BCFF]" /> Lecture Notes</h3>
-                <button onClick={() => setShowSummaryDialog(false)} className={`p-1 rounded-lg ${isDark ? 'hover:bg-white/10' : 'hover:bg-black/10'}`}><X className="w-5 h-5" /></button>
-              </div>
-              <textarea 
-                value={summaryText} onChange={(e) => setSummaryText(e.target.value)} placeholder="Type raw notes..."
-                className={`w-full h-32 border rounded-xl p-4 text-sm outline-none focus:ring-2 focus:ring-[#D0BCFF] resize-none mb-4 ${isDark ? 'bg-white/[0.05] border-white/20 text-white' : 'bg-black/5 border-black/10 text-neutral-900'}`}
-              />
-              <div className="flex space-x-3">
-                <button onClick={() => finalizeAttendanceSave(null)} disabled={isGeneratingAi} className={`flex-1 py-3 border rounded-xl font-bold transition-colors ${isDark ? 'bg-white/[0.05] border-white/20 hover:bg-white/[0.1]' : 'bg-black/5 border-black/10 hover:bg-black/10'}`}>Skip</button>
-                <button onClick={handleGenerateAiNotes} disabled={isGeneratingAi} className="flex-1 py-3 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold hover:scale-[1.02] transition-transform flex justify-center items-center">
-                  {isGeneratingAi ? <Loader2 className="w-5 h-5 animate-spin" /> : "Save & Format"}
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Interactive Roll List */}
+      {students.length > 0 && (
+        <div className={`p-6 rounded-[2rem] border ${cardBg}`}>
+          <div className="flex justify-between items-center mb-6 border-b border-white/10 pb-4">
+            <div>
+              <h3 className="font-bold text-xl">Interactive Roll List</h3>
+              <p className="text-sm opacity-60 mt-1">{students.length} students loaded for {selectedSubject}.</p>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => markAll(false)} className="px-4 py-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-xl font-bold text-sm hover:bg-red-500/20 transition-colors">Mark All Absent</button>
+              <button onClick={() => markAll(true)} className="px-4 py-2 bg-green-500/10 text-green-400 border border-green-500/20 rounded-xl font-bold text-sm hover:bg-green-500/20 transition-colors">Mark All Present</button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            {students.map(s => {
+              const isPresent = attendance[s.id];
+              return (
+                <div 
+                  key={s.id} 
+                  onClick={() => toggleStudent(s.id)} 
+                  className={`p-3 rounded-2xl border cursor-pointer transition-all flex flex-col items-center text-center select-none ${
+                    isPresent ? 'bg-green-500/10 border-green-500/30 shadow-[0_0_15px_rgba(34,197,94,0.1)]' : 'bg-red-500/10 border-red-500/30'
+                  }`}
+                >
+                  <p className="text-xs opacity-60 mb-1 font-mono">Roll {s.rollNo}</p>
+                  <p className="font-bold text-sm leading-tight mb-3 px-1">{s.fullName}</p>
+                  {isPresent ? <CheckCircle className="w-6 h-6 text-green-400 mt-auto" /> : <XCircle className="w-6 h-6 text-red-400 mt-auto" />}
+                </div>
+              );
+            })}
+          </div>
+
+          <button 
+            onClick={handleSubmit} 
+            disabled={isSubmitting} 
+            className="w-full py-4 bg-white text-black rounded-2xl font-bold text-lg flex justify-center items-center hover:scale-[1.01] transition-transform shadow-[0_0_20px_rgba(255,255,255,0.2)] disabled:opacity-50"
+          >
+            {isSubmitting ? <Loader2 className="w-6 h-6 animate-spin" /> : `Save Attendance (${Object.values(attendance).filter(Boolean).length} Present)`}
+          </button>
+        </div>
+      )}
+
     </div>
   );
 }

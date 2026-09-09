@@ -62,7 +62,7 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
   const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
 
   useEffect(() => {
-    const unsubRoster = onSnapshot(collection(db, "students_directory"), (snap) => setRoster(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const unsubRoster = onSnapshot(collection(db, "students_directory"), (snap) => setRoster(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }))));
     
     if (!user?.uid) return;
     const unsubConfig = onSnapshot(doc(db, "teacher_configs", user.uid), (docSnap) => {
@@ -92,6 +92,7 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
 
   useEffect(() => {
     if (!selectedSubject) return;
+    // Formatting matched to Student Dashboard Regex exact path
     const docId = `${selectedSemester}_${selectedBranch}_${selectedSubject}`.replace(/\s+/g, '').replace(/&/g, 'and');
     const unsub = onSnapshot(doc(db, "test_marks", docId), (docSnap) => {
       if (docSnap.exists()) setFullMarksMap(docSnap.get("marks") || {});
@@ -197,7 +198,6 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
     }
   };
 
-
   return (
     <div className="w-full flex flex-col h-full overflow-y-auto pr-2 pb-24 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
       
@@ -280,7 +280,13 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
           setIsLoading(true);
           try {
             const docId = `${selectedSemester}_${selectedBranch}_${selectedSubject}`.replace(/\s+/g, '').replace(/&/g, 'and');
-            await setDoc(doc(db, "test_marks", docId), { marks: fullMarksMap, isPublished: true }, { merge: true });
+            await setDoc(doc(db, "test_marks", docId), { 
+              marks: fullMarksMap, 
+              isPublished: true, 
+              semester: selectedSemester, 
+              branch: selectedBranch, 
+              subject: selectedSubject 
+            }, { merge: true });
             
             // Broadcast Push Notification
             await fetch('/api/send-fcm', {

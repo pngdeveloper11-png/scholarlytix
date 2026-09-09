@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { getMessaging, getToken, onMessage } from 'firebase/messaging';
+import { getMessaging, getToken, onMessage, isSupported } from 'firebase/messaging';
 import { app } from '../lib/firebase';
 import { useAuth } from '../app/context/AuthContext';
 import { BellRing, X } from 'lucide-react';
@@ -14,7 +14,6 @@ export default function PushNotificationManager() {
   useEffect(() => {
     if (typeof window !== 'undefined' && 'Notification' in window) {
       setPermissionStatus(Notification.permission);
-      // Only show banner if they are logged in and haven't answered the prompt yet
       if (Notification.permission === 'default' && user) {
         setShowBanner(true);
       }
@@ -23,17 +22,23 @@ export default function PushNotificationManager() {
 
   // Handle Foreground Messages (When they have the website open)
   useEffect(() => {
-    if (typeof window !== 'undefined' && 'serviceWorker' in navigator && permissionStatus === 'granted') {
-      try {
-        const messaging = getMessaging(app);
-        const unsubscribe = onMessage(messaging, (payload) => {
-          const title = payload.data?.title || payload.notification?.title || "New Alert";
-          const body = payload.data?.message || payload.notification?.body || "";
-          new Notification(title, { body, icon: '/favicon.ico' });
-        });
-        return () => unsubscribe();
-      } catch (e) { console.error("Messaging error", e); }
-    }
+    const setupForegroundListener = async () => {
+      if (typeof window !== 'undefined' && 'serviceWorker' in navigator && permissionStatus === 'granted') {
+        const supported = await isSupported();
+        if (supported) {
+          try {
+            const messaging = getMessaging(app);
+            const unsubscribe = onMessage(messaging, (payload) => {
+              const title = payload.data?.title || payload.notification?.title || "New Alert";
+              const body = payload.data?.message || payload.notification?.body || "";
+              new Notification(title, { body, icon: '/favicon.ico' });
+            });
+            return () => unsubscribe();
+          } catch (e) { console.error("Messaging error", e); }
+        }
+      }
+    };
+    setupForegroundListener();
   }, [permissionStatus]);
 
   const handleEnablePush = async () => {
@@ -43,15 +48,18 @@ export default function PushNotificationManager() {
       setShowBanner(false);
 
       if (permission === 'granted') {
+        const supported = await isSupported();
+        if (!supported) {
+          alert("Push notifications are not supported in this browser/mode.");
+          return;
+        }
+
         const messaging = getMessaging(app);
-        
-        // REPLACE WITH YOUR FIREBASE VAPID KEY
         const currentToken = await getToken(messaging, { vapidKey: "BGGPfRStiWlYL7qqIX5hWH395DxF7VUDEDG1z8YTV5qAceVIyAZh0c3RQah3MAfzG0N6Fj9YyHoLbq3soGnWNYk" });
         
         if (currentToken) {
-          const topics = ["all_teachers"];
+          const topics = ["all_users"];
           
-          // Replicating the Android Topic logic exactly
           if (role?.startsWith("HOD|")) {
              const branches = role.replace("HOD|", "").split(",");
              branches.forEach(b => topics.push(`hod_${b.replace(/[ ()]/g, "_")}`));
@@ -60,12 +68,14 @@ export default function PushNotificationManager() {
              branches.forEach(b => topics.push(`hod_${b.replace(/[ ()]/g, "_")}`));
           }
           
-          // Send to Next.js API to link the token to the Firebase Topics
-          await fetch('/api/subscribe-topics', {
-             method: 'POST',
-             headers: { 'Content-Type': 'application/json' },
-             body: JSON.stringify({ token: currentToken, topics })
-          });
+          // Silently fail if the subscribe API doesn't exist yet, to not disrupt the user
+          try {
+            await fetch('/api/subscribe-topics', {
+               method: 'POST',
+               headers: { 'Content-Type': 'application/json' },
+               body: JSON.stringify({ token: currentToken, topics })
+            });
+          } catch (e) { console.warn("Topic subscription skipped."); }
           
           alert("Notifications Enabled!");
         }
@@ -94,4 +104,3 @@ export default function PushNotificationManager() {
     </div>
   );
 }
-
