@@ -35,7 +35,7 @@ export default function Home() {
     return () => unsubscribeAuth();
   }, []);
 
-  // GLOBAL KICK-OUT LISTENER FOR PARENTS (WITH CACHE DEBOUNCE FIX)
+  // GLOBAL KICK-OUT LISTENER FOR PARENTS
   useEffect(() => {
     if (userRole === 'parent' && studentSession?.studentId && currentUser?.email) {
       let kickoutTimer: any;
@@ -102,29 +102,34 @@ export default function Home() {
     router.push(path);
   };
 
-  // Reusable styling strings for the 3D Tactile Buttons
-  const btnWrapperClass = "block w-full text-left group transition-all duration-200 ease-out active:scale-[0.97] active:translate-y-1.5 focus:outline-none";
+  // THE FIX: Physical 3D Tactile Buttons
+  const btnWrapperClass = "block w-full text-left group focus:outline-none";
   
   const glassPanelClass = `
-    p-6 rounded-[24px] backdrop-blur-xl flex items-center justify-between transition-all duration-300
-    bg-white/[0.04] border border-white/10 border-t-white/20 border-b-black/50
-    shadow-[0_8px_24px_rgba(0,0,0,0.4),inset_0_1px_1px_rgba(255,255,255,0.2),inset_0_-4px_10px_rgba(0,0,0,0.3)]
-    hover:bg-white/[0.07] hover:border-[#D0BCFF]/40 hover:shadow-[0_12px_32px_rgba(208,188,255,0.15),inset_0_1px_1px_rgba(255,255,255,0.3),inset_0_-4px_10px_rgba(0,0,0,0.4)]
-    group-active:bg-black/20 group-active:border-t-transparent group-active:shadow-[inset_0_4px_16px_rgba(0,0,0,0.7)]
+    relative p-6 rounded-[24px] flex items-center justify-between
+    bg-white/[0.04] backdrop-blur-xl
+    border-x border-t border-white/10 border-t-white/20
+    border-b-[6px] border-b-[#5B21B6]
+    shadow-[0_10px_20px_rgba(0,0,0,0.3)]
+    transition-all duration-150 ease-out
+    hover:bg-white/[0.06] hover:border-b-[#6D28D9] hover:shadow-[0_15px_30px_rgba(91,33,182,0.25)]
+    active:border-b-[0px] active:translate-y-[6px] active:shadow-[0_2px_5px_rgba(0,0,0,0.4)]
+    active:bg-white/[0.08] active:border-b-transparent
   `;
 
   const iconBoxClass = `
     p-3 rounded-2xl transition-all duration-300
-    bg-[#D0BCFF]/10 text-[#D0BCFF] border border-[#D0BCFF]/20 
-    shadow-[inset_0_1px_2px_rgba(208,188,255,0.3)]
-    group-hover:bg-[#D0BCFF]/20 group-hover:scale-105 group-active:scale-95 group-active:bg-[#D0BCFF]/5
+    bg-[#D0BCFF]/10 text-[#D0BCFF] border border-white/5
+    shadow-[inset_0_1px_2px_rgba(255,255,255,0.1)]
+    group-hover:bg-[#D0BCFF]/20 group-hover:scale-110 
+    group-active:scale-95 group-active:bg-[#D0BCFF]/5
   `;
 
   return (
     <main className="relative min-h-screen w-full flex flex-col items-center justify-between p-6 md:p-12 text-white">
       
       <div className="flex flex-col items-center text-center mt-12">
-        <div className="p-4 rounded-[2rem] bg-white/5 backdrop-blur-xl border border-white/20 border-t-white/40 border-b-black/40 shadow-[0_10px_30px_rgba(0,0,0,0.5),inset_0_2px_4px_rgba(255,255,255,0.2)] mb-6">
+        <div className="p-4 rounded-[2rem] bg-white/5 backdrop-blur-xl border border-white/20 border-t-white/40 border-b-[4px] border-b-black/40 shadow-[0_10px_30px_rgba(0,0,0,0.5)] mb-6">
           <GraduationCap className="w-16 h-16 text-[#D0BCFF] drop-shadow-[0_0_15px_rgba(208,188,255,0.4)]" />
         </div>
         <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight drop-shadow-xl">
@@ -142,10 +147,10 @@ export default function Home() {
           <div className={glassPanelClass}>
             <div className="flex items-center space-x-4">
               <div className={iconBoxClass}>
-                <GraduationCap className="w-8 h-8 drop-shadow-lg" />
+                <GraduationCap className="w-8 h-8 drop-shadow-md" />
               </div>
               <div className="text-left">
-                <h3 className="text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors drop-shadow-md">Faculty Portal</h3>
+                <h3 className="text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors drop-shadow-sm">Faculty Portal</h3>
                 <p className="text-sm text-neutral-400 font-medium group-active:opacity-70 transition-opacity">Mark attendance, upload notes &amp; view analytics</p>
               </div>
             </div>
@@ -158,10 +163,10 @@ export default function Home() {
           <div className={glassPanelClass}>
             <div className="flex items-center space-x-4">
               <div className={iconBoxClass}>
-                <User className="w-8 h-8 drop-shadow-lg" />
+                <User className="w-8 h-8 drop-shadow-md" />
               </div>
               <div className="text-left">
-                <h3 className="text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors drop-shadow-md">Student Portal</h3>
+                <h3 className="text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors drop-shadow-sm">Student Portal</h3>
                 <p className="text-sm text-neutral-400 font-medium group-active:opacity-70 transition-opacity">Track attendance, download materials &amp; view scores</p>
               </div>
             </div>
@@ -174,10 +179,10 @@ export default function Home() {
           <div className={glassPanelClass}>
             <div className="flex items-center space-x-4">
               <div className={iconBoxClass}>
-                <User className="w-8 h-8 drop-shadow-lg" />
+                <User className="w-8 h-8 drop-shadow-md" />
               </div>
               <div className="text-left">
-                <h3 className="text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors drop-shadow-md">Parents' Portal</h3>
+                <h3 className="text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors drop-shadow-sm">Parents' Portal</h3>
                 <p className="text-sm text-neutral-400 font-medium group-active:opacity-70 transition-opacity">Monitor attendance and academic progress</p>
               </div>
             </div>
@@ -190,10 +195,10 @@ export default function Home() {
           <div className={glassPanelClass}>
             <div className="flex items-center space-x-4">
               <div className={iconBoxClass}>
-                <ShieldCheck className="w-8 h-8 drop-shadow-lg" />
+                <ShieldCheck className="w-8 h-8 drop-shadow-md" />
               </div>
               <div className="text-left">
-                <h3 className="text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors drop-shadow-md">Security Portal</h3>
+                <h3 className="text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors drop-shadow-sm">Security Portal</h3>
                 <p className="text-sm text-neutral-400 font-medium group-active:opacity-70 transition-opacity">Guard scanner for digital gate passes</p>
               </div>
             </div>
