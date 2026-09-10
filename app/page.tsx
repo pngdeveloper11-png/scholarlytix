@@ -75,7 +75,7 @@ export default function Home() {
     if (userRole === 'parent' && currentUser) {
       if (studentSession) router.replace('/student/dashboard');
       else router.replace('/parent/linking');
-    } else if (userRole === 'student' && currentUser) { // FIXED: Checking currentUser, not studentSession
+    } else if (userRole === 'student' && currentUser) { 
       router.replace('/student/dashboard');
     } else if (userRole === 'faculty' && currentUser) {
       if (localStorage.getItem("academiq_faculty_id")) {
@@ -90,7 +90,7 @@ export default function Home() {
 
   const isRedirecting = 
     (userRole === 'parent' && currentUser) ||
-    (userRole === 'student' && currentUser) || // FIXED
+    (userRole === 'student' && currentUser) || 
     (userRole === 'faculty' && currentUser && localStorage.getItem("academiq_faculty_id"));
 
   if (isRedirecting) {
@@ -102,96 +102,120 @@ export default function Home() {
     router.push(path);
   };
 
+  // Reusable styling strings for the 3D Tactile Buttons
+  const btnWrapperClass = "block w-full text-left group transition-all duration-200 ease-out active:scale-[0.97] active:translate-y-1.5 focus:outline-none";
+  
+  const glassPanelClass = `
+    p-6 rounded-[24px] backdrop-blur-xl flex items-center justify-between transition-all duration-300
+    bg-white/[0.04] border border-white/10 border-t-white/20 border-b-black/50
+    shadow-[0_8px_24px_rgba(0,0,0,0.4),inset_0_1px_1px_rgba(255,255,255,0.2),inset_0_-4px_10px_rgba(0,0,0,0.3)]
+    hover:bg-white/[0.07] hover:border-[#D0BCFF]/40 hover:shadow-[0_12px_32px_rgba(208,188,255,0.15),inset_0_1px_1px_rgba(255,255,255,0.3),inset_0_-4px_10px_rgba(0,0,0,0.4)]
+    group-active:bg-black/20 group-active:border-t-transparent group-active:shadow-[inset_0_4px_16px_rgba(0,0,0,0.7)]
+  `;
+
+  const iconBoxClass = `
+    p-3 rounded-2xl transition-all duration-300
+    bg-[#D0BCFF]/10 text-[#D0BCFF] border border-[#D0BCFF]/20 
+    shadow-[inset_0_1px_2px_rgba(208,188,255,0.3)]
+    group-hover:bg-[#D0BCFF]/20 group-hover:scale-105 group-active:scale-95 group-active:bg-[#D0BCFF]/5
+  `;
+
   return (
     <main className="relative min-h-screen w-full flex flex-col items-center justify-between p-6 md:p-12 text-white">
       
       <div className="flex flex-col items-center text-center mt-12">
-        <div className="p-4 rounded-3xl bg-white/10 backdrop-blur-xl border border-white/20 shadow-2xl mb-6">
-          <GraduationCap className="w-16 h-16 text-[#D0BCFF]" />
+        <div className="p-4 rounded-[2rem] bg-white/5 backdrop-blur-xl border border-white/20 border-t-white/40 border-b-black/40 shadow-[0_10px_30px_rgba(0,0,0,0.5),inset_0_2px_4px_rgba(255,255,255,0.2)] mb-6">
+          <GraduationCap className="w-16 h-16 text-[#D0BCFF] drop-shadow-[0_0_15px_rgba(208,188,255,0.4)]" />
         </div>
-        <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight">
+        <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight drop-shadow-xl">
           Scholarlytix<span className="text-[#D0BCFF]"></span>
         </h1>
-        <p className="text-lg md:text-xl text-neutral-400 mt-3 max-w-md">
+        <p className="text-lg md:text-xl text-neutral-400 mt-3 max-w-md font-medium drop-shadow-md">
           The Intelligent EdTech Ecosystem &amp; Autonomous Assistant
         </p>
       </div>
 
-      <div className="w-full max-w-md space-y-4 my-8">
-        <button onClick={() => handleRoleSelect('faculty', '/faculty/login')} className="block w-full text-left group">
-          <div className="p-6 rounded-2xl bg-white/5 backdrop-blur-md border border-white/15 hover:border-[#D0BCFF]/50 hover:bg-white/10 transition-all duration-300 shadow-xl flex items-center justify-between">
+      <div className="w-full max-w-md space-y-5 my-10">
+        
+        {/* Faculty Button */}
+        <button onClick={() => handleRoleSelect('faculty', '/faculty/login')} className={btnWrapperClass}>
+          <div className={glassPanelClass}>
             <div className="flex items-center space-x-4">
-              <div className="p-3 rounded-xl bg-[#D0BCFF]/20 text-[#D0BCFF]">
-                <GraduationCap className="w-8 h-8" />
+              <div className={iconBoxClass}>
+                <GraduationCap className="w-8 h-8 drop-shadow-lg" />
               </div>
               <div className="text-left">
-                <h3 className="text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors">Faculty Portal</h3>
-                <p className="text-sm text-neutral-400">Mark attendance, upload notes &amp; view analytics</p>
+                <h3 className="text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors drop-shadow-md">Faculty Portal</h3>
+                <p className="text-sm text-neutral-400 font-medium group-active:opacity-70 transition-opacity">Mark attendance, upload notes &amp; view analytics</p>
               </div>
             </div>
-            <ArrowRight className="w-6 h-6 text-neutral-400 group-hover:text-[#D0BCFF] group-hover:translate-x-1 transition-all" />
+            <ArrowRight className="w-6 h-6 text-neutral-400 group-hover:text-[#D0BCFF] group-hover:translate-x-1.5 transition-transform duration-300" />
           </div>
         </button>
 
-        <button onClick={() => handleRoleSelect('student', '/student/login')} className="block w-full text-left group">
-          <div className="p-6 rounded-2xl bg-white/5 backdrop-blur-md border border-white/15 hover:border-[#D0BCFF]/50 hover:bg-white/10 transition-all duration-300 shadow-xl flex items-center justify-between">
+        {/* Student Button */}
+        <button onClick={() => handleRoleSelect('student', '/student/login')} className={btnWrapperClass}>
+          <div className={glassPanelClass}>
             <div className="flex items-center space-x-4">
-              <div className="p-3 rounded-xl bg-[#D0BCFF]/20 text-[#D0BCFF]">
-                <User className="w-8 h-8" />
+              <div className={iconBoxClass}>
+                <User className="w-8 h-8 drop-shadow-lg" />
               </div>
               <div className="text-left">
-                <h3 className="text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors">Student Portal</h3>
-                <p className="text-sm text-neutral-400">Track attendance, download materials &amp; view scores</p>
+                <h3 className="text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors drop-shadow-md">Student Portal</h3>
+                <p className="text-sm text-neutral-400 font-medium group-active:opacity-70 transition-opacity">Track attendance, download materials &amp; view scores</p>
               </div>
             </div>
-            <ArrowRight className="w-6 h-6 text-neutral-400 group-hover:text-[#D0BCFF] group-hover:translate-x-1 transition-all" />
+            <ArrowRight className="w-6 h-6 text-neutral-400 group-hover:text-[#D0BCFF] group-hover:translate-x-1.5 transition-transform duration-300" />
           </div>
         </button>
 
-        <button onClick={() => handleRoleSelect('parent', '/parent/linking')} className="block w-full text-left group">
-          <div className="p-6 rounded-2xl bg-white/5 backdrop-blur-md border border-white/15 hover:border-[#D0BCFF]/50 hover:bg-white/10 transition-all duration-300 shadow-xl flex items-center justify-between">
+        {/* Parents Button */}
+        <button onClick={() => handleRoleSelect('parent', '/parent/linking')} className={btnWrapperClass}>
+          <div className={glassPanelClass}>
             <div className="flex items-center space-x-4">
-              <div className="p-3 rounded-xl bg-[#D0BCFF]/20 text-[#D0BCFF]">
-                <User className="w-8 h-8" />
+              <div className={iconBoxClass}>
+                <User className="w-8 h-8 drop-shadow-lg" />
               </div>
               <div className="text-left">
-                <h3 className="text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors">Parents' Portal</h3>
-                <p className="text-sm text-neutral-400">Monitor attendance and academic progress</p>
+                <h3 className="text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors drop-shadow-md">Parents' Portal</h3>
+                <p className="text-sm text-neutral-400 font-medium group-active:opacity-70 transition-opacity">Monitor attendance and academic progress</p>
               </div>
             </div>
-            <ArrowRight className="w-6 h-6 text-neutral-400 group-hover:text-[#D0BCFF] group-hover:translate-x-1 transition-all" />
+            <ArrowRight className="w-6 h-6 text-neutral-400 group-hover:text-[#D0BCFF] group-hover:translate-x-1.5 transition-transform duration-300" />
           </div>
         </button>
 
-        <button onClick={() => router.push('/guard')} className="block w-full text-left group">
-          <div className="p-6 rounded-2xl bg-white/5 backdrop-blur-md border border-white/15 hover:border-[#D0BCFF]/50 hover:bg-white/10 transition-all duration-300 shadow-xl flex items-center justify-between">
+        {/* Security Button */}
+        <button onClick={() => router.push('/guard')} className={btnWrapperClass}>
+          <div className={glassPanelClass}>
             <div className="flex items-center space-x-4">
-              <div className="p-3 rounded-xl bg-[#D0BCFF]/20 text-[#D0BCFF]">
-                <ShieldCheck className="w-8 h-8" />
+              <div className={iconBoxClass}>
+                <ShieldCheck className="w-8 h-8 drop-shadow-lg" />
               </div>
               <div className="text-left">
-                <h3 className="text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors">Security Portal</h3>
-                <p className="text-sm text-neutral-400">Guard scanner for digital gate passes</p>
+                <h3 className="text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors drop-shadow-md">Security Portal</h3>
+                <p className="text-sm text-neutral-400 font-medium group-active:opacity-70 transition-opacity">Guard scanner for digital gate passes</p>
               </div>
             </div>
-            <ArrowRight className="w-6 h-6 text-neutral-400 group-hover:text-[#D0BCFF] group-hover:translate-x-1 transition-all" />
+            <ArrowRight className="w-6 h-6 text-neutral-400 group-hover:text-[#D0BCFF] group-hover:translate-x-1.5 transition-transform duration-300" />
           </div>
         </button>
+
       </div>
 
-      <div className="w-full max-w-md mb-12">
+      <div className="w-full max-w-md mb-12 relative z-10 drop-shadow-[0_10px_20px_rgba(0,0,0,0.5)]">
         <DownloadAppButton />
       </div>
 
       <div className="flex flex-col items-center text-center space-y-2 mb-4">
-        <p className="text-xs font-medium text-white/70">Developed by - Pratosh Gharat</p>
-        <div className="relative h-14 w-44 flex items-center justify-center">
+        <p className="text-xs font-medium text-white/50 tracking-wide uppercase">Developed by - Pratosh Gharat</p>
+        <div className="relative h-14 w-44 flex items-center justify-center opacity-80 hover:opacity-100 transition-opacity">
           <Image 
             src="/signature.png" 
             alt="Pratosh Gharat Signature" 
             fill
             sizes="(max-width: 768px) 100vw, 176px"
-            className="object-contain brightness-0 invert" 
+            className="object-contain brightness-0 invert drop-shadow-md" 
           />
         </div>
       </div>
