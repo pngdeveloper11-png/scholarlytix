@@ -69,7 +69,6 @@ export default function FacultyLeavesAndTransfersTab({
 
     // 1. My Leaves
     const unsubMyLeaves = onSnapshot(query(collection(db, "faculty_leaves"), where("facultyUid", "==", currentUid)), (snap) => {
-      // FIXED: Added (d.data() as any)
       setMyLeaves(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as FacultyLeaveApplication)).sort((a, b) => b.appliedAt - a.appliedAt));
     });
 
@@ -81,7 +80,6 @@ export default function FacultyLeavesAndTransfersTab({
         : role?.replace("HOD|", "").split(",") || [];
 
       unsubAdmin = onSnapshot(collection(db, "faculty_leaves"), (snap) => {
-        // FIXED: Added (d.data() as any)
         const allLeaves = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as FacultyLeaveApplication));
         
         setPendingLeaves(allLeaves.filter(app => {
@@ -99,7 +97,6 @@ export default function FacultyLeavesAndTransfersTab({
 
     // 3. Proxy Market
     const unsubProxies = onSnapshot(collection(db, "proxy_requests"), (snap) => {
-      // FIXED: Added (d.data() as any)
       const allReqs = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as ProxyRequest));
       setOpenProxies(allReqs.filter(req => myBranches.includes(req.branch) || myBranches.length === 0).sort((a, b) => b.timestamp - a.timestamp));
     });
@@ -107,13 +104,13 @@ export default function FacultyLeavesAndTransfersTab({
     return () => { unsubMyLeaves(); unsubAdmin(); unsubProxies(); };
   }, [currentUid, role, isAnyAdmin]);
 
-  // Helper: Trigger Push Notification
-  const triggerPush = async (topic: string, title: string, message: string) => {
+  // Helper: Trigger Targeted Push Notification
+  const triggerPush = async (topic: string, title: string, message: string, targetTab: string) => {
     try {
       await fetch('/api/send-fcm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetTopic: topic, title, message, targetTab: 'Leaves & Transfers' })
+        body: JSON.stringify({ targetTopic: topic, title, message, targetTab })
       });
     } catch (e) { console.error("Push failed", e); }
   };
@@ -149,10 +146,10 @@ export default function FacultyLeavesAndTransfersTab({
       const docRef = doc(collection(db, "faculty_leaves"));
       await setDoc(docRef, appData);
 
-      // Alert HODs
+      // Alert specific HODs for the requested branches
       const branchesToAlert = affectedBranches ? affectedBranches.split(",") : myBranches;
       branchesToAlert.forEach(br => {
-        triggerPush(`hod_${br.replace(/[ ()]/g, "_")}`, "New Leave Request 📝", `${currentName} applied for leave.`);
+        triggerPush(`hod_${br.replace(/[ ()]/g, "_")}`, "New Leave Request 📝", `${currentName} applied for leave.`, "Faculty Leaves");
       });
 
       alert("Leave Application Submitted!");
@@ -180,7 +177,7 @@ export default function FacultyLeavesAndTransfersTab({
       if ((finalHod === "APPROVED" || finalHod === "NA") && finalReg === "APPROVED" && finalPrin === "APPROVED") {
         updates.status = "APPROVED";
 
-        // Generate Proxies
+        // Generate Proxies Automatically
         const batch = writeBatch(db);
         app.lecturesToTransfer.forEach(lec => {
           const proxyRef = doc(collection(db, "proxy_requests"));
@@ -200,10 +197,11 @@ export default function FacultyLeavesAndTransfersTab({
         });
         await batch.commit();
 
-        // Broadcast to Market
+        // Broadcast directly to the Market for specific teachers
         if (app.lecturesToTransfer.length > 0) {
-          app.branch.split(",").forEach(br => {
-            if (br.trim()) triggerPush(`transfers_${br.trim().replace(/[ ()]/g, "_")}`, "Lecture Transfer 🔄", `Prof. ${app.facultyName} has open proxies available.`);
+          const branchesToAlert = Array.from(new Set(app.lecturesToTransfer.map(l => l.branch).filter(Boolean))) as string[];
+          branchesToAlert.forEach(br => {
+            triggerPush(`transfers_${br.replace(/[ ()]/g, "_")}`, "Lecture Transfer 🔄", `Prof. ${app.facultyName} has open proxies available in ${br}.`, "Faculty Leaves");
           });
         }
       }
@@ -223,8 +221,20 @@ export default function FacultyLeavesAndTransfersTab({
         return "SUCCESS";
       });
 
-      if (result.startsWith("TAKEN|")) alert(`Too late! Already claimed by Prof. ${result.split("|")[1]}`);
-      else alert("Lecture Claimed Successfully!");
+      if (result.startsWith("TAKEN|")) {
+        alert(`Too late! Already claimed by Prof. ${result.split("|")[1]}`);
+      } else {
+        alert("Lecture Claimed Successfully!");
+        
+        const cleanSem = (req.semester || "").replace(/ /g, "_");
+        const cleanBranch = (req.branch || "").replace(/[ ()]/g, "_");
+
+        // 1. Notify Students of the Schedule Change
+        triggerPush(`topic_${cleanSem}_${cleanBranch}`, "🔄 Timetable Update", `Prof. ${currentName} will be taking the ${req.subject} lecture today.`, "Timetable");
+
+        // 2. Notify HOD of the Claim
+        triggerPush(`hod_${cleanBranch}`, "✅ Proxy Claimed", `Prof. ${currentName} has accepted the ${req.subject} proxy for Prof. ${req.requestedByName}.`, "Faculty Leaves");
+      }
     } catch (e) { alert("Failed to claim lecture."); }
   };
 
@@ -497,7 +507,6 @@ function AuditLogCard({ app, cardBg, textStyle, formatDate }: { app: FacultyLeav
       import('firebase/firestore').then(({ getDocs, query, collection, where }) => {
         const q = query(collection(db, "proxy_requests"), where("requestedByUid", "==", app.facultyUid), where("lectureDate", "==", app.startDate));
         getDocs(q).then(snap => {
-          // FIXED: Added (d.data() as any)
           setClaimedProxies(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as ProxyRequest)));
         });
       });

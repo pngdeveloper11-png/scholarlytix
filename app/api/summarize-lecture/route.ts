@@ -70,4 +70,4 @@ export async function POST(request: Request) {
     console.error("Marks API Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-}
+} 

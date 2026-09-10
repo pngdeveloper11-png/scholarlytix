@@ -1,19 +1,11 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { collection, query, onSnapshot, doc, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, setDoc, updateDoc, getDoc } from 'firebase/firestore';
 import { db, auth } from '@/lib/firebase';
-import { ShieldCheck, Search, Loader2, CheckCircle, XCircle, FileText } from 'lucide-react';
-
-const DURATION_OPTIONS = [
-  { label: "1 Hour", ms: 3600000 },
-  { label: "2 Hours", ms: 7200000 },
-  { label: "4 Hours", ms: 14400000 },
-  { label: "Full Day", ms: 28800000 }
-];
+import { ShieldCheck, Search, Loader2, FileText, Clock } from 'lucide-react';
 
 export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
-  // Added "leaves" to review student leave applications
   const [activeSubTab, setActiveSubTab] = useState<"issue" | "history" | "leaves">("issue");
   
   const [students, setStudents] = useState<any[]>([]);
@@ -24,32 +16,23 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [reason, setReason] = useState("Medical Emergency");
   const [customReason, setCustomReason] = useState("");
-  const [durationMs, setDurationMs] = useState(DURATION_OPTIONS[1].ms);
   const [isIssuing, setIsIssuing] = useState(false);
 
   const currentUser = auth.currentUser;
   const facultyName = currentUser?.displayName || localStorage.getItem("academiq_faculty_name") || "Faculty Mentor";
 
   useEffect(() => {
-    const unsubStudents = onSnapshot(collection(db, "students_directory"), (snap) => {
-      setStudents(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })));
-    });
-
+    const unsubStudents = onSnapshot(collection(db, "students_directory"), (snap) => setStudents(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }))));
     const unsubPasses = onSnapshot(collection(db, "gate_passes"), (snap) => {
       const allPasses = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
       const myPasses = allPasses.filter(p => p.facultyUid === currentUser?.uid || p.issuedByName === facultyName || p.issuedBy === facultyName);
       myPasses.sort((a, b) => (b.issuedAt || 0) - (a.issuedAt || 0));
       setIssuedHistory(myPasses);
     });
-
-    // Real-time listener for Student Leave Applications
     const unsubLeaves = onSnapshot(collection(db, "leave_applications"), (snap) => {
-      const allLeaves = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-      // We show pending and recent processed leaves
-      allLeaves.sort((a, b) => (b.appliedAt || 0) - (a.appliedAt || 0));
+      const allLeaves = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).sort((a, b) => (b.appliedAt || 0) - (a.appliedAt || 0));
       setStudentLeaves(allLeaves);
     });
-
     return () => { unsubStudents(); unsubPasses(); unsubLeaves(); };
   }, [currentUser?.uid, facultyName]);
 
@@ -63,6 +46,13 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
       const passToken = Array.from({ length: 10 }, () => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".charAt(Math.floor(Math.random() * 32))).join('');
       const now = Date.now();
       
+      // Strict 3:30 PM cutoff for Gate Passes
+      const expiry = new Date();
+      expiry.setHours(15, 30, 0, 0);
+      if (now > expiry.getTime()) {
+         expiry.setDate(expiry.getDate() + 1); // If issued after 3:30PM, valid until 3:30PM tomorrow
+      }
+      
       await setDoc(doc(db, "gate_passes", passToken), {
         passId: passToken,
         studentId: selectedStudent.id,
@@ -75,9 +65,24 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
         issuedByName: facultyName,
         facultyUid: currentUser?.uid || "",
         issuedAt: now,
-        expiresAt: now + durationMs,
+        expiresAt: expiry.getTime(),
         status: "ACTIVE"
       });
+
+      // --- SEND INSTANT PUSH TO THE STUDENT'S DEVICE ---
+      if (selectedStudent.fcmToken) {
+        await fetch('/api/send-fcm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            targetToken: selectedStudent.fcmToken,
+            title: "Digital Gate Pass Issued 🎟️",
+            message: "Your exit pass has been approved. Open the app to view your secure QR code.",
+            targetTab: "Gate Pass"
+          })
+        }).catch(console.error);
+      }
+
       alert(`Gate Pass issued to ${selectedStudent.fullName}.`);
       setSelectedStudent(null); setSearchQuery(""); setCustomReason(""); setActiveSubTab("history");
     } catch (e) { alert("Failed to issue pass."); } finally { setIsIssuing(false); }
@@ -88,12 +93,26 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
     try { await updateDoc(doc(db, "gate_passes", passId), { status: "EXPIRED" }); } catch (e) { alert("Failed to revoke pass."); }
   };
 
-  const handleLeaveApproval = async (leaveId: string, status: "APPROVED" | "REJECTED") => {
-    try {
-      await updateDoc(doc(db, "leave_applications", leaveId), { 
-        status: status,
-        mentorApproval: status === "APPROVED" ? facultyName : "REJECTED"
-      });
+  const handleLeaveApproval = async (leaveId: string, status: "APPROVED" | "REJECTED", studentId: string) => {
+    try { 
+      await updateDoc(doc(db, "leave_applications", leaveId), { status: status, mentorApproval: status === "APPROVED" ? facultyName : "REJECTED" }); 
+      
+      // Notify the student about the leave status instantly
+      const sDoc = await getDoc(doc(db, "students_directory", studentId));
+      if (sDoc.exists() && sDoc.data().fcmToken) {
+         await fetch('/api/send-fcm', {
+           method: 'POST',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({
+             targetToken: sDoc.data().fcmToken,
+             title: status === "APPROVED" ? "Leave Approved ✅" : "Leave Rejected ❌",
+             message: status === "APPROVED" ? "Your leave application has been approved." : "Your leave application was rejected.",
+             targetTab: "Leave"
+           })
+         }).catch(console.error);
+      }
+      
+      alert(`Leave ${status.toLowerCase()} successfully.`);
     } catch (e) { alert("Action failed."); }
   };
 
@@ -101,8 +120,8 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
   const cardBg = isDark ? 'bg-white/[0.08] border-white/20 backdrop-blur-2xl' : 'bg-white border-black/10 shadow-lg';
 
   return (
-    <div className="w-full flex flex-col space-y-6 animate-in fade-in duration-300">
-      <div className="flex space-x-3 bg-white/5 p-1.5 rounded-2xl border border-white/10 w-fit overflow-x-auto">
+    <div className="w-full flex flex-col h-full overflow-y-auto pr-2 pb-24 [&::-webkit-scrollbar]:hidden">
+      <div className="flex space-x-3 bg-white/5 p-1.5 rounded-2xl border border-white/10 w-fit overflow-x-auto mb-6">
         <button onClick={() => setActiveSubTab("issue")} className={`px-5 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${activeSubTab === "issue" ? 'bg-[#D0BCFF] text-[#2A1B4E]' : 'opacity-60 hover:opacity-100 text-white'}`}>Issue Pass</button>
         <button onClick={() => setActiveSubTab("history")} className={`px-5 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${activeSubTab === "history" ? 'bg-[#D0BCFF] text-[#2A1B4E]' : 'opacity-60 hover:opacity-100 text-white'}`}>History & Active</button>
         <button onClick={() => setActiveSubTab("leaves")} className={`px-5 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all flex items-center gap-2 ${activeSubTab === "leaves" ? 'bg-[#D0BCFF] text-[#2A1B4E]' : 'opacity-60 hover:opacity-100 text-white'}`}>
@@ -146,12 +165,14 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
           </div>
           {reason === "Other" && <input type="text" placeholder="Specify custom reason..." value={customReason} onChange={e => setCustomReason(e.target.value)} className="w-full bg-black/30 border border-white/10 rounded-2xl p-4 outline-none focus:border-[#D0BCFF]" />}
           
-          <div>
-            <label className="text-xs font-bold uppercase opacity-60 mb-2 block">Valid Window</label>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              {DURATION_OPTIONS.map(opt => <button key={opt.label} type="button" onClick={() => setDurationMs(opt.ms)} className={`p-3 rounded-xl border text-xs font-bold transition-all ${durationMs === opt.ms ? 'bg-[#D0BCFF] text-[#2A1B4E] border-[#D0BCFF]' : 'border-white/10 bg-black/20 text-white opacity-70'}`}>{opt.label}</button>)}
-            </div>
+          <div className="p-4 bg-white/[0.05] border border-white/10 rounded-xl flex items-center gap-3">
+             <Clock className="w-5 h-5 text-[#D0BCFF]" />
+             <div>
+               <p className="text-sm font-bold">Valid Window</p>
+               <p className="text-xs opacity-60">This pass will expire automatically at 3:30 PM today.</p>
+             </div>
           </div>
+
           <button onClick={handleIssuePass} disabled={isIssuing || !selectedStudent} className="w-full py-4 bg-[#D0BCFF] text-[#2A1B4E] rounded-2xl font-bold flex justify-center items-center hover:scale-[1.01] transition-transform disabled:opacity-50">
             {isIssuing ? <Loader2 className="w-5 h-5 animate-spin" /> : "Issue Scannable Gate Pass"}
           </button>
@@ -196,8 +217,8 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
               </div>
               {leave.status === "PENDING" ? (
                 <div className="flex gap-3">
-                  <button onClick={() => handleLeaveApproval(leave.id, "REJECTED")} className="flex-1 py-2.5 bg-red-500/10 text-red-400 border border-red-500/20 rounded-xl font-bold hover:bg-red-500/20 transition-colors">Reject</button>
-                  <button onClick={() => handleLeaveApproval(leave.id, "APPROVED")} className="flex-1 py-2.5 bg-green-500 text-white rounded-xl font-bold hover:bg-green-600 transition-colors shadow-[0_0_15px_rgba(34,197,94,0.3)]">Approve</button>
+                  <button onClick={() => handleLeaveApproval(leave.id, "REJECTED", leave.studentId)} className="flex-1 py-2.5 bg-red-500/10 text-red-400 border border-red-500/20 rounded-xl font-bold hover:bg-red-500/20 transition-colors">Reject</button>
+                  <button onClick={() => handleLeaveApproval(leave.id, "APPROVED", leave.studentId)} className="flex-1 py-2.5 bg-green-500 text-white rounded-xl font-bold hover:bg-green-600 transition-colors shadow-[0_0_15px_rgba(34,197,94,0.3)]">Approve</button>
                 </div>
               ) : (
                 <p className="text-xs opacity-50 mt-2">Processed by {leave.mentorApproval}</p>

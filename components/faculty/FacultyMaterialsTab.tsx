@@ -1,25 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { collection, doc, addDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase'; 
 import { useAuth } from '../../app/context/AuthContext';
-import { Loader2, UploadCloud, Trash2, FileQuestion, BookOpen, ExternalLink } from 'lucide-react';
+import { Loader2, UploadCloud, Trash2, FileQuestion, BookOpen, ExternalLink, Paperclip, X, Link as LinkIcon } from 'lucide-react';
 import GlassDropdown from '../GlassDropdown';
-
-const getDriveViewUrl = (url: string) => {
-  if (!url) return '';
-  try {
-    if (url.includes('file/d/')) {
-      const fileId = url.split('file/d/')[1].split('/')[0];
-      return `https://drive.google.com/file/d/${fileId}/view`;
-    } else if (url.includes('id=')) {
-      const fileId = url.split('id=')[1].split('&')[0];
-      return `https://drive.google.com/file/d/${fileId}/view`;
-    }
-  } catch (e) {}
-  return url;
-};
 
 export default function FacultyMaterialsTab() {
   const { user, role } = useAuth();
@@ -66,26 +52,24 @@ export default function FacultyMaterialsTab() {
   const handleDelete = async (mat: any) => {
     if (confirm("Delete this material permanently from all student devices and Google Drive?")) {
       try {
-        if (mat.downloadUrl) {
-          await fetch('/api/upload-drive', {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: mat.downloadUrl })
-          });
+        if (mat.attachments) {
+           for (const att of mat.attachments) {
+             await fetch('/api/upload-drive', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: att.url }) });
+           }
         }
-        
         await deleteDoc(doc(db, "study_materials", mat.id));
-        alert("Material completely deleted.");
-      } catch(e) {
-        alert("Error deleting file.");
-      }
+      } catch(e) {}
     }
   };
 
   const availableClasses = Object.keys(teachingConfig);
   const validSems = Array.from(new Set(availableClasses.map(c => c.split("|")[0])));
   const validBranches = Array.from(new Set(availableClasses.filter(c => c.startsWith(viewSem)).map(c => c.split("|")[1])));
-  const validSubjects = teachingConfig[`${viewSem}|${viewBranch}`] || [];
+  
+  // Aggregate subjects for Sem+Branch just like in Tests tab
+  const validSubjects = Array.from(new Set(
+    Object.keys(teachingConfig).filter(k => k.startsWith(`${viewSem}|${viewBranch}`)).flatMap(k => teachingConfig[k])
+  ));
 
   const myUploads = materials.filter(m => isHod || m.facultyName === user?.displayName);
   const displayedMaterials = myUploads.filter(m => {
@@ -96,7 +80,7 @@ export default function FacultyMaterialsTab() {
 
   return (
     <div className="w-full flex flex-col h-full relative">
-      <div className="flex-1 overflow-y-auto pr-2 pb-24 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
+      <div className="flex-1 overflow-y-auto pr-2 pb-24 [&::-webkit-scrollbar]:hidden">
         <h2 className="text-2xl font-bold text-white mb-6">Study Materials</h2>
 
         <div className="flex space-x-3 mb-6">
@@ -107,7 +91,7 @@ export default function FacultyMaterialsTab() {
           </div>
         </div>
 
-        <div className="flex space-x-3 mb-8 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
+        <div className="flex space-x-3 mb-8 overflow-x-auto [&::-webkit-scrollbar]:hidden">
            {["All", "Notes", "Question Papers"].map(cat => (
              <button key={cat} onClick={() => setCategoryFilter(cat)} 
                className={`px-5 py-2.5 rounded-[12px] text-sm font-bold transition-all border ${categoryFilter === cat ? 'bg-[#4F378B] text-white border-[#4F378B]' : 'bg-white/[0.05] text-white border-white/20 hover:bg-white/[0.1]'}`}
@@ -125,45 +109,47 @@ export default function FacultyMaterialsTab() {
               const timestampMs = mat.timestamp?.seconds ? mat.timestamp.seconds * 1000 : (mat.timestamp || Date.now());
               const dateStr = new Date(timestampMs).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
               return (
-                <div 
-                  key={mat.id} 
-                  onClick={() => {
-                    if (mat.downloadUrl) {
-                      window.open(getDriveViewUrl(mat.downloadUrl), '_blank');
-                    }
-                  }}
-                  className="bg-white/[0.08] backdrop-blur-[40px] border border-white/20 p-5 rounded-2xl flex items-center justify-between group cursor-pointer hover:bg-white/[0.12] transition-all"
-                >
-                  <div className="flex items-center space-x-5 overflow-hidden">
-                    <div className="p-3 bg-white/[0.05] rounded-xl border border-white/10">
-                      {mat.category === "Question Paper" ? <FileQuestion className="w-6 h-6 text-white" /> : <BookOpen className="w-6 h-6 text-white" />}
-                    </div>
-                    <div className="flex flex-col truncate pr-4">
-                      <h4 className="font-bold text-white text-[15px] truncate">{mat.fileName}</h4>
-                      <p className="text-xs text-white/70 mt-1 truncate">{mat.semester} • {mat.branch} • {mat.category || "Notes"}</p>
-                      <p className="text-[10px] font-bold text-[#D0BCFF] mt-1.5 uppercase tracking-widest">{dateStr}</p>
-                    </div>
-                  </div>
-                  <div className="flex space-x-2">
-                    {mat.downloadUrl && (
-                      <div 
-                        className="p-2.5 text-[#D0BCFF] bg-white/[0.05] border border-white/10 rounded-xl transition-all flex items-center justify-center"
-                        title="View in Google Drive"
-                      >
-                        <ExternalLink className="w-5 h-5" />
+                <div key={mat.id} className="bg-white/[0.08] backdrop-blur-[40px] border border-white/20 p-6 rounded-[2rem] flex flex-col group transition-all">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center space-x-4">
+                      <div className="p-3 bg-[#D0BCFF]/10 rounded-xl border border-[#D0BCFF]/20">
+                        {mat.category === "Question Paper" ? <FileQuestion className="w-6 h-6 text-[#D0BCFF]" /> : <BookOpen className="w-6 h-6 text-[#D0BCFF]" />}
                       </div>
-                    )}
-                    <button 
-                      onClick={(e) => { 
-                        e.stopPropagation(); 
-                        handleDelete(mat); 
-                      }} 
-                      className="p-2.5 text-[#FF453A] bg-[#FF453A]/10 hover:bg-[#FF453A]/20 rounded-xl transition-all"
-                      title="Delete Material"
-                    >
+                      <div>
+                        <h4 className="font-bold text-lg text-white">{mat.fileName}</h4>
+                        <p className="text-xs text-[#D0BCFF] mt-0.5">{mat.semester} • {mat.branch} • {mat.category || "Notes"} • {dateStr}</p>
+                      </div>
+                    </div>
+                    <button onClick={() => handleDelete(mat)} className="p-2.5 text-[#FF453A] bg-[#FF453A]/10 hover:bg-[#FF453A]/20 rounded-xl transition-all">
                       <Trash2 className="w-5 h-5" />
                     </button>
                   </div>
+                  
+                  {mat.message && <div className="bg-black/20 p-4 rounded-xl border border-white/5 text-sm text-white/80 mb-4">{mat.message}</div>}
+
+                  {(mat.links?.length > 0 || mat.attachments?.length > 0) && (
+                    <div className="flex flex-wrap gap-3">
+                      {mat.links?.map((link: string, i: number) => (
+                        <a key={i} href={link} target="_blank" rel="noopener noreferrer" className="flex items-center px-4 py-2 bg-blue-500/10 border border-blue-500/20 text-blue-300 rounded-xl text-xs font-bold hover:bg-blue-500/20 transition">
+                          <LinkIcon className="w-3 h-3 mr-2" /> View Link
+                        </a>
+                      ))}
+                      {mat.attachments?.map((att: any, i: number) => (
+                         att.type.startsWith('image/') ? (
+                           <div key={i} className="w-full sm:w-48 h-32 rounded-xl overflow-hidden border border-white/10 cursor-pointer relative group" onClick={() => window.open(att.url)}>
+                             <img src={att.url} alt="Attachment" className="w-full h-full object-cover group-hover:scale-110 transition-transform" />
+                             <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                               <ExternalLink className="w-6 h-6 text-white" />
+                             </div>
+                           </div>
+                         ) : (
+                           <a key={i} href={att.url} target="_blank" rel="noopener noreferrer" className="flex items-center px-4 py-2 bg-white/5 border border-white/10 text-white rounded-xl text-xs font-bold hover:bg-white/10 transition">
+                             <Paperclip className="w-3 h-3 mr-2" /> Download Document
+                           </a>
+                         )
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })
@@ -172,7 +158,7 @@ export default function FacultyMaterialsTab() {
       </div>
 
       <div className="absolute bottom-4 left-0 w-full">
-        <button onClick={() => setShowUploadDialog(true)} className="w-full py-4 bg-[#D0BCFF] text-[#2A1B4E] rounded-[1rem] font-bold text-[16px] tracking-wide flex justify-center items-center hover:scale-[1.02] transition-transform">
+        <button onClick={() => setShowUploadDialog(true)} className="w-full py-4 bg-[#D0BCFF] text-[#2A1B4E] rounded-[1rem] font-bold text-[16px] flex justify-center items-center hover:scale-[1.02] transition-transform shadow-[0_0_20px_rgba(208,188,255,0.3)]">
           <UploadCloud className="w-5 h-5 mr-3" /> Upload Material
         </button>
       </div>
@@ -187,88 +173,83 @@ export default function FacultyMaterialsTab() {
 function UploadMaterialDialog({ user, teachingConfig, initialSem, initialBranch, initialSubject, initialCategory, onDismiss }: any) {
   const [isUploading, setIsUploading] = useState(false);
   const [title, setTitle] = useState("");
+  const [message, setMessage] = useState("");
   const [upSem, setUpSem] = useState(initialSem || "Semester 3");
   const [upBranch, setUpBranch] = useState(initialBranch);
   const [upSubject, setUpSubject] = useState(initialSubject);
   const [upCategory, setUpCategory] = useState(initialCategory);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  
+  const [files, setFiles] = useState<File[]>([]);
+  const [links, setLinks] = useState<string[]>([]);
+  const [linkInput, setLinkInput] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleUpload = async () => {
-    if (!title || !upSubject || !selectedFile) return alert("Please fill all fields and select a file.");
+    if (!title || !upSubject || (files.length === 0 && links.length === 0)) return alert("Please provide a title and at least one file or link.");
     setIsUploading(true);
     try {
-      const formData = new FormData();
-      formData.append('file', selectedFile);
-      formData.append('fileName', title);
-      formData.append('path', `materials/${upSem}/${upBranch}`);
+      const uploadedAttachments = [];
+      for (const file of files) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('fileName', file.name);
+        formData.append('path', `materials/${upSem}/${upBranch}`);
+        const res = await fetch('/api/upload-drive', { method: 'POST', body: formData });
+        if (res.ok) {
+          const { downloadUrl } = await res.json();
+          uploadedAttachments.push({ url: downloadUrl, name: file.name, type: file.type });
+        }
+      }
 
-      const uploadRes = await fetch('/api/upload-drive', {
-        method: 'POST',
-        body: formData
-      });
-
-      if (!uploadRes.ok) throw new Error("Google Drive upload failed");
-      
-      const { downloadUrl } = await uploadRes.json();
-      
-      const newDoc = { 
+      await addDoc(collection(db, "study_materials"), { 
         fileName: title, 
-        downloadUrl: downloadUrl, 
+        message,
+        attachments: uploadedAttachments,
+        links,
         semester: upSem, 
         branch: upBranch, 
         subject: upSubject, 
         category: upCategory, 
         timestamp: Date.now(),
         facultyName: user?.displayName || "Faculty"
-      };
-
-      await addDoc(collection(db, "study_materials"), newDoc);
-
-      // Broadcast Push Notification
-      await fetch('/api/send-fcm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          targetTopic: `topic_${upSem.replace(/ /g, "_")}_${upBranch.replace(/[ ()]/g, "_")}`,
-          title: "📚 New Study Material",
-          message: `${upCategory} for ${upSubject} has been uploaded.`,
-          targetTab: "Materials"
-        })
       });
 
-      alert("Material published to Google Drive and App successfully!");
-      onDismiss();
-    } catch (e) {
-      console.error(e);
-      alert("API Helper error. Could not upload to Drive.");
-    } finally {
-      setIsUploading(false);
-    }
+      await fetch('/api/send-fcm', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetTopic: `topic_${upSem.replace(/ /g, "_")}_${upBranch.replace(/[ ()]/g, "_")}`, title: "📚 New Study Material", message: `${upCategory} for ${upSubject} uploaded.`, targetTab: "Materials" })
+      });
+
+      alert("Material published successfully!"); onDismiss();
+    } catch (e) { alert("Upload failed."); } finally { setIsUploading(false); }
   };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
-      <div className="bg-white/[0.08] border border-white/20 p-8 rounded-[2rem] w-full max-w-sm backdrop-blur-[40px]">
+      <div className="bg-[#111] border border-white/20 p-8 rounded-[2rem] w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto [&::-webkit-scrollbar]:hidden">
         <h2 className="text-xl font-bold text-white mb-6">Upload Material</h2>
-        <div className="space-y-4">
-          <input type="text" placeholder="Title (e.g. Chapter 1 PYQ)" value={title} onChange={(e) => setTitle(e.target.value)} className="w-full bg-white/[0.08] border border-white/20 rounded-xl p-4 text-white focus:ring-2 focus:ring-[#D0BCFF] outline-none placeholder:text-white/50" />
+        <div className="space-y-4 mb-6">
+          <input type="text" placeholder="Title (e.g. Chapter 1 PYQ)" value={title} onChange={(e) => setTitle(e.target.value)} className="w-full bg-white/[0.05] border border-white/20 rounded-xl p-4 text-white focus:ring-2 focus:ring-[#D0BCFF] outline-none" />
+          <textarea placeholder="Message / Instructions (Optional)" value={message} onChange={e => setMessage(e.target.value)} className="w-full bg-white/[0.05] border border-white/20 rounded-xl p-4 text-white text-sm outline-none resize-none" rows={3} />
           
-          <div className="pb-2">
-              <GlassDropdown 
-                label=""
-                value={upCategory} 
-                options={["Notes", "Question Paper", "Assignment"]} 
-                onChange={(val) => setUpCategory(val)} 
-                isDark={true}
-                zIndex={110} 
-              />
+          <GlassDropdown label="" value={upCategory} options={["Notes", "Question Paper", "Assignment"]} onChange={setUpCategory} isDark={true} zIndex={110} />
+          
+          <div className="bg-black/30 p-4 rounded-xl border border-white/10">
+             <div className="flex gap-2 mb-3">
+               <input type="url" placeholder="https://" value={linkInput} onChange={e => setLinkInput(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none text-white" />
+               <button onClick={() => { if(linkInput) { setLinks([...links, linkInput]); setLinkInput(""); } }} className="px-3 bg-blue-500/20 text-blue-300 rounded-lg text-xs font-bold">Add Link</button>
+             </div>
+             <div className="flex gap-2 flex-wrap mb-3">
+               {links.map((lnk, i) => <span key={i} className="px-2 py-1 bg-blue-500/10 text-blue-300 rounded text-[10px] flex items-center"><LinkIcon className="w-3 h-3 mr-1"/> Link {i+1} <X onClick={() => setLinks(links.filter((_, idx) => idx !== i))} className="w-3 h-3 ml-2 cursor-pointer"/></span>)}
+               {files.map((f, i) => <span key={i} className="px-2 py-1 bg-white/10 text-white rounded text-[10px] flex items-center"><Paperclip className="w-3 h-3 mr-1"/> {f.name} <X onClick={() => setFiles(files.filter((_, idx) => idx !== i))} className="w-3 h-3 ml-2 cursor-pointer"/></span>)}
+             </div>
+             {/* FIXED: Array concatenation bypasses strict iterable TS checks */}
+             <input type="file" multiple ref={fileInputRef} onChange={e => e.target.files && setFiles(files.concat(Array.from(e.target.files)))} className="hidden" />
+             <button onClick={() => fileInputRef.current?.click()} className="w-full py-2 bg-white/5 border border-white/10 text-white rounded-lg text-xs font-bold hover:bg-white/10 flex justify-center items-center"><UploadCloud className="w-4 h-4 mr-2" /> Add Files / Images</button>
           </div>
-
-          <input type="file" onChange={(e) => setSelectedFile(e.target.files ? e.target.files[0] : null)} className="w-full text-sm text-white/70 file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-white/[0.15] file:text-white hover:file:bg-white/[0.25] cursor-pointer bg-white/[0.08] border border-white/20 rounded-xl p-2" />
         </div>
-        <div className="flex space-x-3 mt-8">
+        <div className="flex space-x-3 mt-auto">
           <button onClick={onDismiss} className="flex-1 py-3.5 bg-white/[0.05] border border-white/20 text-white rounded-xl font-bold hover:bg-white/[0.1] transition-colors">Cancel</button>
-          <button onClick={handleUpload} disabled={isUploading || !title || !selectedFile} className="flex-1 py-3.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold flex justify-center items-center disabled:opacity-50 hover:scale-[1.02] transition-transform">
+          <button onClick={handleUpload} disabled={isUploading || !title} className="flex-1 py-3.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold flex justify-center items-center disabled:opacity-50 hover:scale-[1.02] transition-transform">
             {isUploading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Upload"}
           </button>
         </div>

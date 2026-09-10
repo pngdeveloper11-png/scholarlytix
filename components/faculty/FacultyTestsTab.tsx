@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { collection, doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../app/context/AuthContext';
-import { Loader2, AlertTriangle, UploadCloud, Sparkles, Image as ImageIcon } from 'lucide-react';
+import { Loader2, Sparkles, Image as ImageIcon } from 'lucide-react';
 import GlassDropdown from '../GlassDropdown';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
@@ -86,13 +86,17 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
 
   useEffect(() => {
     if (isHod) return;
-    const subjects = teachingConfig[`${selectedSemester}|${selectedBranch}`] || [];
-    if (!subjects.includes(selectedSubject)) setSelectedSubject(subjects[0] || "");
+    // THE FIX: Aggregate subjects across all divisions for the selected Semester + Branch
+    const aggregatedSubjects = Array.from(new Set(
+      Object.keys(teachingConfig)
+        .filter(k => k.startsWith(`${selectedSemester}|${selectedBranch}`))
+        .flatMap(k => teachingConfig[k])
+    ));
+    if (!aggregatedSubjects.includes(selectedSubject)) setSelectedSubject(aggregatedSubjects[0] || "");
   }, [selectedSemester, selectedBranch, teachingConfig, isHod, selectedSubject]);
 
   useEffect(() => {
     if (!selectedSubject) return;
-    // Formatting matched to Student Dashboard Regex exact path
     const docId = `${selectedSemester}_${selectedBranch}_${selectedSubject}`.replace(/\s+/g, '').replace(/&/g, 'and');
     const unsub = onSnapshot(doc(db, "test_marks", docId), (docSnap) => {
       if (docSnap.exists()) setFullMarksMap(docSnap.get("marks") || {});
@@ -106,7 +110,12 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
   const textColor = isDark ? 'text-white' : 'text-neutral-900';
   const cardBg = isDark ? 'bg-white/[0.08] border-white/20' : 'bg-black/5 border-black/10 shadow-sm';
 
-  // --- HANDLER 1: AI CSV TEXT IMPORT ---
+  const aggregatedSubjectsList = Array.from(new Set(
+    Object.keys(teachingConfig)
+      .filter(k => k.startsWith(`${selectedSemester}|${selectedBranch}`))
+      .flatMap(k => teachingConfig[k])
+  ));
+
   const handleAiCsvImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -122,58 +131,37 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
           generationConfig: { responseMimeType: "application/json" }
       });
 
-      const prompt = `
-        Analyze the following raw CSV/text data containing student marks for an exam.
-        Extract the roll numbers and their corresponding marks.
-        Return ONLY a strict JSON array of objects with the exact keys "roll" (number) and "score" (string).
-        If a mark is missing or absent, put "-".
-        
-        Data to analyze:
-        ${text}
-      `;
-
+      const prompt = `Analyze this CSV/text data. Extract Roll Numbers and Marks. Max marks 20. Absent = "AB". Return ONLY a strict JSON object {"roll":"mark"}. Data: ${text}`;
       const result = await model.generateContent(prompt);
       const parsedMarks = JSON.parse(result.response.text());
 
       const newMap = { ...fullMarksMap };
-      
       classRoster.forEach((student) => {
-        const matchedData = parsedMarks.find((m: any) => String(m.roll) === String(student.rollNo));
-        if (matchedData) {
+        const score = parsedMarks[String(student.rollNo)];
+        if (score) {
           if (!newMap[student.id]) newMap[student.id] = {};
-          newMap[student.id][selectedTest] = String(matchedData.score);
+          newMap[student.id][selectedTest] = String(score);
         }
       });
-
       setFullMarksMap(newMap);
       alert("CSV Marks mapped successfully!");
-    } catch (error) {
-      console.error("CSV Analysis failed:", error);
-      alert("Failed to parse CSV. Make sure it has Roll Numbers and Marks.");
-    } finally {
-      setIsAiAnalyzing(false);
-      if (csvInputRef.current) csvInputRef.current.value = "";
-    }
+    } catch (error) { alert("Failed to parse CSV."); } finally { setIsAiAnalyzing(false); if (csvInputRef.current) csvInputRef.current.value = ""; }
   };
 
-  // --- HANDLER 2: AI IMAGE IMPORT ---
   const handleAiImageImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     setIsAiAnalyzing(true);
     try {
       const compressedFile = await compressImage(file);
-
       const formData = new FormData();
       formData.append('file', compressedFile);
       formData.append('maxMarks', '20'); 
 
       const res = await fetch('/api/extract-marks', { method: 'POST', body: formData });
-      if (!res.ok) throw new Error("Backend extraction failed or timed out.");
+      if (!res.ok) throw new Error("Backend extraction failed.");
       
       const data = await res.json();
-      
       if (data.error) throw new Error(data.error);
 
       const extractedMarksMap = data.marks || {};
@@ -186,56 +174,36 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
           newMap[student.id][selectedTest] = String(score);
         }
       });
-
       setFullMarksMap(newMap);
-      alert("Image marks scanned and mapped successfully!");
-    } catch (error: any) {
-      console.error("Image Analysis failed:", error);
-      alert(`Image scan failed: ${error.message}`);
-    } finally {
-      setIsAiAnalyzing(false);
-      if (imageInputRef.current) imageInputRef.current.value = "";
-    }
+      alert("Image marks scanned successfully!");
+    } catch (error: any) { alert(`Image scan failed: ${error.message}`); } finally { setIsAiAnalyzing(false); if (imageInputRef.current) imageInputRef.current.value = ""; }
   };
 
   return (
-    <div className="w-full flex flex-col h-full overflow-y-auto pr-2 pb-24 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
-      
+    <div className="w-full flex flex-col h-full overflow-y-auto pr-2 pb-24 [&::-webkit-scrollbar]:hidden">
       <div className="flex space-x-3 mb-4">
-        <GlassDropdown label="Sem" value={selectedSemester} options={isHod ? AVAILABLE_SEMESTERS : Array.from(new Set(Object.keys(teachingConfig).map(k => k.split("|")[0])))} onChange={setSelectedSemester} isDark={isDark} zIndex={60} />
-        <GlassDropdown label="Branch" value={selectedBranch} options={isHod ? AVAILABLE_BRANCHES : Array.from(new Set(Object.keys(teachingConfig).filter(k => k.startsWith(selectedSemester)).map(k => k.split("|")[1])))} onChange={setSelectedBranch} isDark={isDark} zIndex={50} />
+        <GlassDropdown label="SEM" value={selectedSemester} options={isHod ? AVAILABLE_SEMESTERS : Array.from(new Set(Object.keys(teachingConfig).map(k => k.split("|")[0])))} onChange={setSelectedSemester} isDark={isDark} zIndex={60} />
+        <GlassDropdown label="BRANCH" value={selectedBranch} options={isHod ? AVAILABLE_BRANCHES : Array.from(new Set(Object.keys(teachingConfig).filter(k => k.startsWith(selectedSemester)).map(k => k.split("|")[1])))} onChange={setSelectedBranch} isDark={isDark} zIndex={50} />
       </div>
       <div className="flex space-x-3 mb-8">
         <div className="flex-[1.5]">
-          <GlassDropdown label="Subject" value={selectedSubject} options={isHod ? [] : teachingConfig[`${selectedSemester}|${selectedBranch}`] || []} onChange={setSelectedSubject} isDark={isDark} zIndex={40} />
+          <GlassDropdown label="SUBJECT" value={selectedSubject} options={isHod ? [] : aggregatedSubjectsList} onChange={setSelectedSubject} isDark={isDark} zIndex={40} />
         </div>
         <div className="flex-1">
-          <GlassDropdown label="Test" value={selectedTest} options={["IAT 1", "IAT 2"]} onChange={setSelectedTest} isDark={isDark} zIndex={30} />
+          <GlassDropdown label="TEST" value={selectedTest} options={["IAT 1", "IAT 2"]} onChange={setSelectedTest} isDark={isDark} zIndex={30} />
         </div>
       </div>
 
       <div className="flex flex-col md:flex-row md:justify-between md:items-center mb-6 space-y-4 md:space-y-0">
         <h3 className={`text-lg font-bold ${textColor}`}>Student Scores</h3>
-        
         <div className="flex space-x-2">
           <input type="file" accept=".csv, .txt" onChange={handleAiCsvImport} ref={csvInputRef} className="hidden" />
-          <button 
-            onClick={() => csvInputRef.current?.click()}
-            disabled={isAiAnalyzing || classRoster.length === 0}
-            className={`px-3 py-2 ${isDark ? 'bg-blue-500/20 text-blue-300 border-blue-500/30' : 'bg-blue-100 text-blue-700 border-blue-200'} border rounded-xl text-sm font-bold flex items-center transition-all disabled:opacity-50`}
-          >
-            {isAiAnalyzing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
-            Auto CSV
+          <button onClick={() => csvInputRef.current?.click()} disabled={isAiAnalyzing || classRoster.length === 0} className={`px-3 py-2 ${isDark ? 'bg-blue-500/20 text-blue-300 border-blue-500/30' : 'bg-blue-100 text-blue-700 border-blue-200'} border rounded-xl text-sm font-bold flex items-center transition-all disabled:opacity-50`}>
+            {isAiAnalyzing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />} Auto CSV
           </button>
-
           <input type="file" accept="image/*" capture="environment" onChange={handleAiImageImport} ref={imageInputRef} className="hidden" />
-          <button 
-            onClick={() => imageInputRef.current?.click()}
-            disabled={isAiAnalyzing || classRoster.length === 0}
-            className={`px-3 py-2 ${isDark ? 'bg-purple-500/20 text-[#D0BCFF] border-purple-500/30' : 'bg-purple-100 text-purple-700 border-purple-200'} border rounded-xl text-sm font-bold flex items-center transition-all disabled:opacity-50`}
-          >
-            {isAiAnalyzing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ImageIcon className="w-4 h-4 mr-2" />}
-            Scan Image
+          <button onClick={() => imageInputRef.current?.click()} disabled={isAiAnalyzing || classRoster.length === 0} className={`px-3 py-2 ${isDark ? 'bg-purple-500/20 text-[#D0BCFF] border-purple-500/30' : 'bg-purple-100 text-purple-700 border-purple-200'} border rounded-xl text-sm font-bold flex items-center transition-all disabled:opacity-50`}>
+            {isAiAnalyzing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ImageIcon className="w-4 h-4 mr-2" />} Scan Image
           </button>
         </div>
       </div>
@@ -255,18 +223,16 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
                 <div className="flex flex-col flex-1 pr-4">
                   <span className={`font-bold text-[15px] ${textColor} line-clamp-1`}>{student.fullName}</span>
                   <span className={`text-xs mt-0.5 font-medium ${isDark ? 'text-white/60' : 'text-neutral-500'}`}>Roll {student.rollNo}</span>
-                  {isDefaulter && <span className="text-xs font-bold text-[#FF453A] mt-1">Failed ({total}/40)</span>}
                 </div>
                 <input 
-                  type="text" 
-                  value={val} 
+                  type="text" value={val} 
                   onChange={(e) => {
                     const newMap = { ...fullMarksMap };
                     if (!newMap[student.id]) newMap[student.id] = {};
                     newMap[student.id][selectedTest] = e.target.value.toUpperCase(); 
                     setFullMarksMap(newMap);
                   }}
-                  className={`w-20 p-3 rounded-xl border text-center font-bold outline-none focus:ring-2 focus:ring-[#D0BCFF] ${isDark ? 'bg-black/20 border-white/10 text-white' : 'bg-white border-black/10 text-neutral-900'}`}
+                  className={`w-16 p-3 rounded-xl border text-center font-bold outline-none focus:ring-2 focus:ring-[#D0BCFF] ${isDark ? 'bg-black/20 border-white/10 text-white' : 'bg-white border-black/10 text-neutral-900'}`}
                   placeholder="-"
                 />
               </div>
@@ -280,26 +246,11 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
           setIsLoading(true);
           try {
             const docId = `${selectedSemester}_${selectedBranch}_${selectedSubject}`.replace(/\s+/g, '').replace(/&/g, 'and');
-            await setDoc(doc(db, "test_marks", docId), { 
-              marks: fullMarksMap, 
-              isPublished: true, 
-              semester: selectedSemester, 
-              branch: selectedBranch, 
-              subject: selectedSubject 
-            }, { merge: true });
-            
-            // Broadcast Push Notification
+            await setDoc(doc(db, "test_marks", docId), { marks: fullMarksMap, isPublished: true, semester: selectedSemester, branch: selectedBranch, subject: selectedSubject }, { merge: true });
             await fetch('/api/send-fcm', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                targetTopic: `topic_${selectedSemester.replace(/ /g, "_")}_${selectedBranch.replace(/[ ()]/g, "_")}`,
-                title: "📊 Test Results Published",
-                message: `Marks for ${selectedSubject} (${selectedTest}) have been published to your portal.`,
-                targetTab: "Academics"
-              })
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ targetTopic: `topic_${selectedSemester.replace(/ /g, "_")}_${selectedBranch.replace(/[ ()]/g, "_")}`, title: "📊 Test Results", message: `Marks for ${selectedSubject} published.`, targetTab: "Tests" })
             });
-
             alert("Marks published to students!");
           } catch (e) { alert("Error saving marks."); } finally { setIsLoading(false); }
         }} disabled={isLoading} className="w-full mt-6 py-4 bg-[#D0BCFF] text-[#2A1B4E] rounded-2xl font-bold flex justify-center items-center hover:scale-[1.02] transition-transform">

@@ -1,14 +1,13 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { doc, setDoc, onSnapshot } from 'firebase/firestore';
+import { doc, collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../app/context/AuthContext';
 import { CollegeStructureConfig } from '../../types/index';
-import { CloudUpload, Edit, Zap, Loader2, X } from 'lucide-react';
+import { Edit, Zap, CalendarDays } from 'lucide-react';
 
-const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4"];
-const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
+const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 export default function FacultyClassesTab({
   isDark,
@@ -23,175 +22,134 @@ export default function FacultyClassesTab({
   onProxyClick: () => void;
   onEditSubjectsClick: () => void;
 }) {
-  const { role } = useAuth();
-  const isHod = role?.startsWith("HOD|") || role === "SUPER_ADMIN" || role === "DIRECTOR" || role === "PRINCIPAL" || role === "REGISTRAR";
-  
+  const { user } = useAuth();
   const textStyle = isDark ? "text-white" : "text-gray-900";
-  const cardBg = isDark ? "bg-white/5 border-white/10" : "bg-gray-50 border-gray-200";
+  const cardBg = isDark ? "bg-white/[0.05] border-white/10" : "bg-gray-50 border-gray-200";
 
-  const [showUploader, setShowUploader] = useState(false);
-  const [uploadSem, setUploadSem] = useState(AVAILABLE_SEMESTERS[2]);
-  const [uploadBranch, setUploadBranch] = useState("IT");
-  const [uploadDiv, setUploadDiv] = useState("");
-  const [isUploading, setIsUploading] = useState(false);
   const [globalStructure, setGlobalStructure] = useState<CollegeStructureConfig>({});
+  const [scheduleView, setScheduleView] = useState<"Today" | "Week">("Today");
+  const [myTimetable, setMyTimetable] = useState<any[]>([]);
 
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'app_config', 'college_structure'), (snap) => {
+    const unsubConfig = onSnapshot(doc(db, 'app_config', 'college_structure'), (snap) => {
       if (snap.exists()) setGlobalStructure(snap.data() as any);
     });
-    return () => unsub();
-  }, []);
 
-  const availableDivs = globalStructure[`${uploadSem}|${uploadBranch}`]?.map(d => d.divisionName) || [];
-  useEffect(() => {
-    if (!availableDivs.includes(uploadDiv)) setUploadDiv(availableDivs[0] || "");
-  }, [uploadSem, uploadBranch, globalStructure]);
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!uploadDiv) return alert("Please select a Division first.");
-
-    setIsUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const response = await fetch('/api/extract-timetable', {
-        method: 'POST',
-        body: formData
-      });
-
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Extraction failed");
-
-      const classKey = `${uploadSem}_${uploadBranch}_${uploadDiv}`.replace(/\s+/g, '');
+    const unsubTimetables = onSnapshot(collection(db, 'class_timetables'), (snap) => {
+      const allEntries: any[] = [];
+      const teacherName = user?.displayName || localStorage.getItem("academiq_faculty_name");
       
-      const enrichedData = result.entries.map((entry: any) => ({
-        ...entry,
-        semester: uploadSem,
-        branch: uploadBranch,
-        divisionName: uploadDiv,
-        id: crypto.randomUUID()
-      }));
-
-      await setDoc(doc(db, 'class_timetables', classKey), { entries: enrichedData });
-      
-      const cleanSem = uploadSem.replace(/ /g, "_");
-      const cleanBranch = uploadBranch.replace(/[ ()]/g, "_");
-      await fetch('/api/send-fcm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          targetTopic: `topic_${cleanSem}_${cleanBranch}`,
-          title: "📅 Timetable Published",
-          message: `New timetable for ${uploadSem} ${uploadBranch} (${uploadDiv}) is available.`,
-          targetTab: "Timetable"
-        })
+      snap.docs.forEach(d => {
+        const data = d.data().entries || [];
+        data.forEach((entry: any) => {
+          if (entry.teacherName === teacherName || entry.facultyName === teacherName) {
+            allEntries.push(entry);
+          }
+        });
       });
+      setMyTimetable(allEntries);
+    });
 
-      alert("Timetable extracted and published successfully!");
-      setShowUploader(false);
-    } catch (error: any) {
-      alert(`Upload failed: ${error.message}`);
-    } finally {
-      setIsUploading(false);
-    }
+    return () => { unsubConfig(); unsubTimetables(); };
+  }, [user?.displayName]);
+
+  // Derive exact batch label mapped from global structure
+  const getBatchLabel = (entry: any) => {
+    if (!entry.batch || entry.batch === "All") return "All";
+    const classKey = `${entry.semester}|${entry.branch}`;
+    const divs = globalStructure[classKey] || [];
+    let mappedLabel = entry.batch;
+    
+    // Reverse map: if entry.batch matches a structured name, display it cleanly
+    divs.forEach(d => {
+      const bMatch = d.batches.find(b => b.name === entry.batch);
+      if (bMatch) mappedLabel = `${d.divisionName} • ${bMatch.name}`;
+    });
+    return mappedLabel;
   };
+
+  const currentDayStr = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+  const activeDay = scheduleView === "Today" ? (DAYS.includes(currentDayStr) ? currentDayStr : "Monday") : "All";
+  
+  const displayedSchedule = myTimetable.filter(t => activeDay === "All" || t.dayOfWeek === activeDay)
+    .sort((a, b) => {
+      // Basic time sort fallback
+      const timeA = parseInt(a.startTime.replace(/[^0-9]/g, ''));
+      const timeB = parseInt(b.startTime.replace(/[^0-9]/g, ''));
+      return timeA - timeB;
+    });
 
   return (
     <div className="flex flex-col h-full space-y-6">
-      <div className="flex-1 overflow-y-auto space-y-4 pb-24 pr-2">
-        <h3 className={`text-lg font-bold ${textStyle}`}>Your Assigned Classes</h3>
+      <div className="flex-1 overflow-y-auto space-y-8 pb-24 pr-2 [&::-webkit-scrollbar]:hidden">
         
-        {Object.keys(teachingConfig).length === 0 ? (
-          <div className="p-8 text-center border border-dashed border-white/20 rounded-2xl">
-            <p className="text-gray-500">No classes assigned yet.</p>
+        {/* Your Schedule Panel (Matches Android UI exactly) */}
+        <div className={`p-6 rounded-[2rem] border ${cardBg}`}>
+          <div className="flex justify-between items-center mb-6">
+            <h3 className={`text-lg font-bold flex items-center ${textStyle}`}><CalendarDays className="w-5 h-5 mr-2 text-[#D0BCFF]"/> Your Schedule</h3>
+            <span className="text-xs font-bold text-[#D0BCFF] cursor-pointer hover:underline">Edit Schedule</span>
           </div>
-        ) : (
-          Object.keys(teachingConfig).map(comboKey => {
-            const parts = comboKey.split('|');
-            const sem = parts[0] || "Semester 3";
-            const branch = parts[1] || "Unknown";
-            const div = parts[2] || "";
-            const displayTitle = div ? `${branch} (${div})` : branch;
+          
+          <div className="flex space-x-3 mb-6 bg-white/[0.05] p-1.5 rounded-xl border border-white/10 w-fit">
+            <button onClick={() => setScheduleView("Today")} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${scheduleView === "Today" ? 'bg-[#D0BCFF] text-[#2A1B4E]' : 'text-white/60 hover:text-white'}`}>
+              Today ({currentDayStr})
+            </button>
+            <button onClick={() => setScheduleView("Week")} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${scheduleView === "Week" ? 'bg-[#D0BCFF] text-[#2A1B4E]' : 'text-white/60 hover:text-white'}`}>
+              Full Week
+            </button>
+          </div>
 
-            return (
-              <div 
-                key={comboKey} 
-                onClick={() => onComboClick(comboKey)}
-                className={`p-5 rounded-2xl border ${cardBg} cursor-pointer hover:border-[#D0BCFF] transition-all group`}
-              >
-                <h4 className={`text-xl font-bold ${textStyle} group-hover:text-[#D0BCFF] transition-colors`}>{displayTitle}</h4>
-                <p className="text-[#D0BCFF] text-sm">{sem}</p>
-              </div>
-            );
-          })
-        )}
+          <div className="space-y-3">
+            {displayedSchedule.length === 0 ? (
+              <p className="text-sm opacity-50 py-4 text-center">No lectures scheduled for {scheduleView === "Today" ? 'today' : 'this week'}.</p>
+            ) : (
+              displayedSchedule.map((lecture, i) => (
+                <div key={i} className="flex justify-between items-center p-4 bg-white/[0.03] border border-white/10 rounded-2xl">
+                  <div>
+                    <h4 className="font-bold text-white text-[15px]">{lecture.subject}</h4>
+                    <p className="text-xs text-[#D0BCFF] font-medium mt-0.5">{lecture.branch} • {getBatchLabel(lecture)}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-white/90">{lecture.startTime} - {lecture.endTime}</p>
+                    {scheduleView === "Week" && <p className="text-[10px] text-white/40 uppercase mt-0.5">{lecture.dayOfWeek}</p>}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
 
-        <div className="pt-8 space-y-4">
+        {/* Assigned Classes */}
+        <div className="space-y-4">
+          <h3 className={`text-lg font-bold ${textStyle}`}>Assigned Classes</h3>
+          {Object.keys(teachingConfig).length === 0 ? (
+            <div className="p-8 text-center border border-dashed border-white/20 rounded-2xl"><p className="text-gray-500">No classes assigned.</p></div>
+          ) : (
+            Object.keys(teachingConfig).map(comboKey => {
+              const parts = comboKey.split('|');
+              const sem = parts[0] || "Semester 3";
+              const branch = parts[1] || "Unknown";
+              const div = parts[2] || "";
+              return (
+                <div key={comboKey} onClick={() => onComboClick(comboKey)} className={`p-5 rounded-2xl border ${cardBg} cursor-pointer hover:border-[#D0BCFF] transition-all group`}>
+                  <h4 className={`text-xl font-bold ${textStyle} group-hover:text-[#D0BCFF] transition-colors`}>{div ? `${branch} (${div})` : branch}</h4>
+                  <p className="text-[#D0BCFF] text-sm">{sem}</p>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <div className="pt-4 space-y-4">
           <button onClick={onEditSubjectsClick} className={`w-full py-4 rounded-2xl flex items-center justify-center gap-3 font-bold border ${isDark ? 'bg-white/10 border-white/20 text-white hover:bg-white/20' : 'bg-gray-100 border-gray-300 text-gray-800 hover:bg-gray-200'} transition-colors`}>
             <Edit className="w-5 h-5"/> Edit Classes & Subjects
           </button>
           
-          <button onClick={onProxyClick} className="w-full py-4 rounded-2xl flex items-center justify-center gap-3 font-bold bg-[#D0BCFF] text-[#2A1B4E] hover:scale-[1.02] transition-transform">
+          <button onClick={onProxyClick} className="w-full py-4 rounded-2xl flex items-center justify-center gap-3 font-bold bg-[#D0BCFF] text-[#2A1B4E] hover:scale-[1.02] transition-transform shadow-[0_0_20px_rgba(208,188,255,0.3)]">
             <Zap className="w-5 h-5"/> Mark Proxy Lecture
           </button>
-
-          {isHod && (
-            <button onClick={() => setShowUploader(true)} className="w-full py-4 rounded-2xl flex items-center justify-center gap-3 font-bold bg-green-500 text-white hover:bg-green-600 transition-colors mt-4">
-              <CloudUpload className="w-5 h-5"/> Publish Branch Timetables
-            </button>
-          )}
         </div>
       </div>
-
-      {showUploader && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className={`w-full max-w-md p-6 rounded-3xl border ${isDark ? 'bg-[#111] border-white/10' : 'bg-white border-gray-200'} shadow-2xl`}>
-            <div className="flex justify-between items-center mb-6">
-              <h2 className={`text-xl font-bold ${textStyle}`}>Upload Timetable</h2>
-              <button onClick={() => !isUploading && setShowUploader(false)} className="text-gray-500 hover:text-red-500"><X className="w-6 h-6"/></button>
-            </div>
-
-            <div className="space-y-4">
-              <p className="text-sm text-gray-400">Select the target class, then upload the timetable image for Gemini to parse.</p>
-              
-              <div className="flex gap-4">
-                <select value={uploadSem} onChange={e => setUploadSem(e.target.value)} className={`flex-1 p-3 rounded-xl outline-none ${isDark ? 'bg-white/5 text-white border-white/10' : 'bg-gray-50 border-gray-300'}`}>
-                  {AVAILABLE_SEMESTERS.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-                <select value={uploadBranch} onChange={e => setUploadBranch(e.target.value)} className={`flex-1 p-3 rounded-xl outline-none ${isDark ? 'bg-white/5 text-white border-white/10' : 'bg-gray-50 border-gray-300'}`}>
-                  {AVAILABLE_BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
-                </select>
-              </div>
-
-              {availableDivs.length > 0 ? (
-                <select value={uploadDiv} onChange={e => setUploadDiv(e.target.value)} className={`w-full p-3 rounded-xl outline-none ${isDark ? 'bg-white/5 text-white border-white/10' : 'bg-gray-50 border-gray-300'}`}>
-                  {availableDivs.map(d => <option key={d} value={d}>{d}</option>)}
-                </select>
-              ) : (
-                <p className="text-red-500 text-sm font-bold">No divisions built for this class.</p>
-              )}
-
-              {isUploading ? (
-                <div className="flex items-center gap-3 p-4 bg-[#D0BCFF]/10 rounded-xl border border-[#D0BCFF]/30">
-                  <Loader2 className="w-6 h-6 animate-spin text-[#D0BCFF]" />
-                  <span className="text-[#D0BCFF] font-bold text-sm">Gemini AI is parsing image...</span>
-                </div>
-              ) : (
-                <div className="pt-4 relative">
-                  <input type="file" accept="image/*" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                  <div className="w-full py-4 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold text-center pointer-events-none">
-                    Select Image
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
