@@ -102,17 +102,17 @@ export default function Home() {
     router.push(path);
   };
 
-  // THE FIX: Physical 3D Tactile Buttons
+  // THE FIX: Translucent Glossy 3D Glass Buttons
   const btnWrapperClass = "block w-full text-left group focus:outline-none";
   
   const glassPanelClass = `
     relative p-6 rounded-[24px] flex items-center justify-between
     bg-white/[0.04] backdrop-blur-xl
-    border-x border-t border-white/10 border-t-white/20
-    border-b-[6px] border-b-[#5B21B6]
-    shadow-[0_10px_20px_rgba(0,0,0,0.3)]
+    border border-white/10 border-t-white/20
+    border-b-[6px] border-b-white/10
+    shadow-[0_10px_20px_rgba(0,0,0,0.3),inset_0_-2px_10px_rgba(255,255,255,0.05)]
     transition-all duration-150 ease-out
-    hover:bg-white/[0.06] hover:border-b-[#6D28D9] hover:shadow-[0_15px_30px_rgba(91,33,182,0.25)]
+    hover:bg-white/[0.06] hover:border-b-white/25 hover:shadow-[0_15px_30px_rgba(0,0,0,0.4),inset_0_-2px_15px_rgba(255,255,255,0.1)]
     active:border-b-[0px] active:translate-y-[6px] active:shadow-[0_2px_5px_rgba(0,0,0,0.4)]
     active:bg-white/[0.08] active:border-b-transparent
   `;
