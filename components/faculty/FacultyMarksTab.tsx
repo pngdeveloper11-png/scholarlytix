@@ -5,6 +5,7 @@ import { collection, doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Loader2, Save, FileSpreadsheet, FileUp, ScanSearch, Sparkles } from 'lucide-react';
 import GlassDropdown from '@/components/GlassDropdown';
+import GlassButton from '@/components/ui/GlassButton';
 
 const TEST_TYPES = ["IAT 1", "IAT 2"];
 
@@ -251,12 +252,16 @@ export default function FacultyMarksTab() {
             })}
           </div>
 
-          <button 
-            onClick={handleSaveMarks} disabled={isSaving || classStudents.length === 0 || !isLoadedMarks || isExtracting}
-            className="w-full py-4 mt-auto bg-[#D0BCFF] text-[#2A1B4E] rounded-2xl font-bold text-lg flex items-center justify-center hover:scale-[1.02] transition-transform disabled:opacity-50"
+          <GlassButton
+            onClick={handleSaveMarks}
+            disabled={isSaving || classStudents.length === 0 || !isLoadedMarks || isExtracting}
+            variant="primary"
+            size="lg"
+            className="w-full mt-auto text-lg"
+            icon={isSaving ? <Loader2 className="w-6 h-6 animate-spin" /> : <Save className="w-5 h-5" />}
           >
-            {isSaving ? <Loader2 className="w-6 h-6 animate-spin" /> : <><Save className="w-5 h-5 mr-2" /> Publish {testType} Marks</>}
-          </button>
+            {isSaving ? null : `Publish ${testType} Marks`}
+          </GlassButton>
         </div>
       )}
     </div>

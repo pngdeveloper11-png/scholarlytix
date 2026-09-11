@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { GraduationCap, User, ArrowRight, ShieldCheck } from 'lucide-react';
 import Image from 'next/image';
 import DownloadAppButton from '@/components/DownloadAppButton';
+import GlassButton from '@/components/ui/GlassButton';
 import { useRouter } from 'next/navigation';
 
 // Firebase Imports
@@ -102,28 +103,9 @@ export default function Home() {
     router.push(path);
   };
 
-  // THE FIX: Translucent Glossy 3D Glass Buttons
-  const btnWrapperClass = "block w-full text-left group focus:outline-none";
-  
-  const glassPanelClass = `
-    relative p-6 rounded-[24px] flex items-center justify-between
-    bg-white/[0.04] backdrop-blur-xl
-    border border-white/10 border-t-white/20
-    border-b-[6px] border-b-white/10
-    shadow-[0_10px_20px_rgba(0,0,0,0.3),inset_0_-2px_10px_rgba(255,255,255,0.05)]
-    transition-all duration-150 ease-out
-    hover:bg-white/[0.06] hover:border-b-white/25 hover:shadow-[0_15px_30px_rgba(0,0,0,0.4),inset_0_-2px_15px_rgba(255,255,255,0.1)]
-    active:border-b-[0px] active:translate-y-[6px] active:shadow-[0_2px_5px_rgba(0,0,0,0.4)]
-    active:bg-white/[0.08] active:border-b-transparent
-  `;
-
-  const iconBoxClass = `
-    p-3 rounded-2xl transition-all duration-300
-    bg-[#D0BCFF]/10 text-[#D0BCFF] border border-white/5
-    shadow-[inset_0_1px_2px_rgba(255,255,255,0.1)]
-    group-hover:bg-[#D0BCFF]/20 group-hover:scale-110 
-    group-active:scale-95 group-active:bg-[#D0BCFF]/5
-  `;
+  const PortalArrow = () => (
+    <ArrowRight className="w-6 h-6 shrink-0 text-neutral-400 group-hover:text-[#D0BCFF] group-hover:translate-x-1.5 transition-transform duration-300" />
+  );
 
   return (
     <main className="relative min-h-screen w-full flex flex-col items-center justify-between p-6 md:p-12 text-white">
@@ -142,69 +124,57 @@ export default function Home() {
 
       <div className="w-full max-w-md space-y-5 my-10">
         
-        {/* Faculty Button */}
-        <button onClick={() => handleRoleSelect('faculty', '/faculty/login')} className={btnWrapperClass}>
-          <div className={glassPanelClass}>
-            <div className="flex items-center space-x-4">
-              <div className={iconBoxClass}>
-                <GraduationCap className="w-8 h-8 drop-shadow-md" />
-              </div>
-              <div className="text-left">
-                <h3 className="text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors drop-shadow-sm">Faculty Portal</h3>
-                <p className="text-sm text-neutral-400 font-medium group-active:opacity-70 transition-opacity">Mark attendance, upload notes &amp; view analytics</p>
-              </div>
-            </div>
-            <ArrowRight className="w-6 h-6 text-neutral-400 group-hover:text-[#D0BCFF] group-hover:translate-x-1.5 transition-transform duration-300" />
-          </div>
-        </button>
+        <GlassButton
+          onClick={() => handleRoleSelect('faculty', '/faculty/login')}
+          size="card"
+          className="w-full"
+          icon={<GraduationCap className="w-8 h-8 drop-shadow-md" />}
+          trailing={<PortalArrow />}
+        >
+          <span className="flex-1 min-w-0">
+            <span className="block text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors drop-shadow-sm">Faculty Portal</span>
+            <span className="block text-sm text-neutral-400 font-medium group-active:opacity-70 transition-opacity">Mark attendance, upload notes &amp; view analytics</span>
+          </span>
+        </GlassButton>
 
-        {/* Student Button */}
-        <button onClick={() => handleRoleSelect('student', '/student/login')} className={btnWrapperClass}>
-          <div className={glassPanelClass}>
-            <div className="flex items-center space-x-4">
-              <div className={iconBoxClass}>
-                <User className="w-8 h-8 drop-shadow-md" />
-              </div>
-              <div className="text-left">
-                <h3 className="text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors drop-shadow-sm">Student Portal</h3>
-                <p className="text-sm text-neutral-400 font-medium group-active:opacity-70 transition-opacity">Track attendance, download materials &amp; view scores</p>
-              </div>
-            </div>
-            <ArrowRight className="w-6 h-6 text-neutral-400 group-hover:text-[#D0BCFF] group-hover:translate-x-1.5 transition-transform duration-300" />
-          </div>
-        </button>
+        <GlassButton
+          onClick={() => handleRoleSelect('student', '/student/login')}
+          size="card"
+          className="w-full"
+          icon={<User className="w-8 h-8 drop-shadow-md" />}
+          trailing={<PortalArrow />}
+        >
+          <span className="flex-1 min-w-0">
+            <span className="block text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors drop-shadow-sm">Student Portal</span>
+            <span className="block text-sm text-neutral-400 font-medium group-active:opacity-70 transition-opacity">Track attendance, download materials &amp; view scores</span>
+          </span>
+        </GlassButton>
 
-        {/* Parents Button */}
-        <button onClick={() => handleRoleSelect('parent', '/parent/linking')} className={btnWrapperClass}>
-          <div className={glassPanelClass}>
-            <div className="flex items-center space-x-4">
-              <div className={iconBoxClass}>
-                <User className="w-8 h-8 drop-shadow-md" />
-              </div>
-              <div className="text-left">
-                <h3 className="text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors drop-shadow-sm">Parents' Portal</h3>
-                <p className="text-sm text-neutral-400 font-medium group-active:opacity-70 transition-opacity">Monitor attendance and academic progress</p>
-              </div>
-            </div>
-            <ArrowRight className="w-6 h-6 text-neutral-400 group-hover:text-[#D0BCFF] group-hover:translate-x-1.5 transition-transform duration-300" />
-          </div>
-        </button>
+        <GlassButton
+          onClick={() => handleRoleSelect('parent', '/parent/linking')}
+          size="card"
+          className="w-full"
+          icon={<User className="w-8 h-8 drop-shadow-md" />}
+          trailing={<PortalArrow />}
+        >
+          <span className="flex-1 min-w-0">
+            <span className="block text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors drop-shadow-sm">Parents&apos; Portal</span>
+            <span className="block text-sm text-neutral-400 font-medium group-active:opacity-70 transition-opacity">Monitor attendance and academic progress</span>
+          </span>
+        </GlassButton>
 
-        {/* Security Button */}
-        <button onClick={() => router.push('/guard')} className={btnWrapperClass}>
-          <div className={glassPanelClass}>
-            <div className="flex items-center space-x-4">
-              <div className={iconBoxClass}>
-                <ShieldCheck className="w-8 h-8 drop-shadow-md" />
-              </div>
-              <div className="text-left">
-                <h3 className="text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors drop-shadow-sm">Security Portal</h3>
-                <p className="text-sm text-neutral-400 font-medium group-active:opacity-70 transition-opacity">Guard scanner for digital gate passes</p>
-              </div>
-            </div>
-            <ArrowRight className="w-6 h-6 text-neutral-400 group-hover:text-[#D0BCFF] group-hover:translate-x-1.5 transition-transform duration-300" />
-          </div>
-        </button>
+        <GlassButton
+          onClick={() => router.push('/guard')}
+          size="card"
+          className="w-full"
+          icon={<ShieldCheck className="w-8 h-8 drop-shadow-md" />}
+          trailing={<PortalArrow />}
+        >
+          <span className="flex-1 min-w-0">
+            <span className="block text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors drop-shadow-sm">Security Portal</span>
+            <span className="block text-sm text-neutral-400 font-medium group-active:opacity-70 transition-opacity">Guard scanner for digital gate passes</span>
+          </span>
+        </GlassButton>
 
       </div>
 

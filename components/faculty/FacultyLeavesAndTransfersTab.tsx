@@ -7,6 +7,7 @@ import { useAuth } from '../../app/context/AuthContext';
 import { FacultyLeaveApplication, ProxyRequest, TimetableEntry } from '../../types';
 import { FileText, Plus, CheckCircle, XCircle, Clock, ShieldAlert, Loader2, Calendar } from 'lucide-react';
 import GlassDropdown from '../GlassDropdown';
+import GlassButton from '../ui/GlassButton';
 
 const LEAVE_OPTIONS = ["Casual Leave", "Earned Leave", "Medical Leave", "Duty Leave", "Study Leave", "Compensatory Off", "Without Pay Leave"];
 
@@ -263,9 +264,9 @@ export default function FacultyLeavesAndTransfersTab({
           <div className="space-y-6">
             <div className="flex justify-between items-center">
               <h2 className={`text-xl font-bold ${textStyle}`}>My Applications</h2>
-              <button onClick={() => setShowApplyDialog(true)} className="bg-[#D0BCFF] text-[#2A1B4E] px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:scale-105 transition">
-                <Plus className="w-4 h-4"/> Apply Leave
-              </button>
+              <GlassButton onClick={() => setShowApplyDialog(true)} variant="primary" icon={<Plus className="w-4 h-4"/>}>
+                Apply Leave
+              </GlassButton>
             </div>
             
             {myLeaves.length === 0 ? (
@@ -323,12 +324,12 @@ export default function FacultyLeavesAndTransfersTab({
                   <div className="flex items-center gap-3">
                     {processingId === app.id ? <Loader2 className="w-6 h-6 animate-spin text-[#D0BCFF]" /> : (
                       <>
-                        <button onClick={async () => {
+                        <GlassButton onClick={async () => {
                           setProcessingId(app.id);
                           await updateDoc(doc(db, "faculty_leaves", app.id), { status: "REJECTED", remarks: `Rejected by ${currentName}` });
                           setProcessingId(null);
-                        }} className="px-4 py-2 rounded-xl text-red-500 border border-red-500/50 hover:bg-red-500/10 font-bold transition">Reject</button>
-                        <button onClick={() => handleApprove(app)} className="px-6 py-2 rounded-xl bg-green-500 text-white font-bold hover:bg-green-600 transition">Approve</button>
+                        }} variant="danger">Reject</GlassButton>
+                        <GlassButton onClick={() => handleApprove(app)} variant="success" className="px-6">Approve</GlassButton>
                       </>
                     )}
                   </div>
@@ -368,8 +369,8 @@ export default function FacultyLeavesAndTransfersTab({
                       </div>
                     ) : (
                       <div className="flex gap-3">
-                        <button onClick={() => setDismissedProxies(new Set(dismissedProxies).add(req.id))} className="flex-1 py-2.5 border border-red-500/50 text-red-500 rounded-xl font-bold hover:bg-red-500/10 transition">Skip</button>
-                        <button onClick={() => handleClaimProxy(req)} className="flex-[2] py-2.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold hover:bg-[#D0BCFF]/90 transition">Accept Transfer</button>
+                        <GlassButton onClick={() => setDismissedProxies(new Set(dismissedProxies).add(req.id))} variant="danger" className="flex-1">Skip</GlassButton>
+                        <GlassButton onClick={() => handleClaimProxy(req)} variant="primary" className="flex-[2]">Accept Transfer</GlassButton>
                       </div>
                     )}
                   </div>
@@ -481,11 +482,10 @@ export default function FacultyLeavesAndTransfersTab({
             </div>
 
             <div className="p-6 border-t border-white/10 flex justify-end gap-3 bg-black/20">
-              <button onClick={() => setShowApplyDialog(false)} disabled={isSubmitting} className={`px-5 py-2.5 rounded-xl font-bold ${isDark ? 'text-gray-300 hover:bg-white/10' : 'text-gray-600 hover:bg-gray-100'}`}>Cancel</button>
-              <button onClick={handleApplyLeave} disabled={isSubmitting} className="px-6 py-2.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold hover:scale-105 transition flex items-center gap-2 disabled:opacity-50">
-                {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin"/> : null}
+              <GlassButton onClick={() => setShowApplyDialog(false)} disabled={isSubmitting} variant="glass">Cancel</GlassButton>
+              <GlassButton onClick={handleApplyLeave} disabled={isSubmitting} variant="primary" icon={isSubmitting ? <Loader2 className="w-4 h-4 animate-spin"/> : undefined}>
                 {isSubmitting ? "Submitting..." : "Submit Application"}
-              </button>
+              </GlassButton>
             </div>
 
           </div>

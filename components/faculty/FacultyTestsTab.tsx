@@ -6,6 +6,7 @@ import { db } from '../../lib/firebase';
 import { useAuth } from '../../app/context/AuthContext';
 import { Loader2, Sparkles, Image as ImageIcon } from 'lucide-react';
 import GlassDropdown from '../GlassDropdown';
+import GlassButton from '../ui/GlassButton';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // --- BROWSER IMAGE COMPRESSOR ---
@@ -198,13 +199,13 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
         <h3 className={`text-lg font-bold ${textColor}`}>Student Scores</h3>
         <div className="flex space-x-2">
           <input type="file" accept=".csv, .txt" onChange={handleAiCsvImport} ref={csvInputRef} className="hidden" />
-          <button onClick={() => csvInputRef.current?.click()} disabled={isAiAnalyzing || classRoster.length === 0} className={`px-3 py-2 ${isDark ? 'bg-blue-500/20 text-blue-300 border-blue-500/30' : 'bg-blue-100 text-blue-700 border-blue-200'} border rounded-xl text-sm font-bold flex items-center transition-all disabled:opacity-50`}>
-            {isAiAnalyzing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />} Auto CSV
-          </button>
+          <GlassButton onClick={() => csvInputRef.current?.click()} disabled={isAiAnalyzing || classRoster.length === 0} variant="glass" size="sm" icon={isAiAnalyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}>
+            Auto CSV
+          </GlassButton>
           <input type="file" accept="image/*" capture="environment" onChange={handleAiImageImport} ref={imageInputRef} className="hidden" />
-          <button onClick={() => imageInputRef.current?.click()} disabled={isAiAnalyzing || classRoster.length === 0} className={`px-3 py-2 ${isDark ? 'bg-purple-500/20 text-[#D0BCFF] border-purple-500/30' : 'bg-purple-100 text-purple-700 border-purple-200'} border rounded-xl text-sm font-bold flex items-center transition-all disabled:opacity-50`}>
-            {isAiAnalyzing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ImageIcon className="w-4 h-4 mr-2" />} Scan Image
-          </button>
+          <GlassButton onClick={() => imageInputRef.current?.click()} disabled={isAiAnalyzing || classRoster.length === 0} variant="glass" size="sm" icon={isAiAnalyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}>
+            Scan Image
+          </GlassButton>
         </div>
       </div>
 
@@ -242,7 +243,7 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
       )}
 
       {classRoster.length > 0 && (
-        <button onClick={async () => {
+        <GlassButton onClick={async () => {
           setIsLoading(true);
           try {
             const docId = `${selectedSemester}_${selectedBranch}_${selectedSubject}`.replace(/\s+/g, '').replace(/&/g, 'and');
@@ -253,9 +254,9 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
             });
             alert("Marks published to students!");
           } catch (e) { alert("Error saving marks."); } finally { setIsLoading(false); }
-        }} disabled={isLoading} className="w-full mt-6 py-4 bg-[#D0BCFF] text-[#2A1B4E] rounded-2xl font-bold flex justify-center items-center hover:scale-[1.02] transition-transform">
-          {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Save & Publish Marks"}
-        </button>
+        }} disabled={isLoading} variant="primary" size="lg" className="w-full mt-6" icon={isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : undefined}>
+          {isLoading ? null : "Save & Publish Marks"}
+        </GlassButton>
       )}
     </div>
   );

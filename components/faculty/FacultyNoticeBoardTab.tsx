@@ -5,6 +5,7 @@ import { collection, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firesto
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../app/context/AuthContext';
 import { Bell, Plus, Trash2, Calendar, Loader2, X, Link as LinkIcon, Paperclip, ExternalLink, Image as ImgIcon, UploadCloud } from 'lucide-react';
+import GlassButton from '../ui/GlassButton';
 
 const AUDIENCES = ["All", "All Students", "All Teachers", "CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
 
@@ -112,9 +113,9 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
       <div className="flex justify-between items-center mb-6">
         <h2 className={`text-2xl font-bold ${textColor}`}>Notice Board</h2>
         {isHod && (
-          <button onClick={() => setShowNewNoticeDialog(true)} className="px-4 py-2 bg-white text-black rounded-xl font-bold text-sm flex items-center shadow-[0_0_15px_rgba(255,255,255,0.2)] hover:scale-105 transition-transform">
-            <Plus className="w-4 h-4 mr-2" /> New Notice
-          </button>
+          <GlassButton onClick={() => setShowNewNoticeDialog(true)} variant="light" icon={<Plus className="w-4 h-4" />}>
+            New Notice
+          </GlassButton>
         )}
       </div>
 
@@ -238,10 +239,10 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
             </div>
 
             <div className="flex space-x-3 mt-auto">
-              <button onClick={() => setShowNewNoticeDialog(false)} disabled={isPublishing} className="flex-1 py-3.5 bg-white/10 rounded-xl font-bold text-white disabled:opacity-50">Cancel</button>
-              <button onClick={handlePublish} disabled={isPublishing} className="flex-1 py-3.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold hover:scale-[1.02] transition-transform disabled:opacity-50 flex justify-center items-center">
-                {isPublishing ? <Loader2 className="w-5 h-5 animate-spin" /> : "Publish Notice"}
-              </button>
+              <GlassButton onClick={() => setShowNewNoticeDialog(false)} disabled={isPublishing} variant="glass" className="flex-1">Cancel</GlassButton>
+              <GlassButton onClick={handlePublish} disabled={isPublishing} variant="primary" className="flex-1" icon={isPublishing ? <Loader2 className="w-5 h-5 animate-spin" /> : undefined}>
+                {isPublishing ? null : "Publish Notice"}
+              </GlassButton>
             </div>
           </div>
         </div>

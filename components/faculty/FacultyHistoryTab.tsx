@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import GlassDropdown from '../GlassDropdown';
+import GlassButton from '../ui/GlassButton';
 
 const getOrdinalNum = (n: number) => n + (n > 0 ? ['th', 'st', 'nd', 'rd'][(n > 3 && n < 21) || n % 10 > 3 ? 0 : n % 10] : '');
 const formatExportDate = (date: Date) => {
@@ -305,12 +306,12 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
       <div className="flex justify-between items-center mb-6">
         <h2 className={`text-2xl font-bold ${textColor}`}>History Logs</h2>
         <div className="flex space-x-3">
-          <button onClick={() => setShowCustomRangeModal(true)} className="p-3 bg-white/[0.08] border border-white/20 hover:bg-white/[0.15] rounded-2xl text-white transition-all backdrop-blur-md" title="Custom Date Range Export">
+          <GlassButton onClick={() => setShowCustomRangeModal(true)} variant="glass" size="icon" title="Custom Date Range Export">
             <CalendarRange className="w-5 h-5 text-[#D0BCFF]" />
-          </button>
-          <button onClick={() => triggerExportDialog(filteredHistory, "all")} className="p-3 bg-white/[0.08] border border-white/20 hover:bg-white/[0.15] rounded-2xl text-white transition-all backdrop-blur-md" title="Export All Data">
+          </GlassButton>
+          <GlassButton onClick={() => triggerExportDialog(filteredHistory, "all")} variant="glass" size="icon" title="Export All Data">
             <Download className="w-5 h-5 text-[#D0BCFF]" />
-          </button>
+          </GlassButton>
         </div>
       </div>
 
@@ -481,9 +482,9 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
             <div className="p-6 flex-1 flex flex-col max-w-4xl mx-auto w-full h-full overflow-hidden relative">
               
               <div className="flex items-center mb-8">
-                 <button onClick={() => setEditingRecord(null)} className="px-5 py-2.5 bg-white/[0.08] border border-white/20 rounded-[14px] mr-4 hover:bg-white/[0.15] transition-colors text-sm font-semibold">
+                 <GlassButton onClick={() => setEditingRecord(null)} variant="glass" className="mr-4">
                    Back
-                 </button>
+                 </GlassButton>
                  <div>
                    <p className="text-xs text-[#D0BCFF] font-bold tracking-wide uppercase mb-1">{editingRecord.semester} • {editingRecord.branchName} ({editingRecord.divisionName})</p>
                    <h2 className="text-2xl font-bold tracking-tight leading-tight">{editingRecord.subjectName}</h2>
@@ -532,9 +533,9 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
               </div>
 
               <div className="absolute bottom-6 left-6 right-6 flex justify-center">
-                <button onClick={handleSaveUpdatedAttendance} disabled={isUpdatingAttendance} className="w-full max-w-4xl py-4 bg-[#D0BCFF] text-[#1A103C] rounded-2xl font-bold text-[16px] tracking-wide shadow-[0_0_20px_rgba(208,188,255,0.4)] flex justify-center items-center hover:scale-[1.02] transition-transform">
-                  {isUpdatingAttendance ? <Loader2 className="w-5 h-5 animate-spin" /> : `Update Attendance (${editingPresentIds.length} Present)`}
-                </button>
+                <GlassButton onClick={handleSaveUpdatedAttendance} disabled={isUpdatingAttendance} variant="primary" size="lg" className="w-full max-w-4xl text-[16px] tracking-wide" icon={isUpdatingAttendance ? <Loader2 className="w-5 h-5 animate-spin" /> : undefined}>
+                  {isUpdatingAttendance ? null : `Update Attendance (${editingPresentIds.length} Present)`}
+                </GlassButton>
               </div>
             </div>
           </motion.div>
@@ -555,10 +556,10 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
               className={`w-full h-36 border rounded-xl p-4 text-sm outline-none focus:ring-2 focus:ring-[#D0BCFF] resize-none mb-4 ${isDark ? 'bg-white/[0.05] border-white/20' : 'bg-black/5 border-black/10'}`}
             />
             <div className="flex space-x-3">
-              <button onClick={handleFormatAiNotes} disabled={isFormattingAi} className="flex-1 py-3 bg-white/[0.05] border border-white/20 rounded-xl font-bold flex justify-center items-center hover:bg-white/[0.15]">
-                {isFormattingAi ? <span className="flex items-center"><Sparkles className="w-4 h-4 animate-spin mr-2 text-[#D0BCFF]" /> Formatting...</span> : <span className="flex items-center"><Sparkles className="w-4 h-4 mr-2 text-[#D0BCFF]" /> Format AI</span>}
-              </button>
-              <button onClick={handleSaveNotes} className="flex-1 py-3 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold hover:scale-[1.02] shadow-[0_0_20px_rgba(208,188,255,0.3)]">Save Notes</button>
+              <GlassButton onClick={handleFormatAiNotes} disabled={isFormattingAi} variant="glass" className="flex-1" icon={isFormattingAi ? <Sparkles className="w-4 h-4 animate-spin text-[#D0BCFF]" /> : <Sparkles className="w-4 h-4 text-[#D0BCFF]" />}>
+                {isFormattingAi ? "Formatting..." : "Format AI"}
+              </GlassButton>
+              <GlassButton onClick={handleSaveNotes} variant="primary" className="flex-1">Save Notes</GlassButton>
             </div>
           </div>
         </div>
@@ -572,13 +573,13 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
             <p className="text-xs opacity-70 mb-6 break-words">{exportFileName}</p>
             <div className="space-y-3">
               {exportScope === "single" && (
-                <button onClick={handleDownloadPdf} className="w-full flex items-center justify-center py-3.5 bg-white/[0.08] border border-white/20 hover:bg-white/[0.15] rounded-xl font-bold transition-all">
-                  <FileType2 className="w-5 h-5 mr-2" /> Save as PDF
-                </button>
+                <GlassButton onClick={handleDownloadPdf} variant="glass" className="w-full" icon={<FileType2 className="w-5 h-5" />}>
+                  Save as PDF
+                </GlassButton>
               )}
-              <button onClick={handleDownloadCsv} className="w-full flex items-center justify-center py-3.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold hover:scale-[1.02] shadow-[0_0_20px_rgba(208,188,255,0.4)] transition-transform">
+              <GlassButton onClick={handleDownloadCsv} variant="primary" className="w-full">
                  Save as CSV (Excel)
-              </button>
+              </GlassButton>
               <button onClick={() => setShowExportDialog(false)} className="w-full py-3 bg-transparent opacity-60 hover:opacity-100 font-bold transition-colors">Cancel</button>
             </div>
           </div>
@@ -614,7 +615,7 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
               </div>
             </div>
             
-            <button onClick={() => {
+            <GlassButton onClick={() => {
               if (!startDate || !endDate) return alert("Please select start and end dates.");
               const startMs = new Date(startDate).getTime();
               const endMs = new Date(endDate).getTime() + 86400000;
@@ -625,9 +626,9 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
               if (customBranchFilter !== "All") filtered = filtered.filter(r => r.branchName === customBranchFilter);
               triggerExportDialog(filtered, "custom", startDate, endDate, customBranchFilter);
               setShowCustomRangeModal(false);
-            }} className="w-full py-3.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold hover:scale-[1.02] shadow-[0_0_20px_rgba(208,188,255,0.4)] transition-transform">
+            }} variant="primary" className="w-full">
               Generate Custom Report
-            </button>
+            </GlassButton>
           </div>
         </div>
       )}

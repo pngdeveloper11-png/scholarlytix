@@ -5,6 +5,7 @@ import { collection, query, where, getDocs, addDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { CheckCircle, XCircle, Search, Loader2 } from 'lucide-react';
 import GlassDropdown from '../GlassDropdown';
+import GlassButton from '../ui/GlassButton';
 
 export default function FacultyAttendanceTab({ directMarkData, isDark }: { directMarkData?: any, isDark: boolean }) {
   const [selectedSem, setSelectedSem] = useState(directMarkData?.sem || "Semester 3");
@@ -138,13 +139,16 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
             className="w-full bg-black/30 border border-white/10 rounded-2xl p-4 outline-none focus:border-[#D0BCFF]" 
           />
         </div>
-        <button 
-          onClick={fetchStudents} 
-          disabled={isLoadingStudents || !selectedSubject} 
-          className="w-full py-4 bg-[#D0BCFF] text-[#2A1B4E] rounded-2xl font-bold flex justify-center items-center hover:scale-[1.01] transition-transform disabled:opacity-50"
+        <GlassButton
+          onClick={fetchStudents}
+          disabled={isLoadingStudents || !selectedSubject}
+          variant="primary"
+          size="lg"
+          className="w-full"
+          icon={isLoadingStudents ? <Loader2 className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5" />}
         >
-          {isLoadingStudents ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Search className="w-5 h-5 mr-2" /> Load Student Roster</>}
-        </button>
+          {isLoadingStudents ? null : "Load Student Roster"}
+        </GlassButton>
       </div>
 
       {/* Interactive Roll List */}
@@ -156,8 +160,8 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
               <p className="text-sm opacity-60 mt-1">{students.length} students loaded for {selectedSubject}.</p>
             </div>
             <div className="flex gap-2">
-              <button onClick={() => markAll(false)} className="px-4 py-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-xl font-bold text-sm hover:bg-red-500/20 transition-colors">Mark All Absent</button>
-              <button onClick={() => markAll(true)} className="px-4 py-2 bg-green-500/10 text-green-400 border border-green-500/20 rounded-xl font-bold text-sm hover:bg-green-500/20 transition-colors">Mark All Present</button>
+              <GlassButton onClick={() => markAll(false)} variant="danger" size="sm">Mark All Absent</GlassButton>
+              <GlassButton onClick={() => markAll(true)} variant="success" size="sm">Mark All Present</GlassButton>
             </div>
           </div>
 
@@ -180,13 +184,16 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
             })}
           </div>
 
-          <button 
-            onClick={handleSubmit} 
-            disabled={isSubmitting} 
-            className="w-full py-4 bg-white text-black rounded-2xl font-bold text-lg flex justify-center items-center hover:scale-[1.01] transition-transform shadow-[0_0_20px_rgba(255,255,255,0.2)] disabled:opacity-50"
+          <GlassButton
+            onClick={handleSubmit}
+            disabled={isSubmitting}
+            variant="light"
+            size="lg"
+            className="w-full text-lg"
+            icon={isSubmitting ? <Loader2 className="w-6 h-6 animate-spin" /> : undefined}
           >
-            {isSubmitting ? <Loader2 className="w-6 h-6 animate-spin" /> : `Save Attendance (${Object.values(attendance).filter(Boolean).length} Present)`}
-          </button>
+            {isSubmitting ? null : `Save Attendance (${Object.values(attendance).filter(Boolean).length} Present)`}
+          </GlassButton>
         </div>
       )}
 

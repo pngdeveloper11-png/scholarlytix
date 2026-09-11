@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, onSnapshot, doc, setDoc, updateDoc, getDoc } from 'firebase/firestore';
 import { db, auth } from '@/lib/firebase';
 import { ShieldCheck, Search, Loader2, FileText, Clock } from 'lucide-react';
+import GlassButton from '../ui/GlassButton';
 
 export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
   const [activeSubTab, setActiveSubTab] = useState<"issue" | "history" | "leaves">("issue");
@@ -173,9 +174,9 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
              </div>
           </div>
 
-          <button onClick={handleIssuePass} disabled={isIssuing || !selectedStudent} className="w-full py-4 bg-[#D0BCFF] text-[#2A1B4E] rounded-2xl font-bold flex justify-center items-center hover:scale-[1.01] transition-transform disabled:opacity-50">
-            {isIssuing ? <Loader2 className="w-5 h-5 animate-spin" /> : "Issue Scannable Gate Pass"}
-          </button>
+          <GlassButton onClick={handleIssuePass} disabled={isIssuing || !selectedStudent} variant="primary" size="lg" className="w-full" icon={isIssuing ? <Loader2 className="w-5 h-5 animate-spin" /> : undefined}>
+            {isIssuing ? null : "Issue Scannable Gate Pass"}
+          </GlassButton>
         </div>
       )}
 
@@ -193,7 +194,7 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
               </div>
               <div className="flex items-center gap-3 w-full md:w-auto justify-end">
                 <span className={`px-3 py-1 text-xs font-black uppercase rounded-lg border ${pass.status === 'ACTIVE' ? 'bg-green-500/20 text-green-400 border-green-500/30' : pass.status === 'USED' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'}`}>{pass.status}</span>
-                {pass.status === 'ACTIVE' && <button onClick={() => handleRevokePass(pass.id)} className="px-3 py-1 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 rounded-lg text-xs font-bold transition-colors">Revoke</button>}
+                {pass.status === 'ACTIVE' && <GlassButton onClick={() => handleRevokePass(pass.id)} variant="danger" size="sm">Revoke</GlassButton>}
               </div>
             </div>
           ))}
@@ -217,8 +218,8 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
               </div>
               {leave.status === "PENDING" ? (
                 <div className="flex gap-3">
-                  <button onClick={() => handleLeaveApproval(leave.id, "REJECTED", leave.studentId)} className="flex-1 py-2.5 bg-red-500/10 text-red-400 border border-red-500/20 rounded-xl font-bold hover:bg-red-500/20 transition-colors">Reject</button>
-                  <button onClick={() => handleLeaveApproval(leave.id, "APPROVED", leave.studentId)} className="flex-1 py-2.5 bg-green-500 text-white rounded-xl font-bold hover:bg-green-600 transition-colors shadow-[0_0_15px_rgba(34,197,94,0.3)]">Approve</button>
+                  <GlassButton onClick={() => handleLeaveApproval(leave.id, "REJECTED", leave.studentId)} variant="danger" className="flex-1">Reject</GlassButton>
+                  <GlassButton onClick={() => handleLeaveApproval(leave.id, "APPROVED", leave.studentId)} variant="success" className="flex-1">Approve</GlassButton>
                 </div>
               ) : (
                 <p className="text-xs opacity-50 mt-2">Processed by {leave.mentorApproval}</p>

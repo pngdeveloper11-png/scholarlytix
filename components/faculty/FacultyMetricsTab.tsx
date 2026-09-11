@@ -6,6 +6,7 @@ import { db } from '../../lib/firebase';
 import { useAuth } from '../../app/context/AuthContext';
 import { Loader2, UploadCloud, Users, Trash2, Check, Edit } from 'lucide-react'; 
 import GlassDropdown from '../GlassDropdown';
+import GlassButton from '../ui/GlassButton';
 import { CollegeStructureConfig, StudentData } from '../../types';
 
 const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4"];
@@ -214,11 +215,11 @@ function ImportStudentsDialog({ isDynamicHue, onDismiss, globalStructure }: { is
         )}
 
         <div className="flex space-x-3 mt-auto">
-          <button onClick={onDismiss} disabled={isUploading} className="flex-1 py-3.5 bg-white/10 rounded-xl font-bold text-white disabled:opacity-50">Cancel</button>
+          <GlassButton onClick={onDismiss} disabled={isUploading} variant="glass" className="flex-1">Cancel</GlassButton>
           <input type="file" accept=".csv" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
-          <button onClick={() => fileInputRef.current?.click()} disabled={isUploading || (importMode === "Single" && !selectedDivision)} className="flex-1 py-3.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold hover:scale-[1.02] transition-transform disabled:opacity-50">
+          <GlassButton onClick={() => fileInputRef.current?.click()} disabled={isUploading || (importMode === "Single" && !selectedDivision)} variant="primary" className="flex-1">
             {isUploading ? "Processing..." : "Select CSV File"}
-          </button>
+          </GlassButton>
         </div>
       </div>
     </div>
@@ -353,13 +354,13 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
             <h3 className="text-[#D0BCFF] font-bold text-[15px]">HOD Overview Mode</h3>
             <p className="text-white/60 text-xs mt-0.5">Manage the master college directory.</p>
           </div>
-          <button 
+          <GlassButton
             onClick={() => setShowImportDialog(true)}
-            className="flex items-center px-4 py-2 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold text-sm shadow-[0_0_15px_rgba(208,188,255,0.3)] hover:scale-105 transition-transform"
+            variant="primary"
+            icon={<UploadCloud className="w-4 h-4" />}
           >
-            <UploadCloud className="w-4 h-4 mr-2" />
             Import CSV Roster
-          </button>
+          </GlassButton>
         </div>
       )}
 

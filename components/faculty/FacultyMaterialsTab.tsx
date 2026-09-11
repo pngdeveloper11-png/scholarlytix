@@ -6,6 +6,7 @@ import { db } from '../../lib/firebase';
 import { useAuth } from '../../app/context/AuthContext';
 import { Loader2, UploadCloud, Trash2, FileQuestion, BookOpen, ExternalLink, Paperclip, X, Link as LinkIcon } from 'lucide-react';
 import GlassDropdown from '../GlassDropdown';
+import GlassButton from '../ui/GlassButton';
 
 export default function FacultyMaterialsTab() {
   const { user, role } = useAuth();
@@ -158,9 +159,9 @@ export default function FacultyMaterialsTab() {
       </div>
 
       <div className="absolute bottom-4 left-0 w-full">
-        <button onClick={() => setShowUploadDialog(true)} className="w-full py-4 bg-[#D0BCFF] text-[#2A1B4E] rounded-[1rem] font-bold text-[16px] flex justify-center items-center hover:scale-[1.02] transition-transform shadow-[0_0_20px_rgba(208,188,255,0.3)]">
-          <UploadCloud className="w-5 h-5 mr-3" /> Upload Material
-        </button>
+        <GlassButton onClick={() => setShowUploadDialog(true)} variant="primary" size="lg" className="w-full text-[16px]" icon={<UploadCloud className="w-5 h-5" />}>
+          Upload Material
+        </GlassButton>
       </div>
 
       {showUploadDialog && (
@@ -248,10 +249,10 @@ function UploadMaterialDialog({ user, teachingConfig, initialSem, initialBranch,
           </div>
         </div>
         <div className="flex space-x-3 mt-auto">
-          <button onClick={onDismiss} className="flex-1 py-3.5 bg-white/[0.05] border border-white/20 text-white rounded-xl font-bold hover:bg-white/[0.1] transition-colors">Cancel</button>
-          <button onClick={handleUpload} disabled={isUploading || !title} className="flex-1 py-3.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold flex justify-center items-center disabled:opacity-50 hover:scale-[1.02] transition-transform">
-            {isUploading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Upload"}
-          </button>
+          <GlassButton onClick={onDismiss} variant="glass" className="flex-1">Cancel</GlassButton>
+          <GlassButton onClick={handleUpload} disabled={isUploading || !title} variant="primary" className="flex-1" icon={isUploading ? <Loader2 className="w-5 h-5 animate-spin" /> : undefined}>
+            {isUploading ? null : "Upload"}
+          </GlassButton>
         </div>
       </div>
     </div>

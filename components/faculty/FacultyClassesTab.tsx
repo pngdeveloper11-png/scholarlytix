@@ -6,6 +6,7 @@ import { db } from '../../lib/firebase';
 import { useAuth } from '../../app/context/AuthContext';
 import { CollegeStructureConfig } from '../../types/index';
 import { Edit, Zap, CalendarDays } from 'lucide-react';
+import GlassButton from '../ui/GlassButton';
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -141,13 +142,13 @@ export default function FacultyClassesTab({
         </div>
 
         <div className="pt-4 space-y-4">
-          <button onClick={onEditSubjectsClick} className={`w-full py-4 rounded-2xl flex items-center justify-center gap-3 font-bold border ${isDark ? 'bg-white/10 border-white/20 text-white hover:bg-white/20' : 'bg-gray-100 border-gray-300 text-gray-800 hover:bg-gray-200'} transition-colors`}>
-            <Edit className="w-5 h-5"/> Edit Classes & Subjects
-          </button>
+          <GlassButton onClick={onEditSubjectsClick} variant="glass" size="lg" className="w-full" icon={<Edit className="w-5 h-5"/>}>
+            Edit Classes & Subjects
+          </GlassButton>
           
-          <button onClick={onProxyClick} className="w-full py-4 rounded-2xl flex items-center justify-center gap-3 font-bold bg-[#D0BCFF] text-[#2A1B4E] hover:scale-[1.02] transition-transform shadow-[0_0_20px_rgba(208,188,255,0.3)]">
-            <Zap className="w-5 h-5"/> Mark Proxy Lecture
-          </button>
+          <GlassButton onClick={onProxyClick} variant="primary" size="lg" className="w-full" icon={<Zap className="w-5 h-5"/>}>
+            Mark Proxy Lecture
+          </GlassButton>
         </div>
       </div>
     </div>
