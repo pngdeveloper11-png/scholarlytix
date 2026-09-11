@@ -31,7 +31,7 @@ export default function FacultyClassesTab({
   const [scheduleView, setScheduleView] = useState<"Today" | "Week">("Today");
   const [myTimetable, setMyTimetable] = useState<any[]>([]);
   
-  // FIXED: Reference for the hidden file upload input
+  // Reference for the hidden file upload input
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -72,10 +72,10 @@ export default function FacultyClassesTab({
     return mappedLabel;
   };
 
+  // Upload handler logic
   const handleTimetableUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      // Trigger your upload logic here
       alert(`Selected ${file.name} for upload. Processing timetable...`);
       // Reset input so the same file can be uploaded again if needed
       e.target.value = ''; 
@@ -97,7 +97,7 @@ export default function FacultyClassesTab({
     <div className="flex flex-col h-full space-y-6">
       <div className="flex-1 overflow-y-auto space-y-8 pb-24 pr-2 [&::-webkit-scrollbar]:hidden">
         
-        {/* Your Schedule Panel (Matches Android UI exactly) */}
+        {/* Your Schedule Panel */}
         <div className={`p-6 rounded-[2rem] border ${cardBg}`}>
           <div className="flex justify-between items-center mb-6">
             <h3 className={`text-lg font-bold flex items-center ${textStyle}`}><CalendarDays className="w-5 h-5 mr-2 text-[#D0BCFF]"/> Your Schedule</h3>
@@ -156,19 +156,19 @@ export default function FacultyClassesTab({
 
         {/* Global Action Buttons */}
         <div className="pt-4 space-y-4">
-          {/* FIXED: Re-wired the Upload Timetables logic using the new GlassButton */}
-          <input type="file" ref={fileInputRef} onChange={handleTimetableUpload} className="hidden" accept=".csv, .xlsx, .pdf, image/*" />
-          
-          <GlassButton onClick={() => fileInputRef.current?.click()} variant="light" size="lg" className="w-full" icon={<UploadCloud className="w-5 h-5"/>}>
-            Upload Branch Timetables
-          </GlassButton>
-
           <GlassButton onClick={onEditSubjectsClick} variant="glass" size="lg" className="w-full" icon={<Edit className="w-5 h-5"/>}>
             Edit Classes & Subjects
           </GlassButton>
           
           <GlassButton onClick={onProxyClick} variant="primary" size="lg" className="w-full" icon={<Zap className="w-5 h-5"/>}>
             Mark Proxy Lecture
+          </GlassButton>
+
+          {/* Hidden file input bound to the Publish button below */}
+          <input type="file" ref={fileInputRef} onChange={handleTimetableUpload} className="hidden" accept=".csv, .xlsx, .pdf, image/*" />
+          
+          <GlassButton onClick={() => fileInputRef.current?.click()} variant="success" size="lg" className="w-full" icon={<UploadCloud className="w-5 h-5"/>}>
+            Publish Branch Timetables
           </GlassButton>
         </div>
       </div>
