@@ -1,42 +1,58 @@
 'use client';
 
+// VERSION 5.0 - Integrated Proxy Modal & Subject Population
 import React, { useState, useEffect, useRef } from 'react';
 import { doc, collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../app/context/AuthContext';
 import { CollegeStructureConfig } from '../../types/index';
-import { Edit, Zap, CalendarDays, UploadCloud } from 'lucide-react';
+import { Edit, Zap, CalendarDays, UploadCloud, X } from 'lucide-react';
+import GlassDropdown from '../GlassDropdown';
 import GlassButton from '../ui/GlassButton';
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
+const SEMESTERS = ["Sem 1", "Sem 2", "Sem 3", "Sem 4", "Sem 5", "Sem 6", "Sem 7", "Sem 8"];
 
 export default function FacultyClassesTab({
   isDark,
   teachingConfig,
   onComboClick,
-  onProxyClick,
   onEditSubjectsClick
 }: {
   isDark: boolean;
   teachingConfig: Record<string, string[]>;
   onComboClick: (comboKey: string) => void;
-  onProxyClick: () => void;
+  onProxyClick?: () => void; // Made optional since we are overriding it here
   onEditSubjectsClick: () => void;
 }) {
   const { user, role } = useAuth();
   const textStyle = isDark ? "text-white" : "text-gray-900";
   const cardBg = isDark ? "bg-white/[0.05] border-white/10" : "bg-gray-50 border-gray-200";
 
-  // --- DEVELOPER & SUPER ADMIN OVERRIDE ---
-  const currentEmail = user?.email || "";
-  const isDeveloper = currentEmail.toLowerCase() === 'pngdeveloper11@gmail.com';
-  const isHod = role?.startsWith("HOD|") || role === "SUPER_ADMIN" || role === "DIRECTOR" || role === "PRINCIPAL" || role === "REGISTRAR" || isDeveloper;
-
   const [globalStructure, setGlobalStructure] = useState<CollegeStructureConfig>({});
   const [scheduleView, setScheduleView] = useState<"Today" | "Week">("Today");
   const [myTimetable, setMyTimetable] = useState<any[]>([]);
   
+  // Publish Modal State
+  const [showPublishModal, setShowPublishModal] = useState(false);
+  const [publishSem, setPublishSem] = useState("Sem 3");
+  const [publishBranch, setPublishBranch] = useState("CSE");
+  const [publishFile, setPublishFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Proxy Modal State
+  const [showProxyModal, setShowProxyModal] = useState(false);
+  const [proxySem, setProxySem] = useState("Sem 3");
+  const [proxyBranch, setProxyBranch] = useState("CSE");
+  const [proxyBatch, setProxyBatch] = useState("All");
+  const [proxySubject, setProxySubject] = useState("");
+
+  // --- ABSOLUTE SYNCHRONOUS OVERRIDE ---
+  const currentEmail = (user?.email || "").toLowerCase();
+  const isDeveloper = currentEmail === 'pngdeveloper11@gmail.com';
+  const isHod = role?.startsWith("HOD|") || role === "SUPER_ADMIN" || role === "DIRECTOR" || role === "PRINCIPAL" || role === "REGISTRAR";
+  const hasAdminAccess = isHod || isDeveloper;
 
   useEffect(() => {
     const unsubConfig = onSnapshot(doc(db, 'app_config', 'college_structure'), (snap) => {
@@ -61,25 +77,53 @@ export default function FacultyClassesTab({
     return () => { unsubConfig(); unsubTimetables(); };
   }, [user?.displayName]);
 
-  const getBatchLabel = (entry: any) => {
-    if (!entry.batch || entry.batch === "All") return "All";
-    const classKey = `${entry.semester}|${entry.branch}`;
-    const divs = globalStructure[classKey] || [];
-    let mappedLabel = entry.batch;
-    
-    divs.forEach(d => {
-      const bMatch = d.batches.find(b => b.name === entry.batch);
-      if (bMatch) mappedLabel = `${d.divisionName} • ${bMatch.name}`;
-    });
-    return mappedLabel;
+  // Build master list of all known subjects in the college to feed the Proxy dropdown
+  const allKnownSubjects = Array.from(new Set([
+    "Data Structures and Algorithms", "M-III", "Analysis of Algorithm", "COA", "MCE", "FSJP", "DBMS", "EDS", "DSGT", "ED", "AMT",
+    ...Object.values(teachingConfig).flat(),
+    ...myTimetable.map(t => t.subject)
+  ])).filter(Boolean).sort();
+
+  // Advanced Reverse Lookup: Fixes the "All • A1" bug by mapping strictly back to CSE/IT etc.
+  const getResolvedClassInfo = (entry: any) => {
+    let resolvedBranch = entry.branch;
+    let resolvedBatch = entry.batch;
+    let division = "";
+
+    if ((!resolvedBranch || resolvedBranch === "All") && resolvedBatch && resolvedBatch !== "All") {
+      for (const [key, divs] of Object.entries(globalStructure)) {
+        if (key.startsWith(entry.semester + "|")) {
+          for (const d of divs) {
+            if (d.batches?.some(b => b.name === resolvedBatch)) {
+              resolvedBranch = key.split("|")[1]; // Resolves to "CSE", "IT", etc.
+              division = d.divisionName;
+              break;
+            }
+          }
+        }
+      }
+    } else if (resolvedBranch && resolvedBranch !== "All") {
+      const classKey = `${entry.semester}|${resolvedBranch}`;
+      const divs = globalStructure[classKey] || [];
+      for (const d of divs) {
+        if (d.batches?.some(b => b.name === resolvedBatch)) {
+          division = d.divisionName;
+          break;
+        }
+      }
+    }
+
+    let result = resolvedBranch === "All" ? "" : resolvedBranch;
+    if (division) result += result ? ` (${division})` : division;
+    if (resolvedBatch && resolvedBatch !== "All") result += result ? ` • ${resolvedBatch}` : resolvedBatch;
+    return result || "General";
   };
 
-  const handleTimetableUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      alert(`Selected ${file.name} for upload. Processing timetable...`);
-      e.target.value = ''; 
-    }
+  const handlePublishSubmit = () => {
+    if (!publishFile) return alert("Please select a file to publish.");
+    alert(`Publishing ${publishFile.name} to ${publishSem} ${publishBranch}...`);
+    setShowPublishModal(false);
+    setPublishFile(null);
   };
 
   const currentDayStr = new Date().toLocaleDateString('en-US', { weekday: 'long' });
@@ -93,7 +137,7 @@ export default function FacultyClassesTab({
     });
 
   return (
-    <div className="flex flex-col h-full space-y-6">
+    <div className="flex flex-col h-full space-y-6 relative">
       <div className="flex-1 overflow-y-auto space-y-8 pb-24 pr-2 [&::-webkit-scrollbar]:hidden">
         
         {/* Your Schedule Panel */}
@@ -120,7 +164,8 @@ export default function FacultyClassesTab({
                 <div key={i} className="flex justify-between items-center p-4 bg-white/[0.03] border border-white/10 rounded-2xl">
                   <div>
                     <h4 className="font-bold text-white text-[15px]">{lecture.subject}</h4>
-                    <p className="text-xs text-[#D0BCFF] font-medium mt-0.5">{lecture.branch} • {getBatchLabel(lecture)}</p>
+                    {/* ACCURATE REVERSE-MAPPED DISPLAY */}
+                    <p className="text-xs text-[#D0BCFF] font-medium mt-0.5">{getResolvedClassInfo(lecture)}</p>
                   </div>
                   <div className="text-right">
                     <p className="text-sm font-bold text-white/90">{lecture.startTime} - {lecture.endTime}</p>
@@ -159,21 +204,95 @@ export default function FacultyClassesTab({
             Edit Classes & Subjects
           </GlassButton>
           
-          <GlassButton onClick={onProxyClick} variant="primary" size="lg" className="w-full" icon={<Zap className="w-5 h-5"/>}>
+          <GlassButton onClick={() => setShowProxyModal(true)} variant="primary" size="lg" className="w-full" icon={<Zap className="w-5 h-5"/>}>
             Mark Proxy Lecture
           </GlassButton>
 
-          {/* This renders specifically because of your isDeveloper override */}
-          {isHod && (
-            <>
-              <input type="file" ref={fileInputRef} onChange={handleTimetableUpload} className="hidden" accept=".csv, .xlsx, .pdf, image/*" />
-              <GlassButton onClick={() => fileInputRef.current?.click()} variant="success" size="lg" className="w-full" icon={<UploadCloud className="w-5 h-5"/>}>
-                Publish Branch Timetables
-              </GlassButton>
-            </>
+          {hasAdminAccess && (
+            <GlassButton onClick={() => setShowPublishModal(true)} variant="success" size="lg" className="w-full" icon={<UploadCloud className="w-5 h-5"/>}>
+              Publish Branch Timetables
+            </GlassButton>
           )}
         </div>
       </div>
+
+      {/* --- PROXY LECTURE MODAL --- */}
+      {showProxyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className={`p-8 rounded-[2rem] border w-full max-w-md ${isDark ? 'bg-[#111] border-white/10' : 'bg-white border-gray-200'} shadow-2xl`}>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-bold text-white flex items-center">
+                <Zap className="w-5 h-5 mr-2 text-[#D0BCFF]" /> Proxy Lecture
+              </h2>
+              <button onClick={() => setShowProxyModal(false)} className="text-white/50 hover:text-red-500"><X className="w-6 h-6"/></button>
+            </div>
+
+            <p className="text-xs font-bold uppercase tracking-wider text-white/50 mb-4">Class Configuration</p>
+            
+            <div className="flex gap-3 mb-4">
+              <GlassDropdown label="Semester" value={proxySem} options={SEMESTERS} onChange={setProxySem} isDark={isDark} zIndex={100} />
+              <GlassDropdown label="Branch" value={proxyBranch} options={BRANCHES} onChange={setProxyBranch} isDark={isDark} zIndex={90} />
+              <GlassDropdown label="Batch (Optional)" value={proxyBatch} options={["All", "A", "B", "C", "A1", "A2", "B1", "B2"]} onChange={setProxyBatch} isDark={isDark} zIndex={80} />
+            </div>
+
+            <div className="mb-8 z-40 relative">
+              <GlassDropdown 
+                label="Subject Name" 
+                value={proxySubject || allKnownSubjects[0]} 
+                options={allKnownSubjects} 
+                onChange={setProxySubject} 
+                isDark={isDark} 
+                zIndex={70} 
+              />
+            </div>
+
+            <GlassButton onClick={() => alert(`Loading roster for ${proxySubject || allKnownSubjects[0]} in ${proxyBranch}...`)} variant="primary" size="lg" className="w-full">
+              Load Student Roster
+            </GlassButton>
+          </div>
+        </div>
+      )}
+
+      {/* --- PUBLISH TIMETABLE MODAL --- */}
+      {showPublishModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className={`p-6 rounded-[2rem] w-full max-w-sm flex flex-col ${isDark ? 'bg-[#121212] border border-white/10' : 'bg-white border-gray-200'} shadow-2xl`}>
+            
+            <div className="mb-5">
+              <h3 className={`text-lg font-bold mb-1 ${textStyle}`}>Publish Timetable</h3>
+              <p className="text-xs text-gray-500">Pushes directly to student widgets.</p>
+            </div>
+
+            <div className="flex gap-3 mb-4">
+              <div className="flex-1 relative">
+                <select value={publishSem} onChange={e => setPublishSem(e.target.value)} className={`w-full p-3 rounded-xl border outline-none text-sm font-bold appearance-none ${isDark ? 'bg-white/[0.05] border-white/10 text-white' : 'bg-gray-50 border-gray-200 text-black'}`}>
+                  {SEMESTERS.map(s => <option key={s} value={s} className="bg-[#1a1a1a]">{s}</option>)}
+                </select>
+              </div>
+              <div className="flex-1 relative">
+                <select value={publishBranch} onChange={e => setPublishBranch(e.target.value)} className={`w-full p-3 rounded-xl border outline-none text-sm font-bold appearance-none ${isDark ? 'bg-white/[0.05] border-white/10 text-white' : 'bg-gray-50 border-gray-200 text-black'}`}>
+                  {BRANCHES.map(b => <option key={b} value={b} className="bg-[#1a1a1a]">{b}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className={`flex items-center gap-3 p-2 rounded-xl border mb-6 ${isDark ? 'bg-white/[0.05] border-white/10' : 'bg-gray-50 border-gray-200'}`}>
+              <GlassButton variant="light" size="sm" className="whitespace-nowrap" onClick={() => fileInputRef.current?.click()}>
+                Choose File
+              </GlassButton>
+              <span className="text-xs text-gray-400 overflow-hidden text-ellipsis whitespace-nowrap pr-2">
+                {publishFile ? publishFile.name : "No file chosen"}
+              </span>
+              <input type="file" ref={fileInputRef} className="hidden" accept=".csv, .xlsx, .pdf, image/*" onChange={(e) => setPublishFile(e.target.files?.[0] || null)} />
+            </div>
+
+            <div className="flex gap-3 mt-auto">
+              <GlassButton variant="glass" className="flex-1" onClick={() => { setShowPublishModal(false); setPublishFile(null); }}>Cancel</GlassButton>
+              <GlassButton variant="success" className="flex-1" onClick={handlePublishSubmit}>Publish</GlassButton>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
