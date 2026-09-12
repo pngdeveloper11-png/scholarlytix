@@ -1,5 +1,6 @@
 'use client';
 
+// VERSION 2.0 - Forced Cache Bypass Update
 import React, { useState, useEffect, useRef } from 'react';
 import { doc, collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
@@ -72,12 +73,10 @@ export default function FacultyClassesTab({
     return mappedLabel;
   };
 
-  // Upload handler logic
   const handleTimetableUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       alert(`Selected ${file.name} for upload. Processing timetable...`);
-      // Reset input so the same file can be uploaded again if needed
       e.target.value = ''; 
     }
   };
@@ -87,7 +86,6 @@ export default function FacultyClassesTab({
   
   const displayedSchedule = myTimetable.filter(t => activeDay === "All" || t.dayOfWeek === activeDay)
     .sort((a, b) => {
-      // Basic time sort fallback
       const timeA = parseInt(a.startTime.replace(/[^0-9]/g, ''));
       const timeB = parseInt(b.startTime.replace(/[^0-9]/g, ''));
       return timeA - timeB;
@@ -164,7 +162,6 @@ export default function FacultyClassesTab({
             Mark Proxy Lecture
           </GlassButton>
 
-          {/* Hidden file input bound to the Publish button below */}
           <input type="file" ref={fileInputRef} onChange={handleTimetableUpload} className="hidden" accept=".csv, .xlsx, .pdf, image/*" />
           
           <GlassButton onClick={() => fileInputRef.current?.click()} variant="success" size="lg" className="w-full" icon={<UploadCloud className="w-5 h-5"/>}>
