@@ -193,7 +193,7 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
   const [selectedSubject, setSelectedSubject] = useState("");
   
   const [isEditMode, setIsEditMode] = useState(false);
-  const [sortMode, setSortMode] = useState<"roll" | "az">("roll");
+  const [sortMode, setSortMode] = useState<"default" | "az">("default");
   
   // Modals
   const [showImportDialog, setShowImportDialog] = useState(false);
@@ -246,13 +246,18 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
     if (!subjects.includes(selectedSubject)) setSelectedSubject(subjects[0] || "");
   }, [configKey, teachingConfig, isHod, selectedSubject]);
 
-  // Analytics
+  // Analytics & Sorting
   let branchRoster = roster.filter(s => (s as any).branch === selectedBranch && (s as any).semester === selectedSemester && (s as any).division === selectedDivision);
   
   if (sortMode === "az") {
     branchRoster = branchRoster.sort((a, b) => ((a as any).fullName || "").localeCompare((b as any).fullName || ""));
   } else {
-    branchRoster = branchRoster.sort((a, b) => ((a as any).rollNo || 0) - ((b as any).rollNo || 0));
+    // Default sorting keeps students exactly "as they are" (by the timestamp they were added to the system)
+    branchRoster = branchRoster.sort((a, b) => {
+      const timeA = (a as any).admissionTimestamp?.seconds ? (a as any).admissionTimestamp.seconds * 1000 : ((a as any).admissionTimestamp || 0);
+      const timeB = (b as any).admissionTimestamp?.seconds ? (b as any).admissionTimestamp.seconds * 1000 : ((b as any).admissionTimestamp || 0);
+      return timeA - timeB;
+    });
   }
 
   const matchingLectures = history.filter(h => h.semester === selectedSemester && h.branchName === selectedBranch && h.divisionName === selectedDivision && (isHod ? true : h.subjectName === selectedSubject));
@@ -266,7 +271,6 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
       studentBatch = matched?.name || "Unknown";
     }
     const validLectures = matchingLectures.filter(l => {
-        // Safe casting to bypass TS Errors
         const lTime = (l as any).timestamp?.seconds ? (l as any).timestamp.seconds * 1000 : ((l as any).timestamp || (l as any).conductedAt || 0);
         const sTime = (student as any).admissionTimestamp?.seconds ? (student as any).admissionTimestamp.seconds * 1000 : ((student as any).admissionTimestamp || 0);
         return lTime >= sTime && (l.batch === "All" || l.batch === studentBatch);
@@ -330,8 +334,8 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
             <h3 className={`font-bold text-[18px] ${textColor}`}>HOD Overview Mode</h3>
           </div>
           <div className="flex items-center space-x-2">
-            <button onClick={() => setSortMode(s => s === 'roll' ? 'az' : 'roll')} className={`flex items-center text-xs font-bold px-3 py-2 rounded-xl transition-colors ${sortMode === 'az' ? 'bg-[#D0BCFF]/20 text-[#D0BCFF]' : 'text-white/60 hover:bg-white/5'}`}>
-              <ArrowDownAZ className="w-4 h-4 mr-1.5"/> Sort {sortMode === 'az' ? 'A-Z' : 'Roll'}
+            <button onClick={() => setSortMode(s => s === 'default' ? 'az' : 'default')} className={`flex items-center text-xs font-bold px-3 py-2 rounded-xl transition-colors ${sortMode === 'az' ? 'bg-[#D0BCFF]/20 text-[#D0BCFF]' : 'text-white/60 hover:bg-white/5'}`}>
+              <ArrowDownAZ className="w-4 h-4 mr-1.5"/> {sortMode === 'az' ? 'Sorted A-Z' : 'Sort A-Z'}
             </button>
             <button onClick={() => setShowImportDialog(true)} className="flex items-center text-xs font-bold px-3 py-2 rounded-xl text-white/60 hover:bg-white/5 transition-colors">
               <UploadCloud className="w-4 h-4 mr-1.5"/> Import CSV
