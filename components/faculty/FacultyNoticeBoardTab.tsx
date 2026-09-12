@@ -11,7 +11,11 @@ const AUDIENCES = ["All", "All Students", "All Teachers", "CSE", "CSE(AIML)", "I
 
 export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: boolean }) {
   const { user, role } = useAuth();
-  const isHod = role?.startsWith("HOD|") || role === "SUPER_ADMIN" || role === "DIRECTOR" || role === "PRINCIPAL" || role === "REGISTRAR";
+  
+  // --- DEVELOPER & SUPER ADMIN OVERRIDE ---
+  const currentEmail = user?.email || "";
+  const isDeveloper = currentEmail.toLowerCase() === 'pngdeveloper11@gmail.com';
+  const isHod = role?.startsWith("HOD|") || role === "SUPER_ADMIN" || role === "DIRECTOR" || role === "PRINCIPAL" || role === "REGISTRAR" || isDeveloper;
 
   const [notices, setNotices] = useState<any[]>([]);
   const [showNewNoticeDialog, setShowNewNoticeDialog] = useState(false);
@@ -86,7 +90,6 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
         timestamp: Date.now()
       });
 
-      // Simple Push Dispatch
       let pushTopic = "all_users";
       if (selectedAudiences.includes("All Students")) pushTopic = "all_students";
       else if (selectedAudiences.includes("All Teachers")) pushTopic = "all_teachers";
@@ -150,7 +153,6 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
                   <p className="text-sm text-white/90 whitespace-pre-line leading-relaxed">{notice.message}</p>
                 </div>
 
-                {/* Previews: Links & Files */}
                 {(notice.links?.length > 0 || notice.attachments?.length > 0) && (
                   <div className="flex flex-wrap gap-3 mb-4">
                     {notice.links?.map((link: string, i: number) => (
@@ -211,7 +213,6 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
 
               <textarea placeholder="Write your official message..." value={message} onChange={e => setMessage(e.target.value)} className="w-full h-32 bg-white/[0.05] border border-white/20 rounded-xl p-4 text-white text-sm outline-none focus:ring-2 focus:ring-[#D0BCFF] resize-none" />
               
-              {/* Attachments Section */}
               <div className="bg-black/30 p-4 rounded-xl border border-white/10">
                 <p className="text-xs font-bold opacity-60 mb-3">Attachments & Links</p>
                 <div className="flex gap-2 mb-3">
@@ -230,8 +231,7 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
                     </span>
                   ))}
                 </div>
-                {/* FIXED: Array concatenation bypasses strict iterable TS checks */}
-             <input type="file" multiple ref={fileInputRef} onChange={e => e.target.files && setFiles(files.concat(Array.from(e.target.files as any)))} className="hidden" />
+                <input type="file" multiple ref={fileInputRef} onChange={e => e.target.files && setFiles(files.concat(Array.from(e.target.files as any)))} className="hidden" />
                 <button onClick={() => fileInputRef.current?.click()} className="w-full py-2 bg-white/5 border border-white/10 rounded-lg text-xs font-bold hover:bg-white/10 flex justify-center items-center">
                   <UploadCloud className="w-4 h-4 mr-2" /> Add Files / Images
                 </button>

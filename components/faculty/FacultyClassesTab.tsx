@@ -1,6 +1,5 @@
 'use client';
 
-// VERSION 2.0 - Forced Cache Bypass Update
 import React, { useState, useEffect, useRef } from 'react';
 import { doc, collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
@@ -24,15 +23,19 @@ export default function FacultyClassesTab({
   onProxyClick: () => void;
   onEditSubjectsClick: () => void;
 }) {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const textStyle = isDark ? "text-white" : "text-gray-900";
   const cardBg = isDark ? "bg-white/[0.05] border-white/10" : "bg-gray-50 border-gray-200";
+
+  // --- DEVELOPER & SUPER ADMIN OVERRIDE ---
+  const currentEmail = user?.email || "";
+  const isDeveloper = currentEmail.toLowerCase() === 'pngdeveloper11@gmail.com';
+  const isHod = role?.startsWith("HOD|") || role === "SUPER_ADMIN" || role === "DIRECTOR" || role === "PRINCIPAL" || role === "REGISTRAR" || isDeveloper;
 
   const [globalStructure, setGlobalStructure] = useState<CollegeStructureConfig>({});
   const [scheduleView, setScheduleView] = useState<"Today" | "Week">("Today");
   const [myTimetable, setMyTimetable] = useState<any[]>([]);
   
-  // Reference for the hidden file upload input
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -58,14 +61,12 @@ export default function FacultyClassesTab({
     return () => { unsubConfig(); unsubTimetables(); };
   }, [user?.displayName]);
 
-  // Derive exact batch label mapped from global structure
   const getBatchLabel = (entry: any) => {
     if (!entry.batch || entry.batch === "All") return "All";
     const classKey = `${entry.semester}|${entry.branch}`;
     const divs = globalStructure[classKey] || [];
     let mappedLabel = entry.batch;
     
-    // Reverse map: if entry.batch matches a structured name, display it cleanly
     divs.forEach(d => {
       const bMatch = d.batches.find(b => b.name === entry.batch);
       if (bMatch) mappedLabel = `${d.divisionName} • ${bMatch.name}`;
@@ -162,11 +163,15 @@ export default function FacultyClassesTab({
             Mark Proxy Lecture
           </GlassButton>
 
-          <input type="file" ref={fileInputRef} onChange={handleTimetableUpload} className="hidden" accept=".csv, .xlsx, .pdf, image/*" />
-          
-          <GlassButton onClick={() => fileInputRef.current?.click()} variant="success" size="lg" className="w-full" icon={<UploadCloud className="w-5 h-5"/>}>
-            Publish Branch Timetables
-          </GlassButton>
+          {/* This renders specifically because of your isDeveloper override */}
+          {isHod && (
+            <>
+              <input type="file" ref={fileInputRef} onChange={handleTimetableUpload} className="hidden" accept=".csv, .xlsx, .pdf, image/*" />
+              <GlassButton onClick={() => fileInputRef.current?.click()} variant="success" size="lg" className="w-full" icon={<UploadCloud className="w-5 h-5"/>}>
+                Publish Branch Timetables
+              </GlassButton>
+            </>
+          )}
         </div>
       </div>
     </div>
