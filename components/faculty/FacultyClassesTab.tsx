@@ -1,6 +1,6 @@
 'use client';
 
-// VERSION 5.0 - Integrated Proxy Modal & Subject Population
+// VERSION 6.0 - Fully Integrated Proxy Modal & Robust Schedule Resolution
 import React, { useState, useEffect, useRef } from 'react';
 import { doc, collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
@@ -12,7 +12,11 @@ import GlassButton from '../ui/GlassButton';
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
-const SEMESTERS = ["Sem 1", "Sem 2", "Sem 3", "Sem 4", "Sem 5", "Sem 6", "Sem 7", "Sem 8"];
+const SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8"];
+
+// Fuzzy Matching helpers to guarantee compatibility with all DB string formats
+const matchSem = (a: string, b: string) => (a || "").toLowerCase().replace("semester", "sem") === (b || "").toLowerCase().replace("semester", "sem");
+const matchDiv = (a: string, b: string) => (a || "").toLowerCase().replace("div ", "") === (b || "").toLowerCase().replace("div ", "");
 
 export default function FacultyClassesTab({
   isDark,
@@ -23,7 +27,7 @@ export default function FacultyClassesTab({
   isDark: boolean;
   teachingConfig: Record<string, string[]>;
   onComboClick: (comboKey: string) => void;
-  onProxyClick?: () => void; // Made optional since we are overriding it here
+  onProxyClick?: () => void;
   onEditSubjectsClick: () => void;
 }) {
   const { user, role } = useAuth();
@@ -36,14 +40,14 @@ export default function FacultyClassesTab({
   
   // Publish Modal State
   const [showPublishModal, setShowPublishModal] = useState(false);
-  const [publishSem, setPublishSem] = useState("Sem 3");
+  const [publishSem, setPublishSem] = useState("Semester 3");
   const [publishBranch, setPublishBranch] = useState("CSE");
   const [publishFile, setPublishFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Proxy Modal State
   const [showProxyModal, setShowProxyModal] = useState(false);
-  const [proxySem, setProxySem] = useState("Sem 3");
+  const [proxySem, setProxySem] = useState("Semester 3");
   const [proxyBranch, setProxyBranch] = useState("CSE");
   const [proxyBatch, setProxyBatch] = useState("All");
   const [proxySubject, setProxySubject] = useState("");
@@ -77,14 +81,24 @@ export default function FacultyClassesTab({
     return () => { unsubConfig(); unsubTimetables(); };
   }, [user?.displayName]);
 
-  // Build master list of all known subjects in the college to feed the Proxy dropdown
-  const allKnownSubjects = Array.from(new Set([
-    "Data Structures and Algorithms", "M-III", "Analysis of Algorithm", "COA", "MCE", "FSJP", "DBMS", "EDS", "DSGT", "ED", "AMT",
-    ...Object.values(teachingConfig).flat(),
-    ...myTimetable.map(t => t.subject)
-  ])).filter(Boolean).sort();
+  // Dynamically feed all proxy subjects explicitly assigned to this class configuration
+  const proxyClassKey1 = `${proxySem}|${proxyBranch}`;
+  const proxyClassKey2 = `${proxySem.replace("Semester ", "Sem ")}|${proxyBranch}`;
+  const classSubjects = Array.from(new Set(
+    Object.keys(teachingConfig)
+      .filter(k => k.startsWith(proxyClassKey1) || k.startsWith(proxyClassKey2))
+      .flatMap(k => teachingConfig[k])
+  ));
 
-  // Advanced Reverse Lookup: Fixes the "All • A1" bug by mapping strictly back to CSE/IT etc.
+  useEffect(() => {
+    if (classSubjects.length > 0 && !classSubjects.includes(proxySubject)) {
+      setProxySubject(classSubjects[0]);
+    } else if (classSubjects.length === 0) {
+      setProxySubject("");
+    }
+  }, [proxySem, proxyBranch, teachingConfig]);
+
+  // Robust Reverse Lookup: Fixes the "All • A1" bug to resolve to actual Branch (CSE) and Division
   const getResolvedClassInfo = (entry: any) => {
     let resolvedBranch = entry.branch;
     let resolvedBatch = entry.batch;
@@ -92,10 +106,10 @@ export default function FacultyClassesTab({
 
     if ((!resolvedBranch || resolvedBranch === "All") && resolvedBatch && resolvedBatch !== "All") {
       for (const [key, divs] of Object.entries(globalStructure)) {
-        if (key.startsWith(entry.semester + "|")) {
+        if (matchSem(key.split("|")[0], entry.semester)) {
           for (const d of divs) {
             if (d.batches?.some(b => b.name === resolvedBatch)) {
-              resolvedBranch = key.split("|")[1]; // Resolves to "CSE", "IT", etc.
+              resolvedBranch = key.split("|")[1]; 
               division = d.divisionName;
               break;
             }
@@ -103,8 +117,9 @@ export default function FacultyClassesTab({
         }
       }
     } else if (resolvedBranch && resolvedBranch !== "All") {
-      const classKey = `${entry.semester}|${resolvedBranch}`;
-      const divs = globalStructure[classKey] || [];
+      const classKey1 = `${entry.semester}|${resolvedBranch}`;
+      const classKey2 = `${(entry.semester || "").replace("Semester ", "Sem ")}|${resolvedBranch}`;
+      const divs = globalStructure[classKey1] || globalStructure[classKey2] || [];
       for (const d of divs) {
         if (d.batches?.some(b => b.name === resolvedBatch)) {
           division = d.divisionName;
@@ -164,7 +179,6 @@ export default function FacultyClassesTab({
                 <div key={i} className="flex justify-between items-center p-4 bg-white/[0.03] border border-white/10 rounded-2xl">
                   <div>
                     <h4 className="font-bold text-white text-[15px]">{lecture.subject}</h4>
-                    {/* ACCURATE REVERSE-MAPPED DISPLAY */}
                     <p className="text-xs text-[#D0BCFF] font-medium mt-0.5">{getResolvedClassInfo(lecture)}</p>
                   </div>
                   <div className="text-right">
@@ -238,15 +252,15 @@ export default function FacultyClassesTab({
             <div className="mb-8 z-40 relative">
               <GlassDropdown 
                 label="Subject Name" 
-                value={proxySubject || allKnownSubjects[0]} 
-                options={allKnownSubjects} 
+                value={proxySubject || "No Subjects Configured"} 
+                options={classSubjects.length > 0 ? classSubjects : ["No Subjects Configured"]} 
                 onChange={setProxySubject} 
                 isDark={isDark} 
                 zIndex={70} 
               />
             </div>
 
-            <GlassButton onClick={() => alert(`Loading roster for ${proxySubject || allKnownSubjects[0]} in ${proxyBranch}...`)} variant="primary" size="lg" className="w-full">
+            <GlassButton onClick={() => alert(`Loading roster for ${proxySubject || "No Subject"} in ${proxyBranch}...`)} variant="primary" size="lg" className="w-full">
               Load Student Roster
             </GlassButton>
           </div>

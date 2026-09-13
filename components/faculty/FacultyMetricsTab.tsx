@@ -9,13 +9,17 @@ import GlassDropdown from '../GlassDropdown';
 import GlassButton from '../ui/GlassButton';
 import { CollegeStructureConfig, StudentData } from '../../types';
 
-const AVAILABLE_SEMESTERS = ["Sem 1", "Sem 2", "Sem 3", "Sem 4", "Sem 5", "Sem 6", "Sem 7", "Sem 8"];
+const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8"];
 const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
+
+// Helper to gracefully match "Sem 3" with "Semester 3" to prevent blank rosters
+const matchSem = (a: string, b: string) => (a || "").toLowerCase().replace("semester", "sem") === (b || "").toLowerCase().replace("semester", "sem");
+const matchDiv = (a: string, b: string) => (a || "").toLowerCase().replace("div ", "") === (b || "").toLowerCase().replace("div ", "");
 
 // --- IMPORT STUDENTS DIALOG ---
 function ImportStudentsDialog({ isDynamicHue, onDismiss, globalStructure }: { isDynamicHue: boolean, onDismiss: () => void, globalStructure: CollegeStructureConfig }) {
   const [importMode, setImportMode] = useState<"Single" | "Master">("Single");
-  const [selectedSemester, setSelectedSemester] = useState("Sem 3");
+  const [selectedSemester, setSelectedSemester] = useState("Semester 3");
   const [selectedBranch, setSelectedBranch] = useState("CSE");
   const [selectedDivision, setSelectedDivision] = useState("");
   const [isUploading, setIsUploading] = useState(false);
@@ -25,8 +29,9 @@ function ImportStudentsDialog({ isDynamicHue, onDismiss, globalStructure }: { is
   const textColor = isDynamicHue ? 'text-white' : 'text-neutral-900';
   const modalBg = isDynamicHue ? 'bg-black/90 border-white/20' : 'bg-white border-black/10';
 
-  const classKey = `${selectedSemester}|${selectedBranch}`;
-  const availableDivisions = globalStructure[classKey]?.map(d => d.divisionName) || [];
+  const classKey1 = `${selectedSemester}|${selectedBranch}`;
+  const classKey2 = `${selectedSemester.replace("Semester ", "Sem ")}|${selectedBranch}`;
+  const availableDivisions = (globalStructure[classKey1] || globalStructure[classKey2] || [])?.map(d => d.divisionName) || [];
 
   useEffect(() => {
     if (!availableDivisions.includes(selectedDivision)) {
@@ -187,7 +192,7 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
   const [roster, setRoster] = useState<StudentData[]>([]);
   const [history, setHistory] = useState<any[]>([]);
 
-  const [selectedSemester, setSelectedSemester] = useState("Sem 3");
+  const [selectedSemester, setSelectedSemester] = useState("Semester 3");
   const [selectedBranch, setSelectedBranch] = useState("CSE");
   const [selectedDivision, setSelectedDivision] = useState("");
   const [selectedSubject, setSelectedSubject] = useState("");
@@ -195,13 +200,11 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
   const [isEditMode, setIsEditMode] = useState(false);
   const [sortMode, setSortMode] = useState<"default" | "az">("default");
   
-  // Modals
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showPromoteModal, setShowPromoteModal] = useState(false);
   const [editingStudent, setEditingStudent] = useState<StudentData | null>(null);
 
-  // Form states
   const [formName, setFormName] = useState("");
   const [formEmail, setFormEmail] = useState("");
   const [formRoll, setFormRoll] = useState("");
@@ -230,43 +233,52 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
     return () => { unsubConfig(); unsubStruct(); unsubRoster(); unsubHistory(); };
   }, [user?.uid, selectedSemester]);
 
-  const classKey = `${selectedSemester}|${selectedBranch}`;
+  // Use fuzzy matching to ensure divisions render even if strings don't exactly match
+  const classKey1 = `${selectedSemester}|${selectedBranch}`;
+  const classKey2 = `${selectedSemester.replace("Semester ", "Sem ")}|${selectedBranch}`;
   const availableDivisions = isHod 
-    ? (globalStructure[classKey]?.map(d => d.divisionName) || [])
-    : Array.from(new Set(Object.keys(teachingConfig).filter(k => k.startsWith(classKey)).map(k => k.split("|")[2]).filter(Boolean)));
+    ? ((globalStructure[classKey1] || globalStructure[classKey2] || [])?.map(d => d.divisionName) || [])
+    : Array.from(new Set(Object.keys(teachingConfig).filter(k => matchSem(k.split("|")[0], selectedSemester) && k.split("|")[1] === selectedBranch).map(k => k.split("|")[2]).filter(Boolean)));
 
   useEffect(() => {
     if (!availableDivisions.includes(selectedDivision)) setSelectedDivision(availableDivisions[0] || "");
   }, [selectedSemester, selectedBranch, globalStructure, teachingConfig, isHod, selectedDivision, availableDivisions]);
 
-  const configKey = `${selectedSemester}|${selectedBranch}|${selectedDivision}`;
+  const configKey1 = `${selectedSemester}|${selectedBranch}|${selectedDivision}`;
+  const configKey2 = `${selectedSemester.replace("Semester ", "Sem ")}|${selectedBranch}|${selectedDivision}`;
   useEffect(() => {
     if (isHod) return;
-    const subjects = teachingConfig[configKey] || [];
+    const subjects = teachingConfig[configKey1] || teachingConfig[configKey2] || [];
     if (!subjects.includes(selectedSubject)) setSelectedSubject(subjects[0] || "");
-  }, [configKey, teachingConfig, isHod, selectedSubject]);
+  }, [configKey1, configKey2, teachingConfig, isHod, selectedSubject]);
 
-  // Analytics & Sorting
-  let branchRoster = roster.filter(s => (s as any).branch === selectedBranch && (s as any).semester === selectedSemester && (s as any).division === selectedDivision);
+  // Analytics & Sorting - Fuzzy Match ensures blank rosters are fixed
+  let branchRoster = roster.filter(s => 
+    (s as any).branch === selectedBranch && 
+    matchSem((s as any).semester, selectedSemester) && 
+    matchDiv((s as any).division, selectedDivision)
+  );
   
   if (sortMode === "az") {
     branchRoster = branchRoster.sort((a, b) => ((a as any).fullName || "").localeCompare((b as any).fullName || ""));
   } else {
-    // Default sorting keeps students exactly "as they are" (by the timestamp they were added to the system)
+    // Default sorting keeps students exactly "as they are" using their chronological database creation
     branchRoster = branchRoster.sort((a, b) => {
       const timeA = (a as any).admissionTimestamp?.seconds ? (a as any).admissionTimestamp.seconds * 1000 : ((a as any).admissionTimestamp || 0);
       const timeB = (b as any).admissionTimestamp?.seconds ? (b as any).admissionTimestamp.seconds * 1000 : ((b as any).admissionTimestamp || 0);
+      if (timeA === timeB) return ((a as any).rollNo || 0) - ((b as any).rollNo || 0); // Tie breaker
       return timeA - timeB;
     });
   }
 
-  const matchingLectures = history.filter(h => h.semester === selectedSemester && h.branchName === selectedBranch && h.divisionName === selectedDivision && (isHod ? true : h.subjectName === selectedSubject));
+  const matchingLectures = history.filter(h => matchSem(h.semester, selectedSemester) && (h.branchName === selectedBranch || h.branch === selectedBranch) && matchDiv(h.divisionName || h.division, selectedDivision) && (isHod ? true : (h.subjectName === selectedSubject || h.subject === selectedSubject)));
   const totalConducted = matchingLectures.length;
 
   const studentStats = branchRoster.map((student) => {
     let studentBatch = (student as any).batch;
-    if (!studentBatch && globalStructure[classKey]) {
-      const divDef = globalStructure[classKey].find(d => d.divisionName === selectedDivision);
+    if (!studentBatch && (globalStructure[classKey1] || globalStructure[classKey2])) {
+      const divs = globalStructure[classKey1] || globalStructure[classKey2];
+      const divDef = divs.find(d => matchDiv(d.divisionName, selectedDivision));
       const matched = divDef?.batches.find(b => (student as any).rollNo >= b.startRoll && (student as any).rollNo <= b.endRoll);
       studentBatch = matched?.name || "Unknown";
     }
@@ -276,7 +288,11 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
         return lTime >= sTime && (l.batch === "All" || l.batch === studentBatch);
     });
     const studentTotalConducted = validLectures.length;
-    const attended = validLectures.filter(l => ((l as any).presentStudentIds || []).includes(student.id)).length;
+    // Check both standard Firebase arrays
+    const attended = validLectures.filter(l => {
+      const presentIds = (l as any).presentStudentIds || (l as any).presentUids || [];
+      return presentIds.includes(student.id);
+    }).length;
     const pct = studentTotalConducted > 0 ? (attended / studentTotalConducted) * 100 : 100;
     return { ...student, attended, studentTotalConducted, pct };
   });
@@ -346,13 +362,13 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
 
       <div className="flex space-x-3 mb-4 z-50 relative">
         <GlassDropdown label="Sem" value={selectedSemester} options={isHod ? AVAILABLE_SEMESTERS : Array.from(new Set(Object.keys(teachingConfig).map(k => k.split("|")[0])))} onChange={setSelectedSemester} isDark={isDark} zIndex={60} />
-        <GlassDropdown label="Branch" value={selectedBranch} options={isHod ? AVAILABLE_BRANCHES : Array.from(new Set(Object.keys(teachingConfig).filter(k => k.startsWith(selectedSemester)).map(k => k.split("|")[1])))} onChange={setSelectedBranch} isDark={isDark} zIndex={50} />
+        <GlassDropdown label="Branch" value={selectedBranch} options={isHod ? AVAILABLE_BRANCHES : Array.from(new Set(Object.keys(teachingConfig).filter(k => matchSem(k.split("|")[0], selectedSemester)).map(k => k.split("|")[1])))} onChange={setSelectedBranch} isDark={isDark} zIndex={50} />
         {availableDivisions.length > 0 && <GlassDropdown label="Div" value={selectedDivision} options={availableDivisions} onChange={setSelectedDivision} isDark={isDark} zIndex={45} />}
       </div>
       
       {!isHod && (
         <div className="mb-6 z-40 relative">
-            <GlassDropdown label="Subject" value={selectedSubject} options={teachingConfig[configKey] || []} onChange={setSelectedSubject} isDark={isDark} zIndex={40} />
+            <GlassDropdown label="Subject" value={selectedSubject} options={teachingConfig[configKey1] || teachingConfig[configKey2] || []} onChange={setSelectedSubject} isDark={isDark} zIndex={40} />
         </div>
       )}
 
@@ -448,7 +464,7 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
               <div className="flex items-center space-x-3">
                 <GlassDropdown label="From" value={selectedSemester} options={AVAILABLE_SEMESTERS} onChange={setSelectedSemester} isDark={isDark} zIndex={90} />
                 <TrendingUp className="w-6 h-6 text-white/30 mt-6" />
-                <GlassDropdown label="To" value={"Sem 4"} options={AVAILABLE_SEMESTERS} onChange={() => {}} isDark={isDark} zIndex={90} />
+                <GlassDropdown label="To" value={"Semester 4"} options={AVAILABLE_SEMESTERS} onChange={() => {}} isDark={isDark} zIndex={90} />
               </div>
             </div>
             <div className="flex space-x-3 mt-auto">
