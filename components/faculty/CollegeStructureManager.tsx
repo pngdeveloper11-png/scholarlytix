@@ -7,16 +7,15 @@ import { DivisionDef, BatchDef } from '@/types';
 import { X, Plus, Trash2, Save, Loader2 } from 'lucide-react';
 
 const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4"];
-const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
 
 export default function CollegeStructureManager({ isDark, onClose }: { isDark: boolean, onClose: () => void }) {
   const [selectedSem, setSelectedSem] = useState(AVAILABLE_SEMESTERS[2]);
-  const [selectedBranch, setSelectedBranch] = useState(AVAILABLE_BRANCHES[0]);
   const [currentDivisions, setCurrentDivisions] = useState<DivisionDef[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    const classKey = `${selectedSem}|${selectedBranch}`;
+    // THE FIX: Key is strictly the Semester now
+    const classKey = selectedSem;
     const docRef = doc(db, 'app_config', 'college_structure');
     
     const unsubscribe = onSnapshot(docRef, (snap) => {
@@ -29,14 +28,13 @@ export default function CollegeStructureManager({ isDark, onClose }: { isDark: b
       }
     });
     return () => unsubscribe();
-  }, [selectedSem, selectedBranch]);
+  }, [selectedSem]);
 
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      const classKey = `${selectedSem}|${selectedBranch}`;
+      const classKey = selectedSem;
       
-      // Clean up the data to strictly match Firestore expectations
       const divListForDb = currentDivisions.map(div => ({
         divisionName: div.divisionName.trim(),
         batches: div.batches.map(b => ({
@@ -77,9 +75,6 @@ export default function CollegeStructureManager({ isDark, onClose }: { isDark: b
         <div className="flex gap-4 mb-6">
           <select value={selectedSem} onChange={e => setSelectedSem(e.target.value)} className={`flex-1 p-3 rounded-xl border outline-none ${inputBg}`}>
             {AVAILABLE_SEMESTERS.map(sem => <option key={sem} value={sem}>{sem}</option>)}
-          </select>
-          <select value={selectedBranch} onChange={e => setSelectedBranch(e.target.value)} className={`flex-1 p-3 rounded-xl border outline-none ${inputBg}`}>
-            {AVAILABLE_BRANCHES.map(br => <option key={br} value={br}>{br}</option>)}
           </select>
         </div>
 

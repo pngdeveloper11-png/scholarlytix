@@ -31,7 +31,6 @@ export default function SuperAdminPanel({ isDark, onClose }: { isDark: boolean, 
   
   // Class Teacher States
   const [ctSem, setCtSem] = useState(AVAILABLE_SEMESTERS[0]);
-  const [ctBranch, setCtBranch] = useState(ENGINEERING_BRANCHES[0]);
   const [ctDivision, setCtDivision] = useState("");
 
   const currentBranches = selectedStream === "Engineering" ? ENGINEERING_BRANCHES : MANAGEMENT_BRANCHES;
@@ -40,7 +39,6 @@ export default function SuperAdminPanel({ isDark, onClose }: { isDark: boolean, 
     const unsubFaculty = onSnapshot(collection(db, 'approved_faculty_emails'), (snap) => {
       const list = snap.docs
         .filter(doc => doc.id !== "pngdeveloper11@gmail.com")
-        // FIXED: Added (doc.data() as any)
         .map(doc => ({ email: doc.id, ...(doc.data() as any) }))
         .sort((a: any, b: any) => a.name?.localeCompare(b.name));
       setFacultyList(list);
@@ -53,11 +51,10 @@ export default function SuperAdminPanel({ isDark, onClose }: { isDark: boolean, 
     return () => { unsubFaculty(); unsubStructure(); };
   }, []);
 
-  // Auto-select Division for Class Teacher
   useEffect(() => {
-    const divs = globalStructure[`${ctSem}|${ctBranch}`]?.map(d => d.divisionName) || [];
+    const divs = globalStructure[ctSem]?.map(d => d.divisionName) || [];
     if (!divs.includes(ctDivision)) setCtDivision(divs[0] || "");
-  }, [ctSem, ctBranch, globalStructure]);
+  }, [ctSem, globalStructure]);
 
   const handleAuthorize = async () => {
     if (!newName.trim() || !newEmail.trim() || !newEmail.includes('@')) {
@@ -78,7 +75,7 @@ export default function SuperAdminPanel({ isDark, onClose }: { isDark: boolean, 
       case "Principal": finalScopeStr = "PRINCIPAL"; break;
       case "Registrar": finalScopeStr = "REGISTRAR"; break;
       case "HOD": finalScopeStr = `HOD|${selectedBranches.join(',')}`; break;
-      case "Class Teacher": finalScopeStr = `CLASS_TEACHER|${ctSem}|${ctBranch}|${ctDivision}`; break;
+      case "Class Teacher": finalScopeStr = `CLASS_TEACHER|${ctSem}|${ctDivision}`; break;
     }
 
     try {
@@ -110,7 +107,6 @@ export default function SuperAdminPanel({ isDark, onClose }: { isDark: boolean, 
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
       <div className={`w-full max-w-5xl h-[90vh] flex flex-col rounded-2xl border ${bgStyle} shadow-2xl overflow-hidden`}>
         
-        {/* Header */}
         <div className="flex justify-between items-center p-6 border-b border-white/10">
           <div>
             <h2 className={`text-2xl font-bold ${textStyle} flex items-center gap-3`}>
@@ -129,10 +125,8 @@ export default function SuperAdminPanel({ isDark, onClose }: { isDark: boolean, 
           </div>
         </div>
 
-        {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-8">
           
-          {/* Authorization Form */}
           <div className={`p-6 rounded-2xl border ${cardBg}`}>
             <h3 className="text-lg font-bold text-[#D0BCFF] mb-4 flex items-center gap-2">
               <KeyRound className="w-5 h-5"/> Authorize New User
@@ -163,7 +157,6 @@ export default function SuperAdminPanel({ isDark, onClose }: { isDark: boolean, 
               </div>
             </div>
 
-            {/* Dynamic Role Configuration UI */}
             <div className="mb-6 min-h-[60px]">
               {selectedRole === "Teacher" && <p className="text-sm text-gray-400">Teachers will self-select their subjects during their first login.</p>}
               
@@ -193,11 +186,8 @@ export default function SuperAdminPanel({ isDark, onClose }: { isDark: boolean, 
                   <select value={ctSem} onChange={e => setCtSem(e.target.value)} className={`flex-1 p-3 rounded-xl border outline-none ${inputBg}`}>
                     {AVAILABLE_SEMESTERS.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
-                  <select value={ctBranch} onChange={e => setCtBranch(e.target.value)} className={`flex-1 p-3 rounded-xl border outline-none ${inputBg}`}>
-                    {ENGINEERING_BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
-                  </select>
                   <select value={ctDivision} onChange={e => setCtDivision(e.target.value)} className={`flex-1 p-3 rounded-xl border outline-none ${inputBg}`}>
-                    {globalStructure[`${ctSem}|${ctBranch}`]?.map(d => <option key={d.divisionName} value={d.divisionName}>{d.divisionName}</option>) || <option value="">No Divs Built</option>}
+                    {globalStructure[ctSem]?.map(d => <option key={d.divisionName} value={d.divisionName}>{d.divisionName}</option>) || <option value="">No Divs Built</option>}
                   </select>
                 </div>
               )}
@@ -209,7 +199,6 @@ export default function SuperAdminPanel({ isDark, onClose }: { isDark: boolean, 
             </button>
           </div>
 
-          {/* Roster List */}
           <div>
             <h3 className={`text-lg font-bold mb-4 ${textStyle}`}>Current Authorized Directory</h3>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -226,7 +215,7 @@ export default function SuperAdminPanel({ isDark, onClose }: { isDark: boolean, 
                 else if (scope.startsWith("HOD|")) displayRole = `HOD: ${scope.replace("HOD|", "")}`;
                 else if (scope.startsWith("CLASS_TEACHER|")) {
                   const parts = scope.split("|");
-                  displayRole = parts.length >= 4 ? `Class Teacher: ${parts[1]} ${parts[2]} (${parts[3]})` : "Class Teacher";
+                  displayRole = parts.length >= 3 ? `Class Teacher: ${parts[1]} (${parts[2]})` : "Class Teacher";
                 }
 
                 return (

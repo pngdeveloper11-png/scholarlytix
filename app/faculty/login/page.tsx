@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 import { Loader2, ArrowLeft } from 'lucide-react';
 import DynamicHueBackground from '@/components/DynamicHueBackground';
@@ -13,9 +13,19 @@ export default function FacultyLogin() {
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    signOut(auth).catch(() => {});
-    localStorage.removeItem("academiq_faculty_id");
-    localStorage.removeItem("academiq_faculty_name");
+    const cleanupSession = async () => {
+      const currentSessionId = localStorage.getItem("current_session_id");
+      if (currentSessionId) {
+        try {
+          await deleteDoc(doc(db, "active_sessions", currentSessionId));
+        } catch (e) { console.error("Session cleanup failed", e); }
+        localStorage.removeItem("current_session_id");
+      }
+      signOut(auth).catch(() => {});
+      localStorage.removeItem("academiq_faculty_id");
+      localStorage.removeItem("academiq_faculty_name");
+    };
+    cleanupSession();
   }, []);
 
   const handleGoogleLogin = async () => {
@@ -31,7 +41,6 @@ export default function FacultyLogin() {
         const email = user.email.toLowerCase().trim();
         let userRole = "teacher";
         
-        // 1. CRITICAL CHECK: Verify against the approved emails collection
         try {
           const roleDoc = await getDoc(doc(db, "approved_faculty_emails", email));
           
@@ -39,7 +48,7 @@ export default function FacultyLogin() {
             await signOut(auth);
             alert("Access Denied: Your email is not registered as authorized Faculty. Please contact the Principal or HOD.");
             setIsLoading(false);
-            return; // Stop login process
+            return; 
           }
 
           userRole = roleDoc.data().role || "teacher";
@@ -51,11 +60,35 @@ export default function FacultyLogin() {
           return;
         }
 
-        // 2. Setup Local Storage for Dashboard Access
+        // --- THE FIX: Unique Persistent Device Session ---
+        let deviceId = localStorage.getItem("unique_device_id");
+        if (!deviceId) {
+          deviceId = crypto.randomUUID();
+          localStorage.setItem("unique_device_id", deviceId);
+        }
+        localStorage.setItem("current_session_id", deviceId);
+
+        // Generate a clean representation of the device
+        const parser = navigator.userAgent;
+        let deviceName = "Web Browser";
+        if (parser.includes("Windows")) deviceName = "Windows PC";
+        else if (parser.includes("Mac")) deviceName = "Mac";
+        else if (parser.includes("iPhone")) deviceName = "iPhone";
+        else if (parser.includes("Android")) deviceName = "Android Device";
+
+        try {
+          await setDoc(doc(db, "active_sessions", deviceId), {
+            userId: user.uid,
+            role: userRole,
+            deviceName: deviceName,
+            loginTime: Date.now(),
+            sessionId: deviceId
+          });
+        } catch (sessionError) { console.error("Session tracking failed", sessionError); }
+
         localStorage.setItem("academiq_faculty_id", user.uid);
         localStorage.setItem("academiq_faculty_name", user.displayName || "Faculty");
         
-        // 3. NON-CRITICAL WRITE: Update profile data (Isolated so it NEVER blocks login)
         try {
           await setDoc(doc(db, "faculty_directory", user.uid), {
             name: user.displayName,
@@ -65,12 +98,9 @@ export default function FacultyLogin() {
             lastLogin: Date.now()
           }, { merge: true });
         } catch (writeError) {
-          // If Rule 8 fails, we just log it to the console and IGNORE it. 
-          // The user is still granted access to the dashboard.
           console.warn("Ignored: Could not update faculty directory.", writeError);
         }
 
-        // 4. Secure Navigation to Dashboard
         router.replace('/faculty/dashboard');
       }
     } catch (authError: any) {
