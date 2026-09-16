@@ -31,7 +31,7 @@ export default function StudentDashboard() {
   const [materials, setMaterials] = useState<any[]>([]);
   const [gatePasses, setGatePasses] = useState<any[]>([]);
   const [leaveApplications, setLeaveApplications] = useState<any[]>([]);
-  const [pendingLinks, setPendingLinks] = useState<any[]>([]); // New State
+  const [pendingLinks, setPendingLinks] = useState<any[]>([]); 
   
   const [showSettings, setShowSettings] = useState(false);
   const [theme, setTheme] = useState("indigo");
@@ -64,28 +64,27 @@ export default function StudentDashboard() {
 
     const sem = studentProfile.semester || "";
     const branch = studentProfile.branch || "";
-    const cleanClassRef = `${sem}_${branch}`.replace(/\s+/g, '').replace(/&/g, 'and');
-    const spacedClassRef = `${sem}_${branch}`;
+    const division = studentProfile.division || "";
+    
+    // THE FIX: Syncs perfectly with the Faculty's Division-first document generation
+    const cleanClassRef = `${sem}_${division}`.replace(/\s+/g, '').replace(/&/g, 'and');
 
     const unsubAtt = onSnapshot(collection(db, "attendance_history"), (snap) => {
-      setAttendanceHistory(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter((r: any) => (r.branchName === branch || r.branch === branch) && r.semester === sem));
+      setAttendanceHistory(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter((r: any) => 
+        (r.branchName === branch || r.branch === branch) && 
+        r.semester === sem && 
+        (r.divisionName === division || r.division === division)
+      ));
     });
 
-    const unsubTime = onSnapshot(collection(db, "branch_timetables"), (snap) => {
-      const match = snap.docs.find(d => d.id === cleanClassRef || d.id === spacedClassRef || (d.data().branch === branch && d.data().semester === sem));
-      if (match && match.data().entries) setTimetable(match.data().entries);
-      else {
-        const unsubTime2 = onSnapshot(collection(db, "class_timetables"), (snap2) => {
-          const match2 = snap2.docs.find(d => d.id === cleanClassRef || d.id === spacedClassRef || (d.data().branch === branch && d.data().semester === sem));
-          if (match2 && match2.data().entries) setTimetable(match2.data().entries);
-        });
-        return () => unsubTime2();
-      }
+    const unsubTime = onSnapshot(doc(db, "class_timetables", cleanClassRef), (snap) => {
+      if (snap.exists() && snap.data().entries) setTimetable(snap.data().entries);
+      else setTimetable([]);
     });
 
     const unsubNotices = onSnapshot(collection(db, "announcements"), (snap) => {
       const filtered = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter((n: any) => {
-        const target = (n.targetAudience || n.target || n.branch || "").toString().toLowerCase().trim();
+        const target = (n.targetAudience || n.targetRole || n.targetBranch || "").toString().toLowerCase().trim();
         if (!target || target === "all" || target === "all students" || target === "everyone" || target === "general") return true;
         if (branch && target.includes(branch.toLowerCase())) return true;
         if (sem && target.includes(sem.toLowerCase())) return true;
@@ -100,7 +99,9 @@ export default function StudentDashboard() {
     });
 
     const unsubMat = onSnapshot(collection(db, "study_materials"), (snap) => {
-      setMaterials(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter((m: any) => m.branch === branch && m.semester === sem));
+      setMaterials(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter((m: any) => 
+        m.branch === branch && m.semester === sem && m.divisionName === division
+      ));
     });
 
     const unsubPass = onSnapshot(query(collection(db, "gate_passes"), where("studentId", "==", studentProfile.id)), (snap) => {
@@ -111,14 +112,13 @@ export default function StudentDashboard() {
       setLeaveApplications(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter((l: any) => l.studentId === studentProfile.id || l.rollNo === studentProfile.rollNo).sort((a, b) => (b.appliedAt || 0) - (a.appliedAt || 0)));
     });
 
-    // NEW: Fetch Pending Parent Link Requests
     const unsubLinks = onSnapshot(query(collection(db, "link_requests"), where("studentId", "==", studentProfile.id), where("status", "==", "PENDING")), (snap) => {
       setPendingLinks(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })));
     });
 
     setLoading(false);
     return () => { unsubAtt(); unsubTime(); unsubNotices(); unsubMat(); unsubPass(); unsubLeaves(); unsubLinks(); };
-  }, [studentProfile?.id, studentProfile?.branch, studentProfile?.semester]);
+  }, [studentProfile?.id, studentProfile?.branch, studentProfile?.semester, studentProfile?.division]);
 
   const handleLinkResponse = async (reqId: string, parentEmail: string, accept: boolean) => {
     if (accept) {
@@ -158,7 +158,8 @@ export default function StudentDashboard() {
             <div>
               <p className="text-sm text-white/70">Welcome,</p>
               <h1 className="text-xl font-bold tracking-tight uppercase leading-tight">{studentProfile.fullName}</h1>
-              <p className="text-xs text-[#D0BCFF] mt-0.5">{studentProfile.semester} • {studentProfile.branch} • Batch {studentProfile.batch || "A"}</p>
+              {/* THE FIX: Visually shows the Division now! */}
+              <p className="text-xs text-[#D0BCFF] mt-0.5">{studentProfile.semester} • {studentProfile.branch} ({studentProfile.division}) • Batch {studentProfile.batch || "A"}</p>
             </div>
           </div>
           <button onClick={() => setShowSettings(true)} className="p-3 border rounded-2xl transition-all backdrop-blur-xl bg-white/[0.08] border-white/20 text-white hover:bg-white/[0.15]">
@@ -222,8 +223,6 @@ function AttendanceView({ history, student, cardBg }: any) {
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      
-      {/* Defaulter Warning */}
       {isDefaulter && (
         <div className="bg-red-500/10 border border-red-500/50 p-5 rounded-[2rem] flex items-start gap-4 shadow-[0_0_20px_rgba(239,68,68,0.2)]">
           <AlertCircle className="w-8 h-8 text-red-500 shrink-0" />
@@ -251,7 +250,7 @@ function AttendanceView({ history, student, cardBg }: any) {
         <div className="space-y-3">
           {Object.keys(subjectStats).map(sub => {
             const stats = subjectStats[sub];
-            const pct = stats.conducted > 0 ? ((stats.attended / stats.conducted) * 100).toFixed(1) : 100.0;
+            const pct = stats.conducted > 0 ? ((stats.attended / stats.conducted) * 100).toFixed(1) : "100.0";
             return (
               <div key={sub} className={`p-5 rounded-2xl border ${cardBg} flex flex-col`}>
                 <div className="flex justify-between items-start mb-4">
@@ -290,7 +289,7 @@ function TimetableView({ timetable, student, cardBg }: any) {
           dayClasses.map((cls: any, i: number) => (
             <div key={i} className={`p-5 rounded-2xl border flex items-center justify-between ${cardBg}`}>
               <div className="flex flex-col"><h4 className="font-bold text-[16px] mb-1">{cls.subject}</h4><p className="text-xs opacity-70 flex items-center"><Clock className="w-3 h-3 mr-1" /> {cls.startTime} - {cls.endTime}</p></div>
-              <div className="px-3 py-1.5 rounded-lg bg-white/10 border border-white/10 text-xs font-bold">{cls.branch}</div>
+              <div className="px-3 py-1.5 rounded-lg bg-white/10 border border-white/10 text-xs font-bold">{student.division || cls.branch}</div>
             </div>
           ))
         )}
@@ -343,20 +342,25 @@ function MaterialsView({ materials, cardBg }: any) {
   );
 }
 
+// THE FIX: Parses and pulls tests exclusively using the Division architecture
 function TestsView({ student, cardBg }: any) {
   const [marks, setMarks] = useState<any[]>([]);
+
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "test_marks"), (snap) => {
       const targetSem = (student.semester || "").toLowerCase().replace(/\s+/g, '');
-      const targetBranch = (student.branch || "").toLowerCase().replace(/\s+/g, '');
+      const targetDiv = (student.division || "").toLowerCase().replace(/\s+/g, '');
+      
       const classMarks = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter((d: any) => {
         const docIdClean = d.id.toLowerCase().replace(/\s+/g, '');
-        return docIdClean.includes(targetSem) && docIdClean.includes(targetBranch) || (d.semester === student.semester && d.branch === student.branch);
+        // Matches newly formatted `${sem}_${div}_${subject}` keys OR old legacy keys
+        return (docIdClean.includes(targetSem) && docIdClean.includes(targetDiv)) || 
+               (d.semester === student.semester && d.division === student.division);
       });
       setMarks(classMarks);
     });
     return () => unsub();
-  }, [student.semester, student.branch]);
+  }, [student.semester, student.division]);
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -367,6 +371,7 @@ function TestsView({ student, cardBg }: any) {
             const rawSubject = m.subject || m.id.split('_').pop() || "Subject";
             const formattedSubject = rawSubject.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2').replace(/_/g, ' ').replace(/and/gi, '&').trim();
             const studentScores = m.marks?.[student.id] || m.marks?.[student.rollNo] || {};
+            
             return (
               <div key={m.id} className={`p-6 rounded-[2rem] border ${cardBg}`}>
                 <h4 className="font-bold text-lg mb-4">{formattedSubject}</h4>
@@ -406,7 +411,7 @@ function GatePassView({ passes, cardBg }: any) {
         let status = p.status;
         const timeLeft = (p.expiresAt || 0) - now;
         if (status === 'ACTIVE' && timeLeft <= 0) {
-          status = "EXPIRED"; // Visually mark expired based on timer
+          status = "EXPIRED"; 
         }
 
         const mins = Math.max(0, Math.floor(timeLeft / 60000));
@@ -471,7 +476,7 @@ function LeaveView({ student, leaves, cardBg }: any) {
     setSubmitting(true);
     try {
       await addDoc(collection(db, "leave_applications"), {
-        studentId: student.id, studentName: student.fullName, rollNo: student.rollNo, branch: student.branch, semester: student.semester,
+        studentId: student.id, studentName: student.fullName, rollNo: student.rollNo, branch: student.branch, semester: student.semester, division: student.division,
         leaveType, startDate, endDate, reason: reason.trim(), status: "PENDING", mentorApproval: "PENDING", hodApproval: "PENDING", appliedAt: Date.now()
       });
       setShowModal(false); setStartDate(""); setEndDate(""); setReason("");
@@ -519,7 +524,6 @@ function LeaveView({ student, leaves, cardBg }: any) {
 // SETTINGS OVERLAY WITH ACTIVE SESSIONS MANAGER
 // ==========================================
 function StudentSettingsOverlay({ student, isDark, isDynamicHue, theme, onClose, onLogout }: any) {
-  const [blockEmail, setBlockEmail] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [showEmailDialog, setShowEmailDialog] = useState(false);

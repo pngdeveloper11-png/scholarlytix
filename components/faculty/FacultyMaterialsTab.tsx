@@ -8,12 +8,23 @@ import { Loader2, UploadCloud, Trash2, FileQuestion, BookOpen, ExternalLink, Pap
 import GlassDropdown from '../GlassDropdown';
 import GlassButton from '../ui/GlassButton';
 
+const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4"];
+const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
+
+type SubjectDef = { shortName: string; longName: string; type: string };
+
+const getDynamicSubjects = (semester: string, branch: string, globalSubjects: any) => {
+  const key = `${semester}|${branch}`;
+  return (globalSubjects[key] || []).map((s: any) => s.longName);
+};
+
 export default function FacultyMaterialsTab() {
   const { user, role } = useAuth();
   const isHod = role?.startsWith("HOD|") || role === "SUPER_ADMIN" || role === "DIRECTOR" || role === "PRINCIPAL" || role === "REGISTRAR";
 
   const [materials, setMaterials] = useState<any[]>([]);
   const [teachingConfig, setTeachingConfig] = useState<Record<string, string[]>>({});
+  const [globalSubjects, setGlobalSubjects] = useState<any>({});
   const [isLoading, setIsLoading] = useState(true);
 
   const [viewSem, setViewSem] = useState("");
@@ -33,6 +44,10 @@ export default function FacultyMaterialsTab() {
       setMaterials(mats);
     });
 
+    const unsubSubjects = onSnapshot(doc(db, "app_config", "subject_master"), (snap) => {
+      if (snap.exists()) setGlobalSubjects(snap.data());
+    });
+
     if (!user?.uid) return;
     const unsubConfig = onSnapshot(doc(db, "teacher_configs", user.uid), (docSnap) => {
       if (docSnap.exists() && docSnap.get("config")) {
@@ -47,7 +62,7 @@ export default function FacultyMaterialsTab() {
       setIsLoading(false);
     });
 
-    return () => { unsubMaterials(); unsubConfig(); };
+    return () => { unsubMaterials(); unsubSubjects(); unsubConfig(); };
   }, [user?.uid, viewSem]);
 
   const handleDelete = async (mat: any) => {
@@ -67,10 +82,9 @@ export default function FacultyMaterialsTab() {
   const validSems = Array.from(new Set(availableClasses.map(c => c.split("|")[0])));
   const validBranches = Array.from(new Set(availableClasses.filter(c => c.startsWith(viewSem)).map(c => c.split("|")[1])));
   
-  // Aggregate subjects for Sem+Branch just like in Tests tab
-  const validSubjects = Array.from(new Set(
-    Object.keys(teachingConfig).filter(k => k.startsWith(`${viewSem}|${viewBranch}`)).flatMap(k => teachingConfig[k])
-  ));
+  const validSubjects = isHod
+    ? Array.from(new Set(AVAILABLE_BRANCHES.flatMap(b => getDynamicSubjects(viewSem, b, globalSubjects))))
+    : Array.from(new Set(Object.keys(teachingConfig).filter(k => k.startsWith(`${viewSem}|${viewBranch}`)).flatMap(k => teachingConfig[k])));
 
   const myUploads = materials.filter(m => isHod || m.facultyName === user?.displayName);
   const displayedMaterials = myUploads.filter(m => {
@@ -85,8 +99,8 @@ export default function FacultyMaterialsTab() {
         <h2 className="text-2xl font-bold text-white mb-6">Study Materials</h2>
 
         <div className="flex space-x-3 mb-6">
-          <GlassDropdown label="Sem" value={viewSem} options={validSems} onChange={setViewSem} isDark={true} zIndex={70} />
-          <GlassDropdown label="Branch" value={viewBranch} options={validBranches} onChange={setViewBranch} isDark={true} zIndex={60} />
+          <GlassDropdown label="Sem" value={viewSem} options={isHod ? AVAILABLE_SEMESTERS : validSems} onChange={setViewSem} isDark={true} zIndex={70} />
+          <GlassDropdown label="Branch" value={viewBranch} options={isHod ? AVAILABLE_BRANCHES : validBranches} onChange={setViewBranch} isDark={true} zIndex={60} />
           <div className="flex-[1.5]">
             <GlassDropdown label="Subject" value={viewSubject} options={validSubjects} onChange={setViewSubject} isDark={true} zIndex={50} />
           </div>
@@ -165,13 +179,13 @@ export default function FacultyMaterialsTab() {
       </div>
 
       {showUploadDialog && (
-        <UploadMaterialDialog user={user} teachingConfig={teachingConfig} initialSem={viewSem} initialBranch={viewBranch} initialSubject={viewSubject} initialCategory={categoryFilter === "All" ? "Notes" : categoryFilter} onDismiss={() => setShowUploadDialog(false)} />
+        <UploadMaterialDialog user={user} isHod={isHod} teachingConfig={teachingConfig} initialSem={viewSem} initialBranch={viewBranch} initialSubject={viewSubject} initialCategory={categoryFilter === "All" ? "Notes" : categoryFilter} onDismiss={() => setShowUploadDialog(false)} />
       )}
     </div>
   );
 }
 
-function UploadMaterialDialog({ user, teachingConfig, initialSem, initialBranch, initialSubject, initialCategory, onDismiss }: any) {
+function UploadMaterialDialog({ user, isHod, teachingConfig, initialSem, initialBranch, initialSubject, initialCategory, onDismiss }: any) {
   const [isUploading, setIsUploading] = useState(false);
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
@@ -184,6 +198,22 @@ function UploadMaterialDialog({ user, teachingConfig, initialSem, initialBranch,
   const [links, setLinks] = useState<string[]>([]);
   const [linkInput, setLinkInput] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [globalSubjects, setGlobalSubjects] = useState<any>({});
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, "app_config", "subject_master"), (snap) => {
+      if (snap.exists()) setGlobalSubjects(snap.data());
+    });
+    return () => unsub();
+  }, []);
+
+  const validSems = isHod ? AVAILABLE_SEMESTERS : Array.from(new Set(Object.keys(teachingConfig).map(k => k.split("|")[0])));
+  const validBranches = isHod ? AVAILABLE_BRANCHES : Array.from(new Set(Object.keys(teachingConfig).filter(k => k.startsWith(upSem)).map(k => k.split("|")[1])));
+  
+  const availableSubjects = isHod
+    ? getDynamicSubjects(upSem, upBranch, globalSubjects)
+    : Array.from(new Set(Object.keys(teachingConfig).filter(k => k.startsWith(`${upSem}|${upBranch}`)).flatMap(k => teachingConfig[k])));
 
   const handleUpload = async () => {
     if (!title || !upSubject || (files.length === 0 && links.length === 0)) return alert("Please provide a title and at least one file or link.");
@@ -230,6 +260,14 @@ function UploadMaterialDialog({ user, teachingConfig, initialSem, initialBranch,
         <h2 className="text-xl font-bold text-white mb-6">Upload Material</h2>
         <div className="space-y-4 mb-6">
           <input type="text" placeholder="Title (e.g. Chapter 1 PYQ)" value={title} onChange={(e) => setTitle(e.target.value)} className="w-full bg-white/[0.05] border border-white/20 rounded-xl p-4 text-white focus:ring-2 focus:ring-[#D0BCFF] outline-none" />
+          
+          <div className="flex gap-2">
+            <GlassDropdown label="Sem" value={upSem} options={validSems} onChange={setUpSem} isDark={true} zIndex={130} />
+            <GlassDropdown label="Branch" value={upBranch} options={validBranches} onChange={setUpBranch} isDark={true} zIndex={120} />
+          </div>
+          
+          <GlassDropdown label="Subject" value={upSubject} options={availableSubjects} onChange={setUpSubject} isDark={true} zIndex={115} />
+
           <textarea placeholder="Message / Instructions (Optional)" value={message} onChange={e => setMessage(e.target.value)} className="w-full bg-white/[0.05] border border-white/20 rounded-xl p-4 text-white text-sm outline-none resize-none" rows={3} />
           
           <GlassDropdown label="" value={upCategory} options={["Notes", "Question Paper", "Assignment"]} onChange={setUpCategory} isDark={true} zIndex={110} />
@@ -243,7 +281,6 @@ function UploadMaterialDialog({ user, teachingConfig, initialSem, initialBranch,
                {links.map((lnk, i) => <span key={i} className="px-2 py-1 bg-blue-500/10 text-blue-300 rounded text-[10px] flex items-center"><LinkIcon className="w-3 h-3 mr-1"/> Link {i+1} <X onClick={() => setLinks(links.filter((_, idx) => idx !== i))} className="w-3 h-3 ml-2 cursor-pointer"/></span>)}
                {files.map((f, i) => <span key={i} className="px-2 py-1 bg-white/10 text-white rounded text-[10px] flex items-center"><Paperclip className="w-3 h-3 mr-1"/> {f.name} <X onClick={() => setFiles(files.filter((_, idx) => idx !== i))} className="w-3 h-3 ml-2 cursor-pointer"/></span>)}
              </div>
-             {/* FIXED: Array concatenation bypasses strict iterable TS checks */}
              <input type="file" multiple ref={fileInputRef} onChange={e => e.target.files && setFiles(files.concat(Array.from(e.target.files)))} className="hidden" />
              <button onClick={() => fileInputRef.current?.click()} className="w-full py-2 bg-white/5 border border-white/10 text-white rounded-lg text-xs font-bold hover:bg-white/10 flex justify-center items-center"><UploadCloud className="w-4 h-4 mr-2" /> Add Files / Images</button>
           </div>

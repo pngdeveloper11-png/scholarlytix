@@ -5,6 +5,7 @@ import { collection, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firesto
 import { db } from '@/lib/firebase';
 import { X, Trash2, ShieldAlert, Loader2, KeyRound } from 'lucide-react';
 import CollegeStructureManager from './CollegeStructureManager';
+import SubjectManagerDialog from './SubjectManagerDialog';
 import { CollegeStructureConfig } from '@/types';
 
 const ROLES = ["Teacher", "Class Teacher", "HOD", "Registrar", "Principal", "Director"];
@@ -18,6 +19,7 @@ export default function SuperAdminPanel({ isDark, onClose }: { isDark: boolean, 
   const [globalStructure, setGlobalStructure] = useState<CollegeStructureConfig>({});
   
   const [showStructureManager, setShowStructureManager] = useState(false);
+  const [showSubjectManager, setShowSubjectManager] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
   // Form State
@@ -116,8 +118,11 @@ export default function SuperAdminPanel({ isDark, onClose }: { isDark: boolean, 
             <p className="text-gray-400 text-sm mt-1">Configure college structures and authorize access levels.</p>
           </div>
           <div className="flex items-center gap-4">
+            <button onClick={() => setShowSubjectManager(true)} className="bg-[#D0BCFF] text-[#2A1B4E] px-5 py-2.5 rounded-xl font-bold hover:scale-105 transition">
+              Manage Subjects
+            </button>
             <button onClick={() => setShowStructureManager(true)} className="bg-[#D0BCFF] text-[#2A1B4E] px-5 py-2.5 rounded-xl font-bold hover:scale-105 transition">
-              Build College Structure
+              Manage Divisions
             </button>
             <button onClick={onClose} className="p-2 rounded-full hover:bg-red-500/20 text-red-500 transition">
               <X className="w-7 h-7" />
@@ -240,6 +245,7 @@ export default function SuperAdminPanel({ isDark, onClose }: { isDark: boolean, 
       </div>
 
       {showStructureManager && <CollegeStructureManager isDark={isDark} onClose={() => setShowStructureManager(false)} />}
+      {showSubjectManager && <SubjectManagerDialog isDark={isDark} onClose={() => setShowSubjectManager(false)} />}
     </div>
   );
 }

@@ -12,9 +12,15 @@ import { CollegeStructureConfig, StudentData } from '../../types';
 const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8"];
 const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
 
-// Helper to gracefully match "Sem 3" with "Semester 3" to prevent blank rosters
 const matchSem = (a: string, b: string) => (a || "").toLowerCase().replace("semester", "sem") === (b || "").toLowerCase().replace("semester", "sem");
 const matchDiv = (a: string, b: string) => (a || "").toLowerCase().replace("div ", "") === (b || "").toLowerCase().replace("div ", "");
+
+type SubjectDef = { shortName: string; longName: string; type: string };
+
+const getDynamicSubjects = (semester: string, branch: string, globalSubjects: any) => {
+  const key = `${semester}|${branch}`;
+  return (globalSubjects[key] || []).map((s: any) => s.longName);
+};
 
 // --- IMPORT STUDENTS DIALOG ---
 function ImportStudentsDialog({ isDynamicHue, onDismiss, globalStructure }: { isDynamicHue: boolean, onDismiss: () => void, globalStructure: CollegeStructureConfig }) {
@@ -189,6 +195,7 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
 
   const [teachingConfig, setTeachingConfig] = useState<Record<string, string[]>>({});
   const [globalStructure, setGlobalStructure] = useState<CollegeStructureConfig>({});
+  const [globalSubjects, setGlobalSubjects] = useState<any>({});
   const [roster, setRoster] = useState<StudentData[]>([]);
   const [history, setHistory] = useState<any[]>([]);
 
@@ -224,18 +231,21 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
     const unsubStruct = onSnapshot(doc(db, "app_config", "college_structure"), (snap) => {
       if (snap.exists()) setGlobalStructure(snap.data() as CollegeStructureConfig);
     });
+    const unsubSubjects = onSnapshot(doc(db, "app_config", "subject_master"), (snap) => {
+      if (snap.exists()) setGlobalSubjects(snap.data());
+    });
     const unsubRoster = onSnapshot(collection(db, "students_directory"), (snap) => {
       setRoster(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as StudentData)));
     });
     const unsubHistory = onSnapshot(collection(db, "attendance_history"), (snap) => {
       setHistory(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })));
     });
-    return () => { unsubConfig(); unsubStruct(); unsubRoster(); unsubHistory(); };
+    return () => { unsubConfig(); unsubStruct(); unsubSubjects(); unsubRoster(); unsubHistory(); };
   }, [user?.uid, selectedSemester]);
 
-  // Use fuzzy matching to ensure divisions render even if strings don't exactly match
   const classKey1 = `${selectedSemester}|${selectedBranch}`;
   const classKey2 = `${selectedSemester.replace("Semester ", "Sem ")}|${selectedBranch}`;
+  
   const availableDivisions = isHod 
     ? ((globalStructure[classKey1] || globalStructure[classKey2] || [])?.map(d => d.divisionName) || [])
     : Array.from(new Set(Object.keys(teachingConfig).filter(k => matchSem(k.split("|")[0], selectedSemester) && k.split("|")[1] === selectedBranch).map(k => k.split("|")[2]).filter(Boolean)));
@@ -246,13 +256,16 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
 
   const configKey1 = `${selectedSemester}|${selectedBranch}|${selectedDivision}`;
   const configKey2 = `${selectedSemester.replace("Semester ", "Sem ")}|${selectedBranch}|${selectedDivision}`;
-  useEffect(() => {
-    if (isHod) return;
-    const subjects = teachingConfig[configKey1] || teachingConfig[configKey2] || [];
-    if (!subjects.includes(selectedSubject)) setSelectedSubject(subjects[0] || "");
-  }, [configKey1, configKey2, teachingConfig, isHod, selectedSubject]);
+  
+  // THE FIX: Uses globalSubjects correctly for HODs and teachingConfig for teachers
+  const availableSubjects = isHod
+    ? Array.from(new Set(AVAILABLE_BRANCHES.flatMap(b => getDynamicSubjects(selectedSemester, b, globalSubjects)))).distinct().sorted()
+    : teachingConfig[configKey1] || teachingConfig[configKey2] || [];
 
-  // Analytics & Sorting - Fuzzy Match ensures blank rosters are fixed
+  useEffect(() => {
+    if (!availableSubjects.includes(selectedSubject)) setSelectedSubject(availableSubjects[0] || "");
+  }, [configKey1, configKey2, teachingConfig, isHod, selectedSubject, availableSubjects]);
+
   let branchRoster = roster.filter(s => 
     (s as any).branch === selectedBranch && 
     matchSem((s as any).semester, selectedSemester) && 
@@ -262,11 +275,10 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
   if (sortMode === "az") {
     branchRoster = branchRoster.sort((a, b) => ((a as any).fullName || "").localeCompare((b as any).fullName || ""));
   } else {
-    // Default sorting keeps students exactly "as they are" using their chronological database creation
     branchRoster = branchRoster.sort((a, b) => {
       const timeA = (a as any).admissionTimestamp?.seconds ? (a as any).admissionTimestamp.seconds * 1000 : ((a as any).admissionTimestamp || 0);
       const timeB = (b as any).admissionTimestamp?.seconds ? (b as any).admissionTimestamp.seconds * 1000 : ((b as any).admissionTimestamp || 0);
-      if (timeA === timeB) return ((a as any).rollNo || 0) - ((b as any).rollNo || 0); // Tie breaker
+      if (timeA === timeB) return ((a as any).rollNo || 0) - ((b as any).rollNo || 0);
       return timeA - timeB;
     });
   }
@@ -288,7 +300,6 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
         return lTime >= sTime && (l.batch === "All" || l.batch === studentBatch);
     });
     const studentTotalConducted = validLectures.length;
-    // Check both standard Firebase arrays
     const attended = validLectures.filter(l => {
       const presentIds = (l as any).presentStudentIds || (l as any).presentUids || [];
       return presentIds.includes(student.id);
@@ -368,7 +379,7 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
       
       {!isHod && (
         <div className="mb-6 z-40 relative">
-            <GlassDropdown label="Subject" value={selectedSubject} options={teachingConfig[configKey1] || teachingConfig[configKey2] || []} onChange={setSelectedSubject} isDark={isDark} zIndex={40} />
+            <GlassDropdown label="Subject" value={selectedSubject} options={availableSubjects} onChange={setSelectedSubject} isDark={isDark} zIndex={40} />
         </div>
       )}
 

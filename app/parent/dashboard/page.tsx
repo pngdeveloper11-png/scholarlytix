@@ -33,7 +33,6 @@ export default function ParentDashboard() {
     const savedTheme = localStorage.getItem("academiq_theme");
     if (savedTheme) setTheme(savedTheme);
 
-    // FIXED: Real-time Profile Sync
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       if (!user) {
         router.replace('/parent/linking');
@@ -48,7 +47,6 @@ export default function ParentDashboard() {
       }
       const session = JSON.parse(sessionStr);
 
-      const q = query(collection(db, "students_directory"), where("rollNo", "==", session.rollNo || parseInt(session.studentId.split('_')[1])));
       onSnapshot(doc(db, "students_directory", session.studentId), (snap) => {
         if (!snap.exists() || snap.data().linkedParentEmail !== user.email?.toLowerCase().trim()) {
           signOut(auth);
@@ -63,17 +61,21 @@ export default function ParentDashboard() {
     return () => unsubscribeAuth();
   }, [router]);
 
-  // FIXED: Real-time Database Sync (Triggered whenever Profile updates)
   useEffect(() => {
     if (!studentProfile) return;
 
-    const classRef = `${studentProfile.semester}_${studentProfile.branch}`.replace(/\s+/g, '').replace(/&/g, 'and');
+    // THE FIX: Syncs perfectly with the Faculty's Division-first document generation
+    const classRef = `${studentProfile.semester}_${studentProfile.division}`.replace(/\s+/g, '').replace(/&/g, 'and');
     
     const unsubAtt = onSnapshot(collection(db, "attendance_history"), (snap) => {
-      setAttendanceHistory(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter((r: any) => r.branchName === studentProfile.branch && r.semester === studentProfile.semester));
+      setAttendanceHistory(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter((r: any) => 
+        (r.branchName === studentProfile.branch || r.branch === studentProfile.branch) && 
+        r.semester === studentProfile.semester && 
+        (r.divisionName === studentProfile.division || r.division === studentProfile.division)
+      ));
     });
 
-    const unsubTime = onSnapshot(doc(db, "branch_timetables", classRef), (snap) => {
+    const unsubTime = onSnapshot(doc(db, "class_timetables", classRef), (snap) => {
       if (snap.exists() && snap.data().entries) setTimetable(snap.data().entries);
       else setTimetable([]);
     });
@@ -87,13 +89,21 @@ export default function ParentDashboard() {
     });
 
     const unsubMarks = onSnapshot(collection(db, "test_marks"), (snap) => {
-      setTestMarks(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter((d: any) => d.id.startsWith(classRef)));
+      const targetSem = (studentProfile.semester || "").toLowerCase().replace(/\s+/g, '');
+      const targetDiv = (studentProfile.division || "").toLowerCase().replace(/\s+/g, '');
+      
+      setTestMarks(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter((d: any) => {
+        const docIdClean = d.id.toLowerCase().replace(/\s+/g, '');
+        // Match the division-based ID safely
+        return (docIdClean.includes(targetSem) && docIdClean.includes(targetDiv)) || 
+               (d.semester === studentProfile.semester && d.division === studentProfile.division);
+      }));
     });
 
     setLoading(false);
 
     return () => { unsubAtt(); unsubTime(); unsubNotices(); unsubPass(); unsubMarks(); };
-  }, [studentProfile?.id, studentProfile?.branch, studentProfile?.semester]);
+  }, [studentProfile?.id, studentProfile?.branch, studentProfile?.semester, studentProfile?.division]);
 
   const handleDisconnect = async () => {
     if (confirm("Disconnect from this student? You will need to link them again later.")) {
@@ -160,7 +170,8 @@ export default function ParentDashboard() {
             <div>
               <p className="text-sm text-white/70">Monitoring:</p>
               <h1 className="text-xl font-bold tracking-tight uppercase leading-tight">{studentProfile.fullName}</h1>
-              <p className="text-xs text-[#D0BCFF] mt-0.5">{studentProfile.semester} • {studentProfile.branch}</p>
+              {/* THE FIX: Visually shows the Division now! */}
+              <p className="text-xs text-[#D0BCFF] mt-0.5">{studentProfile.semester} • {studentProfile.branch} ({studentProfile.division})</p>
             </div>
           </div>
           <button onClick={() => setShowSettings(true)} className="p-3 border rounded-2xl transition-all backdrop-blur-xl bg-white/[0.08] border-white/20 text-white hover:bg-white/[0.15]">
@@ -219,10 +230,9 @@ export default function ParentDashboard() {
 
           {activeTab === "Tests" && (
             testMarks.map(m => {
-              // FIXED: Regex separates CamelCase into spaces (e.g., MathematicsForComputerEngineering -> Mathematics For Computer Engineering)
-              const rawName = m.id.split('_').pop() || "Subject";
+              const rawName = m.subject || m.id.split('_').pop() || "Subject";
               const subjectName = rawName.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/and/gi, ' & ');
-              const studentMark = m.marks?.[studentProfile.id] || {};
+              const studentMark = m.marks?.[studentProfile.id] || m.marks?.[studentProfile.rollNo] || {};
               
               return (
                 <div key={m.id} className={`p-6 rounded-[2rem] border ${cardBg}`}>
@@ -231,7 +241,7 @@ export default function ParentDashboard() {
                     {["IAT 1", "IAT 2"].map(test => (
                       <div key={test} className="flex-1 bg-black/20 p-4 rounded-xl border border-white/5 text-center">
                         <p className="text-xs opacity-50 uppercase font-bold mb-1">{test}</p>
-                        <p className="font-black text-2xl text-[#D0BCFF]">{studentMark[test] || "-"}</p>
+                        <p className="font-black text-2xl text-[#D0BCFF]">{studentMark[test] !== undefined ? studentMark[test] : "-"}</p>
                       </div>
                     ))}
                   </div>
@@ -247,7 +257,6 @@ export default function ParentDashboard() {
                    <div><h3 className="font-bold text-lg">{p.reason}</h3><p className="text-xs opacity-60 mt-1">Issued by {p.issuedBy}</p></div>
                    <span className={`px-2.5 py-1 text-[10px] font-black uppercase rounded-md border ${p.status === 'ACTIVE' ? 'bg-green-500/20 text-green-400 border-green-500/30' : p.status === 'USED' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'}`}>{p.status}</span>
                  </div>
-                 {/* FIXED: Scalable QR Code generator replacing raw string */}
                  <div className="bg-black/20 p-5 rounded-xl border border-white/5 flex flex-col items-center justify-center">
                    <div className="bg-white p-2 rounded-xl mb-3 shadow-lg">
                      <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${p.passId}&bgcolor=ffffff`} alt="Gate Pass QR" className="w-28 h-28 mix-blend-multiply" />
