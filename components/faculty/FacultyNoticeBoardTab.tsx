@@ -4,15 +4,16 @@ import React, { useState, useEffect, useRef } from 'react';
 import { collection, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../app/context/AuthContext';
-import { Bell, Plus, Trash2, Calendar, Loader2, X, Link as LinkIcon, Paperclip, ExternalLink, Image as ImgIcon, UploadCloud } from 'lucide-react';
+import { Bell, Plus, Trash2, Calendar, Loader2, X, Link as LinkIcon, Paperclip, ExternalLink, UploadCloud } from 'lucide-react';
 import GlassButton from '../ui/GlassButton';
+import GlassDropdown from '../GlassDropdown';
 
-const AUDIENCES = ["All", "All Students", "All Teachers", "CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
+const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4"];
+const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
 
 export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: boolean }) {
   const { user, role } = useAuth();
   
-  // --- DEVELOPER & SUPER ADMIN OVERRIDE ---
   const currentEmail = user?.email || "";
   const isDeveloper = currentEmail.toLowerCase() === 'pngdeveloper11@gmail.com';
   const isHod = role?.startsWith("HOD|") || role === "SUPER_ADMIN" || role === "DIRECTOR" || role === "PRINCIPAL" || role === "REGISTRAR" || isDeveloper;
@@ -21,10 +22,12 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
   const [showNewNoticeDialog, setShowNewNoticeDialog] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
 
-  // Form State
+  // Form State matching Android Logic
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
-  const [selectedAudiences, setSelectedAudiences] = useState<string[]>(["All Students"]);
+  const [targetRole, setTargetRole] = useState("All");
+  const [targetSem, setTargetSem] = useState("All");
+  const [targetBranch, setTargetBranch] = useState("All");
   
   // Attachments State
   const [files, setFiles] = useState<File[]>([]);
@@ -48,20 +51,8 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
     return () => unsub();
   }, []);
 
-  const toggleAudience = (aud: string) => {
-    if (aud === "All" || aud === "All Students" || aud === "All Teachers") {
-      setSelectedAudiences([aud]);
-    } else {
-      setSelectedAudiences(prev => {
-        const filtered = prev.filter(p => p !== "All" && p !== "All Students" && p !== "All Teachers");
-        if (filtered.includes(aud)) return filtered.filter(p => p !== aud);
-        return [...filtered, aud];
-      });
-    }
-  };
-
   const handlePublish = async () => {
-    if (!title.trim() || !message.trim() || selectedAudiences.length === 0) return alert("Title, message, and target audience required.");
+    if (!title.trim() || !message.trim()) return alert("Title and message required.");
     setIsPublishing(true);
 
     try {
@@ -82,7 +73,9 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
       const noticeId = crypto.randomUUID();
       await setDoc(doc(db, "announcements", noticeId), {
         title, message,
-        targetAudience: selectedAudiences.join(", "),
+        targetRole,
+        targetSemester: targetSem,
+        targetBranch,
         links,
         attachments: uploadedAttachments,
         authorName: user?.displayName || "Admin",
@@ -90,10 +83,10 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
         timestamp: Date.now()
       });
 
-      let pushTopic = "all_users";
-      if (selectedAudiences.includes("All Students")) pushTopic = "all_students";
-      else if (selectedAudiences.includes("All Teachers")) pushTopic = "all_teachers";
-      else if (selectedAudiences.length > 0) pushTopic = `topic_${selectedAudiences[0].replace(/[ ()]/g, "_")}`;
+      let pushTopic = "all_students";
+      if (targetRole === "All" || targetRole === "Teachers") pushTopic = "all_teachers";
+      else if (targetRole === "Students" && targetSem !== "All" && targetBranch !== "All") pushTopic = `topic_${targetSem.replace(/ /g, "_")}_${targetBranch.replace(/[ ()]/g, "_")}`;
+      else if (targetRole === "Students" && targetSem !== "All") pushTopic = `topic_${targetSem.replace(/ /g, "_")}`;
 
       await fetch('/api/send-fcm', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -101,7 +94,8 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
       });
 
       setShowNewNoticeDialog(false);
-      setTitle(""); setMessage(""); setFiles([]); setLinks([]); setSelectedAudiences(["All Students"]);
+      setTitle(""); setMessage(""); setFiles([]); setLinks([]); 
+      setTargetRole("All"); setTargetSem("All"); setTargetBranch("All");
     } catch (e) { alert("Failed to publish notice."); } finally { setIsPublishing(false); }
   };
 
@@ -139,7 +133,11 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
                     <h3 className={`text-xl font-bold ${textColor} leading-tight mb-2`}>{notice.title}</h3>
                     <div className="flex items-center text-xs text-white/50 space-x-3 mb-4">
                       <span className="flex items-center"><Calendar className="w-3 h-3 mr-1"/> {dateStr}</span>
-                      <span className="bg-[#D0BCFF]/20 text-[#D0BCFF] px-2 py-0.5 rounded font-bold">{notice.targetAudience}</span>
+                      <span className="bg-[#D0BCFF]/20 text-[#D0BCFF] px-2 py-0.5 rounded font-bold">
+                        {notice.targetRole === "Teachers" ? "Teachers" : 
+                         notice.targetAudience ? notice.targetAudience : 
+                         `${notice.targetRole} • ${notice.targetSemester} • ${notice.targetBranch}`}
+                      </span>
                     </div>
                   </div>
                   {isHod && (
@@ -179,7 +177,7 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
 
                 <div className="flex items-center mt-2 pt-4 border-t border-white/5">
                   <div className="w-6 h-6 rounded-full bg-[#D0BCFF]/20 flex items-center justify-center mr-2">
-                    <span className="text-[#D0BCFF] text-[10px] font-bold">{notice.authorName.charAt(0)}</span>
+                    <span className="text-[#D0BCFF] text-[10px] font-bold">{notice.authorName?.charAt(0) || "A"}</span>
                   </div>
                   <span className="text-xs text-white/60">Issued by <strong className="text-white/80">{notice.authorName}</strong> ({notice.authorRole})</span>
                 </div>
@@ -200,20 +198,19 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
             <div className="space-y-5 mb-6">
               <input type="text" placeholder="Notice Title" value={title} onChange={e => setTitle(e.target.value)} className="w-full bg-white/[0.05] border border-white/20 rounded-xl p-4 text-white font-bold outline-none focus:ring-2 focus:ring-[#D0BCFF]" />
               
-              <div>
-                <label className="text-xs opacity-60 font-bold block mb-2">Target Audience (Multi-Select)</label>
-                <div className="flex flex-wrap gap-2">
-                  {AUDIENCES.map(aud => (
-                    <button key={aud} onClick={() => toggleAudience(aud)} className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${selectedAudiences.includes(aud) ? 'bg-[#D0BCFF] text-[#2A1B4E] border-[#D0BCFF]' : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10'}`}>
-                      {aud}
-                    </button>
-                  ))}
-                </div>
+              <div className="flex gap-3">
+                <GlassDropdown label="Target Role" value={targetRole} options={["All", "Students", "Teachers"]} onChange={setTargetRole} isDark={true} zIndex={90} />
+                {targetRole !== "Teachers" && (
+                  <>
+                    <GlassDropdown label="Semester" value={targetSem} options={["All", ...AVAILABLE_SEMESTERS]} onChange={setTargetSem} isDark={true} zIndex={80} />
+                    <GlassDropdown label="Branch" value={targetBranch} options={["All", ...AVAILABLE_BRANCHES]} onChange={setTargetBranch} isDark={true} zIndex={70} />
+                  </>
+                )}
               </div>
 
               <textarea placeholder="Write your official message..." value={message} onChange={e => setMessage(e.target.value)} className="w-full h-32 bg-white/[0.05] border border-white/20 rounded-xl p-4 text-white text-sm outline-none focus:ring-2 focus:ring-[#D0BCFF] resize-none" />
               
-              <div className="bg-black/30 p-4 rounded-xl border border-white/10">
+              <div className="bg-black/30 p-4 rounded-xl border border-white/10 z-0">
                 <p className="text-xs font-bold opacity-60 mb-3">Attachments & Links</p>
                 <div className="flex gap-2 mb-3">
                   <input type="url" placeholder="https://" value={linkInput} onChange={e => setLinkInput(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none text-white" />

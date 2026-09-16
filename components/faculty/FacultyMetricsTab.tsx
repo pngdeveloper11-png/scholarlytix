@@ -257,9 +257,9 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
   const configKey1 = `${selectedSemester}|${selectedBranch}|${selectedDivision}`;
   const configKey2 = `${selectedSemester.replace("Semester ", "Sem ")}|${selectedBranch}|${selectedDivision}`;
   
-  // THE FIX: Uses globalSubjects correctly for HODs and teachingConfig for teachers
+// THE FIX: Uses globalSubjects correctly for HODs and teachingConfig for teachers
   const availableSubjects = isHod
-    ? Array.from(new Set(AVAILABLE_BRANCHES.flatMap(b => getDynamicSubjects(selectedSemester, b, globalSubjects)))).distinct().sorted()
+    ? Array.from(new Set(AVAILABLE_BRANCHES.flatMap(b => getDynamicSubjects(selectedSemester, b, globalSubjects)))).sort()
     : teachingConfig[configKey1] || teachingConfig[configKey2] || [];
 
   useEffect(() => {

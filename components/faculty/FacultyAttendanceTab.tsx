@@ -1,15 +1,23 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, getDocs, addDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, onSnapshot, addDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { CheckCircle, XCircle, Search, Loader2 } from 'lucide-react';
 import GlassDropdown from '../GlassDropdown';
 import GlassButton from '../ui/GlassButton';
 
+const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4"];
+const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
+const matchSem = (a: string, b: string) => (a || "").toLowerCase().replace("semester", "sem") === (b || "").toLowerCase().replace("semester", "sem");
+const matchDiv = (a: string, b: string) => (a || "").toLowerCase().replace("div ", "") === (b || "").toLowerCase().replace("div ", "");
+
 export default function FacultyAttendanceTab({ directMarkData, isDark }: { directMarkData?: any, isDark: boolean }) {
+  const [globalStructure, setGlobalStructure] = useState<any>({});
+  
   const [selectedSem, setSelectedSem] = useState(directMarkData?.sem || "Semester 3");
   const [selectedBranch, setSelectedBranch] = useState(directMarkData?.branch || "CSE");
+  const [selectedDivision, setSelectedDivision] = useState(directMarkData?.division || "");
   const [selectedSubject, setSelectedSubject] = useState(directMarkData?.subject || "");
   const [selectedBatch, setSelectedBatch] = useState(directMarkData?.batch || "All");
   
@@ -19,38 +27,53 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (directMarkData) fetchStudents();
-  }, [directMarkData]);
+    const unsub = onSnapshot(doc(db, "app_config", "college_structure"), (snap) => {
+      if (snap.exists()) setGlobalStructure(snap.data());
+    });
+    return () => unsub();
+  }, []);
+
+  const availableDivisions = Object.keys(globalStructure)
+    .filter(k => matchSem(k.split("|")[0], selectedSem))
+    .flatMap(k => globalStructure[k])
+    .map((d: any) => d.divisionName);
+
+  useEffect(() => {
+    if (!availableDivisions.includes(selectedDivision)) setSelectedDivision(availableDivisions[0] || "");
+  }, [selectedSem, availableDivisions, selectedDivision]);
+
+  useEffect(() => {
+    if (directMarkData && selectedDivision) fetchStudents();
+  }, [directMarkData, selectedDivision]);
 
   const fetchStudents = async () => {
     if (!selectedSubject) return alert("Please specify a subject to mark attendance.");
+    if (!selectedDivision) return alert("Please specify a division.");
     
     setIsLoadingStudents(true);
     try {
-      const q = query(
-        collection(db, "students_directory"), 
-        where("semester", "==", selectedSem), 
-        where("branch", "==", selectedBranch)
-      );
-      const snap = await getDocs(q);
-      
-      let fetchedStudents = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-      
-      if (selectedBatch !== "All") {
-        fetchedStudents = fetchedStudents.filter(s => s.batch === selectedBatch);
-      }
-      
-      fetchedStudents.sort((a, b) => a.rollNo - b.rollNo);
-      setStudents(fetchedStudents);
+      // Manual filter to avoid composite index requirements
+      import('firebase/firestore').then(async ({ getDocs, query, where, collection }) => {
+        const q = query(collection(db, "students_directory"), where("semester", "==", selectedSem));
+        const snap = await getDocs(q);
+        
+        let fetchedStudents = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }))
+          .filter(s => matchDiv(s.division, selectedDivision));
+        
+        if (selectedBatch !== "All") {
+          fetchedStudents = fetchedStudents.filter(s => s.batch === selectedBatch);
+        }
+        
+        fetchedStudents.sort((a, b) => a.rollNo - b.rollNo);
+        setStudents(fetchedStudents);
 
-      // Default all to Present
-      const initialAttendance: Record<string, boolean> = {};
-      fetchedStudents.forEach(s => initialAttendance[s.id] = true);
-      setAttendance(initialAttendance);
-      
+        const initialAttendance: Record<string, boolean> = {};
+        fetchedStudents.forEach(s => initialAttendance[s.id] = true);
+        setAttendance(initialAttendance);
+        setIsLoadingStudents(false);
+      });
     } catch (e) {
       alert("Failed to fetch student roster.");
-    } finally {
       setIsLoadingStudents(false);
     }
   };
@@ -77,6 +100,8 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
         semester: selectedSem,
         branch: selectedBranch,
         branchName: selectedBranch,
+        division: selectedDivision,
+        divisionName: selectedDivision,
         subjectName: selectedSubject,
         batch: selectedBatch,
         presentStudentIds: presentIds,
@@ -87,16 +112,15 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
 
       await addDoc(collection(db, "attendance_history"), record);
 
-      // Dispatch FCM alerts to parents of absentees
       for (const id of absentIds) {
         const student = students.find(s => s.id === id);
-        if (student) {
+        if (student && student.fcmToken) {
           try {
             await fetch('/api/send-fcm', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ 
-                targetTopic: `parent_${id}`, 
+                targetToken: student.fcmToken, 
                 title: "Attendance Alert 🚨", 
                 message: `${student.fullName} has been marked absent for ${selectedSubject}.`,
                 targetTab: 'Attendance'
@@ -121,13 +145,15 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
   return (
     <div className="w-full flex flex-col space-y-6 animate-in fade-in duration-300">
       
-      {/* Configuration Panel */}
       <div className={`p-6 rounded-[2rem] border ${cardBg}`}>
         <h3 className="font-bold text-lg mb-4">Class Configuration</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-          <GlassDropdown label="Semester" value={selectedSem} options={["Semester 1", "Semester 2", "Semester 3", "Semester 4"]} onChange={setSelectedSem} isDark={isDark} />
-          <GlassDropdown label="Branch" value={selectedBranch} options={["CSE", "CSE(AIML)", "IT", "EE"]} onChange={setSelectedBranch} isDark={isDark} />
-          <GlassDropdown label="Batch (Optional)" value={selectedBatch} options={["All", "A", "B", "C"]} onChange={setSelectedBatch} isDark={isDark} />
+          <GlassDropdown label="Semester" value={selectedSem} options={AVAILABLE_SEMESTERS} onChange={setSelectedSem} isDark={isDark} zIndex={100} />
+          <GlassDropdown label="Branch Tag" value={selectedBranch} options={AVAILABLE_BRANCHES} onChange={setSelectedBranch} isDark={isDark} zIndex={90} />
+          {availableDivisions.length > 0 ? (
+            <GlassDropdown label="Division" value={selectedDivision} options={availableDivisions} onChange={setSelectedDivision} isDark={isDark} zIndex={80} />
+          ) : <div className="flex items-end"><p className="text-red-500 font-bold text-xs pb-3">No Divs Built</p></div>}
+          <GlassDropdown label="Batch (Optional)" value={selectedBatch} options={["All", "A", "B", "C", "A1", "A2", "B1", "B2"]} onChange={setSelectedBatch} isDark={isDark} zIndex={70} />
         </div>
         <div className="mb-4">
           <label className="text-xs font-bold uppercase opacity-60 mb-2 block">Subject Name</label>
@@ -136,22 +162,14 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
             placeholder="e.g., Computer Organization and Architecture" 
             value={selectedSubject} 
             onChange={e => setSelectedSubject(e.target.value)} 
-            className="w-full bg-black/30 border border-white/10 rounded-2xl p-4 outline-none focus:border-[#D0BCFF]" 
+            className="w-full bg-black/30 border border-white/10 rounded-2xl p-4 outline-none focus:border-[#D0BCFF] text-white" 
           />
         </div>
-        <GlassButton
-          onClick={fetchStudents}
-          disabled={isLoadingStudents || !selectedSubject}
-          variant="primary"
-          size="lg"
-          className="w-full"
-          icon={isLoadingStudents ? <Loader2 className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5" />}
-        >
+        <GlassButton onClick={fetchStudents} disabled={isLoadingStudents || !selectedSubject || !selectedDivision} variant="primary" size="lg" className="w-full" icon={isLoadingStudents ? <Loader2 className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5" />}>
           {isLoadingStudents ? null : "Load Student Roster"}
         </GlassButton>
       </div>
 
-      {/* Interactive Roll List */}
       {students.length > 0 && (
         <div className={`p-6 rounded-[2rem] border ${cardBg}`}>
           <div className="flex justify-between items-center mb-6 border-b border-white/10 pb-4">
@@ -184,19 +202,11 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
             })}
           </div>
 
-          <GlassButton
-            onClick={handleSubmit}
-            disabled={isSubmitting}
-            variant="light"
-            size="lg"
-            className="w-full text-lg"
-            icon={isSubmitting ? <Loader2 className="w-6 h-6 animate-spin" /> : undefined}
-          >
+          <GlassButton onClick={handleSubmit} disabled={isSubmitting} variant="light" size="lg" className="w-full text-lg" icon={isSubmitting ? <Loader2 className="w-6 h-6 animate-spin" /> : undefined}>
             {isSubmitting ? null : `Save Attendance (${Object.values(attendance).filter(Boolean).length} Present)`}
           </GlassButton>
         </div>
       )}
-
     </div>
   );
 }

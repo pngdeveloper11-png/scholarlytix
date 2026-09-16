@@ -31,7 +31,6 @@ export default function FacultyLeavesAndTransfersTab({
   const isDirector = role === "DIRECTOR" || role === "SUPER_ADMIN" || isDeveloper;
   const isAnyAdmin = isHod || isRegistrar || isPrincipal || isDirector;
 
-  // Infer user's branches from their timetable
   const myBranches = Array.from(new Set(userTimetable.map(t => t.branch)));
 
   const tabs = ["My Leaves", "Proxy Market"];
@@ -42,14 +41,12 @@ export default function FacultyLeavesAndTransfersTab({
 
   const [activeTab, setActiveTab] = useState(tabs[0]);
   
-  // Data States
   const [myLeaves, setMyLeaves] = useState<FacultyLeaveApplication[]>([]);
   const [pendingLeaves, setPendingLeaves] = useState<FacultyLeaveApplication[]>([]);
   const [openProxies, setOpenProxies] = useState<ProxyRequest[]>([]);
   const [auditLogs, setAuditLogs] = useState<FacultyLeaveApplication[]>([]);
   const [dismissedProxies, setDismissedProxies] = useState<Set<string>>(new Set());
 
-  // Apply Leave Dialog State
   const [showApplyDialog, setShowApplyDialog] = useState(false);
   const [leaveType, setLeaveType] = useState(LEAVE_OPTIONS[0]);
   const [startDate, setStartDate] = useState("");
@@ -59,25 +56,21 @@ export default function FacultyLeavesAndTransfersTab({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
 
-  // Styling
   const textStyle = isDark ? "text-white" : "text-gray-900";
   const cardBg = isDark ? "bg-white/5 border-white/10" : "bg-gray-50 border-gray-200";
   const inputBg = isDark ? "bg-black/50 border-white/10 text-white" : "bg-white border-gray-300 text-gray-900";
 
-  // Realtime Listeners
   useEffect(() => {
     if (!currentUid) return;
 
-    // 1. My Leaves
     const unsubMyLeaves = onSnapshot(query(collection(db, "faculty_leaves"), where("facultyUid", "==", currentUid)), (snap) => {
       setMyLeaves(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as FacultyLeaveApplication)).sort((a, b) => b.appliedAt - a.appliedAt));
     });
 
-    // 2. Admin Views
     let unsubAdmin = () => {};
     if (isAnyAdmin) {
       const hodBranchesList = (isDeveloper || role === "SUPER_ADMIN" || role === "PRINCIPAL" || role === "REGISTRAR" || role === "DIRECTOR") 
-        ? [] // Empty implies all
+        ? [] 
         : role?.replace("HOD|", "").split(",") || [];
 
       unsubAdmin = onSnapshot(collection(db, "faculty_leaves"), (snap) => {
@@ -96,16 +89,14 @@ export default function FacultyLeavesAndTransfersTab({
       });
     }
 
-    // 3. Proxy Market
     const unsubProxies = onSnapshot(collection(db, "proxy_requests"), (snap) => {
       const allReqs = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as ProxyRequest));
       setOpenProxies(allReqs.filter(req => myBranches.includes(req.branch) || myBranches.length === 0).sort((a, b) => b.timestamp - a.timestamp));
     });
 
     return () => { unsubMyLeaves(); unsubAdmin(); unsubProxies(); };
-  }, [currentUid, role, isAnyAdmin]);
+  }, [currentUid, role, isAnyAdmin, isDeveloper, isDirector, isPrincipal, isRegistrar, isHod, myBranches]);
 
-  // Helper: Trigger Targeted Push Notification
   const triggerPush = async (topic: string, title: string, message: string, targetTab: string) => {
     try {
       await fetch('/api/send-fcm', {
@@ -147,7 +138,6 @@ export default function FacultyLeavesAndTransfersTab({
       const docRef = doc(collection(db, "faculty_leaves"));
       await setDoc(docRef, appData);
 
-      // Alert specific HODs for the requested branches
       const branchesToAlert = affectedBranches ? affectedBranches.split(",") : myBranches;
       branchesToAlert.forEach(br => {
         triggerPush(`hod_${br.replace(/[ ()]/g, "_")}`, "New Leave Request 📝", `${currentName} applied for leave.`, "Faculty Leaves");
@@ -178,7 +168,6 @@ export default function FacultyLeavesAndTransfersTab({
       if ((finalHod === "APPROVED" || finalHod === "NA") && finalReg === "APPROVED" && finalPrin === "APPROVED") {
         updates.status = "APPROVED";
 
-        // Generate Proxies Automatically
         const batch = writeBatch(db);
         app.lecturesToTransfer.forEach(lec => {
           const proxyRef = doc(collection(db, "proxy_requests"));
@@ -198,7 +187,6 @@ export default function FacultyLeavesAndTransfersTab({
         });
         await batch.commit();
 
-        // Broadcast directly to the Market for specific teachers
         if (app.lecturesToTransfer.length > 0) {
           const branchesToAlert = Array.from(new Set(app.lecturesToTransfer.map(l => l.branch).filter(Boolean))) as string[];
           branchesToAlert.forEach(br => {
@@ -230,10 +218,7 @@ export default function FacultyLeavesAndTransfersTab({
         const cleanSem = (req.semester || "").replace(/ /g, "_");
         const cleanBranch = (req.branch || "").replace(/[ ()]/g, "_");
 
-        // 1. Notify Students of the Schedule Change
         triggerPush(`topic_${cleanSem}_${cleanBranch}`, "🔄 Timetable Update", `Prof. ${currentName} will be taking the ${req.subject} lecture today.`, "Timetable");
-
-        // 2. Notify HOD of the Claim
         triggerPush(`hod_${cleanBranch}`, "✅ Proxy Claimed", `Prof. ${currentName} has accepted the ${req.subject} proxy for Prof. ${req.requestedByName}.`, "Faculty Leaves");
       }
     } catch (e) { alert("Failed to claim lecture."); }
@@ -243,7 +228,6 @@ export default function FacultyLeavesAndTransfersTab({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Tabs */}
       <div className="flex overflow-x-auto gap-2 pb-4 mb-4 border-b border-white/10 no-scrollbar">
         {tabs.map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)}
@@ -256,10 +240,8 @@ export default function FacultyLeavesAndTransfersTab({
         ))}
       </div>
 
-      {/* Content */}
       <div className="flex-1 overflow-y-auto pb-20">
         
-        {/* --- 1. MY LEAVES --- */}
         {activeTab === "My Leaves" && (
           <div className="space-y-6">
             <div className="flex justify-between items-center">
@@ -303,7 +285,6 @@ export default function FacultyLeavesAndTransfersTab({
           </div>
         )}
 
-        {/* --- 2. PENDING APPROVALS --- */}
         {activeTab === "Pending Approvals" && (
           <div className="space-y-4">
             {pendingLeaves.length === 0 ? (
@@ -339,7 +320,6 @@ export default function FacultyLeavesAndTransfersTab({
           </div>
         )}
 
-        {/* --- 3. PROXY MARKET --- */}
         {activeTab === "Proxy Market" && (
           <div className="space-y-4">
             <div className="mb-6">
@@ -356,7 +336,7 @@ export default function FacultyLeavesAndTransfersTab({
                     <div className="flex justify-between items-start mb-4">
                       <div>
                         <h3 className={`font-bold text-lg ${textStyle}`}>{req.subject}</h3>
-                        <p className="text-sm text-[#D0BCFF]">{req.semester} • {req.branch} ({req.division})</p>
+                        <p className="text-sm text-[#D0BCFF]">{req.semester} • {req.branch} {req.division ? `(${req.division})` : ""}</p>
                       </div>
                       <span className="text-xs font-bold bg-black/30 text-white px-2.5 py-1 rounded-md">{formatDate(req.lectureDate)}</span>
                     </div>
@@ -380,7 +360,6 @@ export default function FacultyLeavesAndTransfersTab({
           </div>
         )}
 
-        {/* --- 4. AUDIT LOGS --- */}
         {activeTab === "Audit Logs" && (
           <div className="space-y-4">
             {auditLogs.length === 0 ? (
@@ -447,7 +426,6 @@ export default function FacultyLeavesAndTransfersTab({
                       daysToProcess.push(d);
                     }
 
-                    // Map days to timetable entries
                     let totalLecturesFound = 0;
                     const renderBlocks = daysToProcess.map((d, i) => {
                       const dayName = d.toLocaleDateString('en-US', { weekday: 'long' });
@@ -496,13 +474,11 @@ export default function FacultyLeavesAndTransfersTab({
   );
 }
 
-// Extracted Sub-Component for Audit Logs to handle its own local state for Proxies
 function AuditLogCard({ app, cardBg, textStyle, formatDate }: { app: FacultyLeaveApplication, cardBg: string, textStyle: string, formatDate: (ms: number) => string }) {
   const [claimedProxies, setClaimedProxies] = useState<ProxyRequest[]>([]);
   const statusColor = app.status === "APPROVED" ? "text-green-500 bg-green-500/20" : "text-red-500 bg-red-500/20";
 
   useEffect(() => {
-    // Fetch proxy requests associated with this specific leave
     const fetchProxies = async () => {
       import('firebase/firestore').then(({ getDocs, query, collection, where }) => {
         const q = query(collection(db, "proxy_requests"), where("requestedByUid", "==", app.facultyUid), where("lectureDate", "==", app.startDate));
@@ -537,7 +513,7 @@ function AuditLogCard({ app, cardBg, textStyle, formatDate }: { app: FacultyLeav
           <div className="space-y-2">
             {claimedProxies.map(proxy => (
               <div key={proxy.id} className="flex justify-between items-center bg-black/20 p-2.5 rounded-lg border border-white/5">
-                <span className={`text-xs ${textStyle}`}>{proxy.subject} ({proxy.division})</span>
+                <span className={`text-xs ${textStyle}`}>{proxy.subject} {proxy.division ? `(${proxy.division})` : ""}</span>
                 {proxy.status === "CLAIMED" ? (
                   <span className="text-[10px] font-bold text-green-500">Taken by: {proxy.claimedByName}</span>
                 ) : (
