@@ -9,7 +9,7 @@ import GlassDropdown from '../GlassDropdown';
 import GlassButton from '../ui/GlassButton';
 import { CollegeStructureConfig, StudentData } from '../../types';
 
-const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8", "Semester 5", "Semester 6", "Semester 7", "Semester 8"];
+const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8"];
 const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
 
 const matchSem = (a: string, b: string) => (a || "").toLowerCase().replace("semester", "sem") === (b || "").toLowerCase().replace("semester", "sem");
@@ -26,7 +26,6 @@ const getDynamicSubjects = (semester: string, branch: string, globalSubjects: an
 function ImportStudentsDialog({ isDynamicHue, onDismiss, globalStructure }: { isDynamicHue: boolean, onDismiss: () => void, globalStructure: CollegeStructureConfig }) {
   const [importMode, setImportMode] = useState<"Single" | "Master">("Single");
   const [selectedSemester, setSelectedSemester] = useState("Semester 3");
-  const [selectedBranch, setSelectedBranch] = useState("CSE");
   const [selectedDivision, setSelectedDivision] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState("");
@@ -35,15 +34,13 @@ function ImportStudentsDialog({ isDynamicHue, onDismiss, globalStructure }: { is
   const textColor = isDynamicHue ? 'text-white' : 'text-neutral-900';
   const modalBg = isDynamicHue ? 'bg-black/90 border-white/20' : 'bg-white border-black/10';
 
-  const classKey1 = `${selectedSemester}|${selectedBranch}`;
-  const classKey2 = `${selectedSemester.replace("Semester ", "Sem ")}|${selectedBranch}`;
-  const availableDivisions = (globalStructure[classKey1] || globalStructure[classKey2] || [])?.map(d => d.divisionName) || [];
+  const availableDivisions = (globalStructure[selectedSemester] || []).map((d: any) => d.divisionName) || [];
 
   useEffect(() => {
     if (!availableDivisions.includes(selectedDivision)) {
       setSelectedDivision(availableDivisions[0] || "");
     }
-  }, [selectedSemester, selectedBranch, globalStructure, selectedDivision, availableDivisions]);
+  }, [selectedSemester, availableDivisions, selectedDivision]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -90,8 +87,8 @@ function ImportStudentsDialog({ isDynamicHue, onDismiss, globalStructure }: { is
         alert("CSV must contain 'Name' and 'Email' columns.");
         setIsUploading(false); return;
       }
-      if (importMode === "Master" && branchIndex === -1) {
-        alert("Master Roster CSV must contain a 'Branch' column.");
+      if (branchIndex === -1) {
+        alert("CSV must contain a 'Branch' column.");
         setIsUploading(false); return;
       }
 
@@ -105,9 +102,9 @@ function ImportStudentsDialog({ isDynamicHue, onDismiss, globalStructure }: { is
         const email = emailIndex !== -1 && parts.length > emailIndex ? parts[emailIndex].toLowerCase() : "";
         const grNumber = grIndex !== -1 && parts.length > grIndex ? parts[grIndex] : "";
 
-        const rowBranchRaw = importMode === "Master" && branchIndex !== -1 && parts.length > branchIndex ? parts[branchIndex] : selectedBranch;
+        const rowBranchRaw = parts[branchIndex] || "Unknown";
         const rowSemRaw = importMode === "Master" && semIndex !== -1 && parts.length > semIndex ? parts[semIndex] : selectedSemester;
-        const rowDivRaw = divIndex !== -1 && parts.length > divIndex ? parts[divIndex] : selectedDivision;
+        const rowDivRaw = importMode === "Master" && divIndex !== -1 && parts.length > divIndex ? parts[divIndex] : selectedDivision;
         const rowBatchRaw = batchIndex !== -1 && parts.length > batchIndex ? parts[batchIndex] : "";
 
         const finalBranch = AVAILABLE_BRANCHES.find(b => b.toLowerCase() === rowBranchRaw.toLowerCase()) || rowBranchRaw;
@@ -163,15 +160,12 @@ function ImportStudentsDialog({ isDynamicHue, onDismiss, globalStructure }: { is
         </div>
         {importMode === "Single" ? (
           <div className="space-y-4 mb-6">
-            <div className="flex space-x-3">
-              <GlassDropdown label="Semester" value={selectedSemester} options={AVAILABLE_SEMESTERS} onChange={setSelectedSemester} isDark={isDynamicHue} zIndex={100} />
-              <GlassDropdown label="Branch" value={selectedBranch} options={AVAILABLE_BRANCHES} onChange={setSelectedBranch} isDark={isDynamicHue} zIndex={90} />
-            </div>
+            <GlassDropdown label="Semester" value={selectedSemester} options={AVAILABLE_SEMESTERS} onChange={setSelectedSemester} isDark={isDynamicHue} zIndex={100} />
             {availableDivisions.length > 0 ? (
-              <GlassDropdown label="Division" value={selectedDivision} options={availableDivisions} onChange={setSelectedDivision} isDark={isDynamicHue} zIndex={80} />
+              <GlassDropdown label="Division" value={selectedDivision} options={availableDivisions} onChange={setSelectedDivision} isDark={isDynamicHue} zIndex={90} />
             ) : <p className="text-red-500 text-sm font-bold">No divisions built for this class.</p>}
           </div>
-        ) : <p className="text-sm opacity-80 text-white mb-6">Uploading the entire college directory.<br/>CSV must contain 'Branch' and 'Semester' columns.</p>}
+        ) : <p className="text-sm opacity-80 text-white mb-6">Uploading the entire college directory.<br/>CSV must contain 'Branch', 'Semester', and 'Division' columns.</p>}
         {isUploading && <div className="flex items-center mb-6"><Loader2 className="w-5 h-5 mr-3 text-[#D0BCFF] animate-spin" /><span className="text-[#D0BCFF] font-bold">{uploadProgress}</span></div>}
         <div className="flex space-x-3 mt-auto">
           <GlassButton onClick={onDismiss} disabled={isUploading} variant="glass" className="flex-1">Cancel</GlassButton>
@@ -200,7 +194,6 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
   const [history, setHistory] = useState<any[]>([]);
 
   const [selectedSemester, setSelectedSemester] = useState("Semester 3");
-  const [selectedBranch, setSelectedBranch] = useState("CSE");
   const [selectedDivision, setSelectedDivision] = useState("");
   const [selectedSubject, setSelectedSubject] = useState("");
   
@@ -217,6 +210,7 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
   const [formRoll, setFormRoll] = useState("");
   const [formGR, setFormGR] = useState("");
   const [formBatch, setFormBatch] = useState("Auto (Dynamic)");
+  const [formBranch, setFormBranch] = useState("CSE");
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -243,39 +237,33 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
     return () => { unsubConfig(); unsubStruct(); unsubSubjects(); unsubRoster(); unsubHistory(); };
   }, [user?.uid, selectedSemester]);
 
-  const classKey1 = `${selectedSemester}|${selectedBranch}`;
-  const classKey2 = `${selectedSemester.replace("Semester ", "Sem ")}|${selectedBranch}`;
-  
+  // Derive Divisions dynamically based purely on Semester
   const availableDivisions = isHod 
-    ? ((globalStructure[classKey1] || globalStructure[classKey2] || [])?.map(d => d.divisionName) || [])
-    : Array.from(new Set(Object.keys(teachingConfig).filter(k => matchSem(k.split("|")[0], selectedSemester) && k.split("|")[1] === selectedBranch).map(k => k.split("|")[2]).filter(Boolean)));
+    ? ((globalStructure[selectedSemester] || [])?.map((d: any) => d.divisionName) || [])
+    : Array.from(new Set(Object.keys(teachingConfig).filter(k => matchSem(k.split("|")[0], selectedSemester)).map(k => k.split("|")[2]).filter(Boolean)));
 
   useEffect(() => {
     if (!availableDivisions.includes(selectedDivision)) setSelectedDivision(availableDivisions[0] || "");
-  }, [selectedSemester, selectedBranch, globalStructure, teachingConfig, isHod, selectedDivision, availableDivisions]);
+  }, [selectedSemester, availableDivisions, selectedDivision]);
 
-  const configKey1 = `${selectedSemester}|${selectedBranch}|${selectedDivision}`;
-  const configKey2 = `${selectedSemester.replace("Semester ", "Sem ")}|${selectedBranch}|${selectedDivision}`;
-  
-// THE FIX: Uses globalSubjects correctly for HODs and teachingConfig for teachers
+  // Extract all subjects belonging to this Semester (ignoring branches since Divisions mix them)
   const availableSubjects = isHod
     ? Array.from(new Set(AVAILABLE_BRANCHES.flatMap(b => getDynamicSubjects(selectedSemester, b, globalSubjects)))).sort()
-    : teachingConfig[configKey1] || teachingConfig[configKey2] || [];
+    : Array.from(new Set(Object.keys(teachingConfig).filter(k => matchSem(k.split("|")[0], selectedSemester) && k.split("|")[2] === selectedDivision).flatMap(k => teachingConfig[k])));
 
   useEffect(() => {
     if (!availableSubjects.includes(selectedSubject)) setSelectedSubject(availableSubjects[0] || "");
-  }, [configKey1, configKey2, teachingConfig, isHod, selectedSubject, availableSubjects]);
+  }, [selectedSemester, selectedDivision, teachingConfig, isHod, selectedSubject, availableSubjects]);
 
-  let branchRoster = roster.filter(s => 
-    (s as any).branch === selectedBranch && 
+  let divisionRoster = roster.filter(s => 
     matchSem((s as any).semester, selectedSemester) && 
     matchDiv((s as any).division, selectedDivision)
   );
   
   if (sortMode === "az") {
-    branchRoster = branchRoster.sort((a, b) => ((a as any).fullName || "").localeCompare((b as any).fullName || ""));
+    divisionRoster = divisionRoster.sort((a, b) => ((a as any).fullName || "").localeCompare((b as any).fullName || ""));
   } else {
-    branchRoster = branchRoster.sort((a, b) => {
+    divisionRoster = divisionRoster.sort((a, b) => {
       const timeA = (a as any).admissionTimestamp?.seconds ? (a as any).admissionTimestamp.seconds * 1000 : ((a as any).admissionTimestamp || 0);
       const timeB = (b as any).admissionTimestamp?.seconds ? (b as any).admissionTimestamp.seconds * 1000 : ((b as any).admissionTimestamp || 0);
       if (timeA === timeB) return ((a as any).rollNo || 0) - ((b as any).rollNo || 0);
@@ -283,15 +271,15 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
     });
   }
 
-  const matchingLectures = history.filter(h => matchSem(h.semester, selectedSemester) && (h.branchName === selectedBranch || h.branch === selectedBranch) && matchDiv(h.divisionName || h.division, selectedDivision) && (isHod ? true : (h.subjectName === selectedSubject || h.subject === selectedSubject)));
+  const matchingLectures = history.filter(h => matchSem(h.semester, selectedSemester) && matchDiv(h.divisionName || h.division, selectedDivision) && (isHod ? true : (h.subjectName === selectedSubject || h.subject === selectedSubject)));
   const totalConducted = matchingLectures.length;
 
-  const studentStats = branchRoster.map((student) => {
+  const studentStats = divisionRoster.map((student) => {
     let studentBatch = (student as any).batch;
-    if (!studentBatch && (globalStructure[classKey1] || globalStructure[classKey2])) {
-      const divs = globalStructure[classKey1] || globalStructure[classKey2];
-      const divDef = divs.find(d => matchDiv(d.divisionName, selectedDivision));
-      const matched = divDef?.batches.find(b => (student as any).rollNo >= b.startRoll && (student as any).rollNo <= b.endRoll);
+    if (!studentBatch && globalStructure[selectedSemester]) {
+      const divs = globalStructure[selectedSemester];
+      const divDef = divs.find((d: any) => matchDiv(d.divisionName, selectedDivision));
+      const matched = divDef?.batches.find((b: any) => (student as any).rollNo >= b.startRoll && (student as any).rollNo <= b.endRoll);
       studentBatch = matched?.name || "Unknown";
     }
     const validLectures = matchingLectures.filter(l => {
@@ -323,8 +311,7 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
     if (!formName || !formEmail) return alert("Name and Email required.");
     const payload = {
       fullName: formName, email: formEmail, rollNo: parseInt(formRoll) || 0,
-      grNumber: formGR, semester: selectedSemester, branch: selectedBranch,
-      division: selectedDivision, batch: formBatch === "Auto (Dynamic)" ? "" : formBatch
+      grNumber: formGR, semester: selectedSemester, division: selectedDivision, branch: formBranch, batch: formBatch === "Auto (Dynamic)" ? "" : formBatch
     };
     if (editingStudent) {
       await updateDoc(doc(db, "students_directory", (editingStudent as any).id), payload);
@@ -339,13 +326,14 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
     setFormEmail((s as any).email || ""); 
     setFormRoll((s as any).rollNo?.toString() || "");
     setFormGR((s as any).grNumber || ""); 
+    setFormBranch((s as any).branch || "CSE");
     setFormBatch((s as any).batch || "Auto (Dynamic)");
     setEditingStudent(s); setShowAddModal(true);
   };
 
   const openAdd = () => {
-    setFormName(""); setFormEmail(""); setFormGR(""); setFormBatch("Auto (Dynamic)");
-    const maxRoll = branchRoster.reduce((max, s) => Math.max(max, (s as any).rollNo || 0), 0);
+    setFormName(""); setFormEmail(""); setFormGR(""); setFormBatch("Auto (Dynamic)"); setFormBranch("CSE");
+    const maxRoll = divisionRoster.reduce((max, s) => Math.max(max, (s as any).rollNo || 0), 0);
     setFormRoll((maxRoll + 1).toString());
     setEditingStudent(null); setShowAddModal(true);
   };
@@ -372,14 +360,15 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
       )}
 
       <div className="flex space-x-3 mb-4 z-50 relative">
-        <GlassDropdown label="Sem" value={selectedSemester} options={isHod ? AVAILABLE_SEMESTERS : Array.from(new Set(Object.keys(teachingConfig).map(k => k.split("|")[0])))} onChange={setSelectedSemester} isDark={isDark} zIndex={60} />
-        <GlassDropdown label="Branch" value={selectedBranch} options={isHod ? AVAILABLE_BRANCHES : Array.from(new Set(Object.keys(teachingConfig).filter(k => matchSem(k.split("|")[0], selectedSemester)).map(k => k.split("|")[1])))} onChange={setSelectedBranch} isDark={isDark} zIndex={50} />
-        {availableDivisions.length > 0 && <GlassDropdown label="Div" value={selectedDivision} options={availableDivisions} onChange={setSelectedDivision} isDark={isDark} zIndex={45} />}
+        <GlassDropdown label="SEM" value={selectedSemester} options={isHod ? AVAILABLE_SEMESTERS : Array.from(new Set(Object.keys(teachingConfig).map(k => k.split("|")[0])))} onChange={setSelectedSemester} isDark={isDark} zIndex={60} />
+        {availableDivisions.length > 0 ? (
+          <GlassDropdown label="DIVISION" value={selectedDivision} options={availableDivisions} onChange={setSelectedDivision} isDark={isDark} zIndex={45} />
+        ) : <p className="text-red-500 font-bold text-sm flex items-end pb-2">No Divisions Built</p>}
       </div>
       
       {!isHod && (
         <div className="mb-6 z-40 relative">
-            <GlassDropdown label="Subject" value={selectedSubject} options={availableSubjects} onChange={setSelectedSubject} isDark={isDark} zIndex={40} />
+            <GlassDropdown label="SUBJECT" value={selectedSubject} options={availableSubjects} onChange={setSelectedSubject} isDark={isDark} zIndex={40} />
         </div>
       )}
 
@@ -416,7 +405,7 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
         )}
       </div>
 
-      {branchRoster.length === 0 ? (
+      {divisionRoster.length === 0 ? (
         <p className="text-center py-10 text-white/40">No students found for this class division.</p>
       ) : (
         <div className="space-y-3">
@@ -426,7 +415,7 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
               <div key={student.id} className={`flex items-center justify-between p-4 rounded-2xl border transition-all ${isDefaulter ? 'bg-[#FF453A]/10 border-[#FF453A]/30' : cardBg} group`}>
                 <div className="flex flex-col flex-1 pr-4">
                   <span className={`font-bold text-[15px] leading-tight ${textColor}`}>{(student as any).fullName}</span>
-                  {(student as any).rollNo > 0 && <span className="text-xs mt-1 text-white/50">Roll {(student as any).rollNo}</span>}
+                  <span className="text-xs mt-1 text-[#D0BCFF] font-medium">Roll {(student as any).rollNo} • {(student as any).branch}</span>
                 </div>
                 <div className="flex items-center space-x-3">
                   <span className="text-sm font-medium text-white/50">{student.attended}/{student.studentTotalConducted}</span>
@@ -453,7 +442,9 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
               <input type="text" placeholder="Full Name" value={formName} onChange={e => setFormName(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white outline-none" />
               <div className="flex space-x-3">
                 <input type="number" placeholder="Roll No" value={formRoll} onChange={e => setFormRoll(e.target.value)} className="w-1/3 bg-white/5 border border-white/10 rounded-xl p-3 text-white outline-none" />
-                <input type="text" placeholder="GR Number" value={formGR} onChange={e => setFormGR(e.target.value)} className="w-2/3 bg-white/5 border border-white/10 rounded-xl p-3 text-white outline-none" />
+                <select value={formBranch} onChange={e => setFormBranch(e.target.value)} className="w-2/3 bg-black/50 border border-white/10 rounded-xl p-3 text-white outline-none">
+                   {AVAILABLE_BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
+                </select>
               </div>
               <input type="email" placeholder="Registered Email" value={formEmail} onChange={e => setFormEmail(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white outline-none" />
             </div>
@@ -469,9 +460,8 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
           <div className={`border p-8 rounded-[2rem] w-full max-w-md flex flex-col ${isDark ? 'bg-[#111] border-white/20' : 'bg-white border-gray-200'}`}>
             <h2 className={`text-xl font-bold mb-2 ${textColor}`}>Promote Class Batch</h2>
-            <p className="text-xs text-white/50 mb-6">Mass-promote all students from a specific semester to the next. Please delete year-drops beforehand.</p>
+            <p className="text-xs text-white/50 mb-6">Mass-promote all students from a specific semester to the next.</p>
             <div className="space-y-4 mb-6">
-              <GlassDropdown label="Branch" value={selectedBranch} options={AVAILABLE_BRANCHES} onChange={setSelectedBranch} isDark={isDark} zIndex={100} />
               <div className="flex items-center space-x-3">
                 <GlassDropdown label="From" value={selectedSemester} options={AVAILABLE_SEMESTERS} onChange={setSelectedSemester} isDark={isDark} zIndex={90} />
                 <TrendingUp className="w-6 h-6 text-white/30 mt-6" />

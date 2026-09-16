@@ -19,17 +19,18 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
   const isHod = role?.startsWith("HOD|") || role === "SUPER_ADMIN" || role === "DIRECTOR" || role === "PRINCIPAL" || role === "REGISTRAR" || isDeveloper;
 
   const [notices, setNotices] = useState<any[]>([]);
+  const [globalStructure, setGlobalStructure] = useState<any>({});
   const [showNewNoticeDialog, setShowNewNoticeDialog] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
 
-  // Form State matching Android Logic
+  // Advanced Filtering States
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
   const [targetRole, setTargetRole] = useState("All");
   const [targetSem, setTargetSem] = useState("All");
   const [targetBranch, setTargetBranch] = useState("All");
+  const [targetDivision, setTargetDivision] = useState("All");
   
-  // Attachments State
   const [files, setFiles] = useState<File[]>([]);
   const [links, setLinks] = useState<string[]>([]);
   const [linkInput, setLinkInput] = useState("");
@@ -40,6 +41,9 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
   const modalBg = isDark ? 'bg-[#111] border-white/10' : 'bg-white border-gray-200';
 
   useEffect(() => {
+    const unsubStruct = onSnapshot(doc(db, "app_config", "college_structure"), (snap) => {
+      if (snap.exists()) setGlobalStructure(snap.data());
+    });
     const unsub = onSnapshot(collection(db, "announcements"), (snap) => {
       const records = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).sort((a: any, b: any) => {
         const timeA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp || 0);
@@ -48,8 +52,20 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
       });
       setNotices(records);
     });
-    return () => unsub();
+    return () => { unsubStruct(); unsub(); };
   }, []);
+
+  // Dynamically load divisions if a specific semester is picked
+  const availableDivisions = targetSem !== "All" 
+    ? (globalStructure[targetSem] || []).map((d: any) => d.divisionName) 
+    : [];
+
+  useEffect(() => {
+    if (targetSem === "All") {
+      setTargetDivision("All");
+      setTargetBranch("All");
+    }
+  }, [targetSem]);
 
   const handlePublish = async () => {
     if (!title.trim() || !message.trim()) return alert("Title and message required.");
@@ -76,6 +92,7 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
         targetRole,
         targetSemester: targetSem,
         targetBranch,
+        targetDivision,
         links,
         attachments: uploadedAttachments,
         authorName: user?.displayName || "Admin",
@@ -83,10 +100,21 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
         timestamp: Date.now()
       });
 
-      let pushTopic = "all_students";
-      if (targetRole === "All" || targetRole === "Teachers") pushTopic = "all_teachers";
-      else if (targetRole === "Students" && targetSem !== "All" && targetBranch !== "All") pushTopic = `topic_${targetSem.replace(/ /g, "_")}_${targetBranch.replace(/[ ()]/g, "_")}`;
-      else if (targetRole === "Students" && targetSem !== "All") pushTopic = `topic_${targetSem.replace(/ /g, "_")}`;
+      // Execute targeted FCM Logic
+      let pushTopic = "all_users";
+      if (targetRole === "Teachers") {
+        pushTopic = "all_teachers";
+      } else if (targetRole === "Students" || targetRole === "All") {
+        if (targetDivision !== "All" && targetSem !== "All") {
+          pushTopic = `topic_${targetSem.replace(/\s+/g, "_")}_${targetDivision.replace(/\s+/g, "_")}`;
+        } else if (targetBranch !== "All" && targetSem !== "All") {
+          pushTopic = `topic_${targetSem.replace(/\s+/g, "_")}_${targetBranch.replace(/[ ()]/g, "_")}`;
+        } else if (targetSem !== "All") {
+          pushTopic = `topic_${targetSem.replace(/\s+/g, "_")}`;
+        } else {
+          pushTopic = "all_students";
+        }
+      }
 
       await fetch('/api/send-fcm', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -95,7 +123,7 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
 
       setShowNewNoticeDialog(false);
       setTitle(""); setMessage(""); setFiles([]); setLinks([]); 
-      setTargetRole("All"); setTargetSem("All"); setTargetBranch("All");
+      setTargetRole("All"); setTargetSem("All"); setTargetBranch("All"); setTargetDivision("All");
     } catch (e) { alert("Failed to publish notice."); } finally { setIsPublishing(false); }
   };
 
@@ -126,6 +154,17 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
           notices.map(notice => {
             const timestampMs = notice.timestamp?.seconds ? notice.timestamp.seconds * 1000 : (notice.timestamp || Date.now());
             const dateStr = new Date(timestampMs).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+            
+            // Generate clean target badge
+            let targetBadge = notice.targetRole === "Teachers" ? "Teachers Only" : notice.targetAudience;
+            if (!targetBadge && notice.targetRole) {
+              const parts = [];
+              if (notice.targetSemester !== "All") parts.push(notice.targetSemester.replace("Semester ","Sem "));
+              if (notice.targetBranch !== "All") parts.push(notice.targetBranch);
+              if (notice.targetDivision !== "All" && notice.targetDivision) parts.push(notice.targetDivision);
+              targetBadge = parts.length > 0 ? parts.join(" • ") : "All Students";
+            }
+
             return (
               <div key={notice.id} className={`p-6 rounded-[2rem] border ${cardBg} flex flex-col transition-all hover:bg-white/[0.08]`}>
                 <div className="flex justify-between items-start mb-3">
@@ -134,9 +173,7 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
                     <div className="flex items-center text-xs text-white/50 space-x-3 mb-4">
                       <span className="flex items-center"><Calendar className="w-3 h-3 mr-1"/> {dateStr}</span>
                       <span className="bg-[#D0BCFF]/20 text-[#D0BCFF] px-2 py-0.5 rounded font-bold">
-                        {notice.targetRole === "Teachers" ? "Teachers" : 
-                         notice.targetAudience ? notice.targetAudience : 
-                         `${notice.targetRole} • ${notice.targetSemester} • ${notice.targetBranch}`}
+                        {targetBadge}
                       </span>
                     </div>
                   </div>
@@ -198,12 +235,15 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
             <div className="space-y-5 mb-6">
               <input type="text" placeholder="Notice Title" value={title} onChange={e => setTitle(e.target.value)} className="w-full bg-white/[0.05] border border-white/20 rounded-xl p-4 text-white font-bold outline-none focus:ring-2 focus:ring-[#D0BCFF]" />
               
-              <div className="flex gap-3">
-                <GlassDropdown label="Target Role" value={targetRole} options={["All", "Students", "Teachers"]} onChange={setTargetRole} isDark={true} zIndex={90} />
+              <div className="grid grid-cols-2 gap-3">
+                <GlassDropdown label="TARGET ROLE" value={targetRole} options={["All", "Students", "Teachers"]} onChange={setTargetRole} isDark={true} zIndex={100} />
                 {targetRole !== "Teachers" && (
+                  <GlassDropdown label="SEMESTER" value={targetSem} options={["All", ...AVAILABLE_SEMESTERS]} onChange={setTargetSem} isDark={true} zIndex={90} />
+                )}
+                {targetRole !== "Teachers" && targetSem !== "All" && (
                   <>
-                    <GlassDropdown label="Semester" value={targetSem} options={["All", ...AVAILABLE_SEMESTERS]} onChange={setTargetSem} isDark={true} zIndex={80} />
-                    <GlassDropdown label="Branch" value={targetBranch} options={["All", ...AVAILABLE_BRANCHES]} onChange={setTargetBranch} isDark={true} zIndex={70} />
+                    <GlassDropdown label="BRANCH" value={targetBranch} options={["All", ...AVAILABLE_BRANCHES]} onChange={setTargetBranch} isDark={true} zIndex={80} />
+                    <GlassDropdown label="DIVISION" value={targetDivision} options={["All", ...availableDivisions]} onChange={setTargetDivision} isDark={true} zIndex={70} />
                   </>
                 )}
               </div>

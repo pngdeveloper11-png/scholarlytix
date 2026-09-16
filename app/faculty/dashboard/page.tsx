@@ -6,6 +6,7 @@ import { doc, setDoc, getDocs, getDoc, collection, query, where, deleteDoc, onSn
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { db, auth } from '@/lib/firebase';
 import GlassDropdown from '@/components/GlassDropdown';
+import GlassButton from '@/components/ui/GlassButton'; // <-- ADDED THIS IMPORT
 import { 
   Settings, Lock, Edit, Download, 
   Smartphone, Fingerprint, CloudUpload, LogOut, 
@@ -510,12 +511,13 @@ export default function FacultyDashboard() {
         {showGuardPinModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
             <div className={`border p-8 rounded-[2rem] w-full max-w-sm ${modalBg}`}>
-              <h2 className="text-xl font-bold mb-2 text-orange-400">Set Gate PIN</h2>
+              <h2 className="text-xl font-bold mb-2">Set Gate PIN</h2>
               <p className="text-sm opacity-70 mb-6">Create the 6-digit access code guards use to log in to the Security Portal.</p>
-              <input type="text" maxLength={6} value={guardPin} onChange={(e) => setGuardPin(e.target.value.replace(/\D/g, ''))} className={`w-full text-center text-3xl tracking-[0.5em] border rounded-2xl p-4 outline-none mb-6 ${isDark ? 'bg-white/[0.08] border-white/20 text-white focus:border-orange-400' : 'bg-black/5 border-black/10 text-neutral-900 focus:border-orange-400'}`} placeholder="••••••" />
+              <input type="text" maxLength={6} value={guardPin} onChange={(e) => setGuardPin(e.target.value.replace(/\D/g, ''))} className={`w-full text-center text-3xl tracking-[0.5em] border rounded-2xl p-4 outline-none mb-6 ${isDark ? 'bg-white/[0.08] border-white/20 text-white focus:border-[#D0BCFF]' : 'bg-black/5 border-black/10 text-neutral-900 focus:border-[#D0BCFF]'}`} placeholder="••••••" />
               <div className="flex space-x-3">
                 <button onClick={() => setShowGuardPinModal(false)} className={`flex-1 py-3.5 rounded-xl font-bold ${isDark ? 'bg-white/[0.05] border border-white/20' : 'bg-black/5 border border-black/10'}`}>Cancel</button>
-                <button onClick={handleSaveGuardPin} className="flex-1 py-3.5 bg-orange-500 text-white rounded-xl font-bold hover:scale-[1.02]">Update PIN</button>
+                {/* THE FIX: Replaced the hardcoded orange button with dynamic GlassButton */}
+                <GlassButton onClick={handleSaveGuardPin} variant="primary" className="flex-1">Update PIN</GlassButton>
               </div>
             </div>
           </div>

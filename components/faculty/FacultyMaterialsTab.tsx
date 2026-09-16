@@ -25,10 +25,11 @@ export default function FacultyMaterialsTab() {
   const [materials, setMaterials] = useState<any[]>([]);
   const [teachingConfig, setTeachingConfig] = useState<Record<string, string[]>>({});
   const [globalSubjects, setGlobalSubjects] = useState<any>({});
+  const [globalStructure, setGlobalStructure] = useState<any>({});
   const [isLoading, setIsLoading] = useState(true);
 
-  const [viewSem, setViewSem] = useState("");
-  const [viewBranch, setViewBranch] = useState("");
+  const [viewSem, setViewSem] = useState("Semester 3");
+  const [viewDivision, setViewDivision] = useState("");
   const [viewSubject, setViewSubject] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
 
@@ -48,22 +49,23 @@ export default function FacultyMaterialsTab() {
       if (snap.exists()) setGlobalSubjects(snap.data());
     });
 
+    const unsubStructure = onSnapshot(doc(db, "app_config", "college_structure"), (snap) => {
+      if (snap.exists()) setGlobalStructure(snap.data());
+    });
+
     if (!user?.uid) return;
     const unsubConfig = onSnapshot(doc(db, "teacher_configs", user.uid), (docSnap) => {
       if (docSnap.exists() && docSnap.get("config")) {
         const config = docSnap.get("config");
         setTeachingConfig(config);
-        const classes = Object.keys(config);
-        if (classes.length > 0 && !viewSem) {
-          const [s, b] = classes[0].split("|");
-          setViewSem(s); setViewBranch(b); setViewSubject(config[classes[0]][0]);
-        }
+        const validSems = Array.from(new Set(Object.keys(config).map(k => k.split("|")[0])));
+        if(!viewSem && validSems.length > 0) setViewSem(validSems[0]);
       }
       setIsLoading(false);
     });
 
-    return () => { unsubMaterials(); unsubSubjects(); unsubConfig(); };
-  }, [user?.uid, viewSem]);
+    return () => { unsubMaterials(); unsubSubjects(); unsubStructure(); unsubConfig(); };
+  }, [user?.uid]);
 
   const handleDelete = async (mat: any) => {
     if (confirm("Delete this material permanently from all student devices and Google Drive?")) {
@@ -79,16 +81,28 @@ export default function FacultyMaterialsTab() {
   };
 
   const availableClasses = Object.keys(teachingConfig);
-  const validSems = Array.from(new Set(availableClasses.map(c => c.split("|")[0])));
-  const validBranches = Array.from(new Set(availableClasses.filter(c => c.startsWith(viewSem)).map(c => c.split("|")[1])));
+  const validSems = isHod ? AVAILABLE_SEMESTERS : Array.from(new Set(availableClasses.map(c => c.split("|")[0])));
   
+  const validDivisions = isHod
+    ? (globalStructure[viewSem] || []).map((d: any) => d.divisionName)
+    : Array.from(new Set(availableClasses.filter(c => c.startsWith(viewSem)).map(c => c.split("|")[2]).filter(Boolean)));
+
+  useEffect(() => {
+    if (!validDivisions.includes(viewDivision)) setViewDivision(validDivisions[0] || "");
+  }, [viewSem, validDivisions, viewDivision]);
+
   const validSubjects = isHod
-    ? Array.from(new Set(AVAILABLE_BRANCHES.flatMap(b => getDynamicSubjects(viewSem, b, globalSubjects))))
-    : Array.from(new Set(Object.keys(teachingConfig).filter(k => k.startsWith(`${viewSem}|${viewBranch}`)).flatMap(k => teachingConfig[k])));
+    ? Array.from(new Set(AVAILABLE_BRANCHES.flatMap(b => getDynamicSubjects(viewSem, b, globalSubjects)))).sort()
+    : Array.from(new Set(Object.keys(teachingConfig).filter(k => k.startsWith(viewSem) && k.split("|")[2] === viewDivision).flatMap(k => teachingConfig[k])));
+
+  useEffect(() => {
+    if (!validSubjects.includes(viewSubject)) setViewSubject(validSubjects[0] || "");
+  }, [viewSem, viewDivision, validSubjects, viewSubject]);
+
 
   const myUploads = materials.filter(m => isHod || m.facultyName === user?.displayName);
   const displayedMaterials = myUploads.filter(m => {
-    const classMatch = m.semester === viewSem && m.branch === viewBranch && m.subject === viewSubject;
+    const classMatch = m.semester === viewSem && m.division === viewDivision && m.subject === viewSubject;
     const categoryMatch = categoryFilter === "All" || m.category === categoryFilter;
     return classMatch && categoryMatch;
   });
@@ -99,10 +113,12 @@ export default function FacultyMaterialsTab() {
         <h2 className="text-2xl font-bold text-white mb-6">Study Materials</h2>
 
         <div className="flex space-x-3 mb-6">
-          <GlassDropdown label="Sem" value={viewSem} options={isHod ? AVAILABLE_SEMESTERS : validSems} onChange={setViewSem} isDark={true} zIndex={70} />
-          <GlassDropdown label="Branch" value={viewBranch} options={isHod ? AVAILABLE_BRANCHES : validBranches} onChange={setViewBranch} isDark={true} zIndex={60} />
+          <GlassDropdown label="SEM" value={viewSem} options={validSems} onChange={setViewSem} isDark={true} zIndex={70} />
+          {validDivisions.length > 0 ? (
+            <GlassDropdown label="DIVISION" value={viewDivision} options={validDivisions} onChange={setViewDivision} isDark={true} zIndex={60} />
+          ) : <p className="text-red-500 font-bold text-sm flex items-end pb-2">No Divisions</p>}
           <div className="flex-[1.5]">
-            <GlassDropdown label="Subject" value={viewSubject} options={validSubjects} onChange={setViewSubject} isDark={true} zIndex={50} />
+            <GlassDropdown label="SUBJECT" value={viewSubject} options={validSubjects} onChange={setViewSubject} isDark={true} zIndex={50} />
           </div>
         </div>
 
@@ -132,7 +148,7 @@ export default function FacultyMaterialsTab() {
                       </div>
                       <div>
                         <h4 className="font-bold text-lg text-white">{mat.fileName}</h4>
-                        <p className="text-xs text-[#D0BCFF] mt-0.5">{mat.semester} • {mat.branch} • {mat.category || "Notes"} • {dateStr}</p>
+                        <p className="text-xs text-[#D0BCFF] mt-0.5">{mat.semester} • {mat.division} • {mat.category || "Notes"} • {dateStr}</p>
                       </div>
                     </div>
                     <button onClick={() => handleDelete(mat)} className="p-2.5 text-[#FF453A] bg-[#FF453A]/10 hover:bg-[#FF453A]/20 rounded-xl transition-all">
@@ -179,18 +195,18 @@ export default function FacultyMaterialsTab() {
       </div>
 
       {showUploadDialog && (
-        <UploadMaterialDialog user={user} isHod={isHod} teachingConfig={teachingConfig} initialSem={viewSem} initialBranch={viewBranch} initialSubject={viewSubject} initialCategory={categoryFilter === "All" ? "Notes" : categoryFilter} onDismiss={() => setShowUploadDialog(false)} />
+        <UploadMaterialDialog user={user} isHod={isHod} teachingConfig={teachingConfig} initialSem={viewSem} initialDivision={viewDivision} initialSubject={viewSubject} initialCategory={categoryFilter === "All" ? "Notes" : categoryFilter} globalStructure={globalStructure} onDismiss={() => setShowUploadDialog(false)} />
       )}
     </div>
   );
 }
 
-function UploadMaterialDialog({ user, isHod, teachingConfig, initialSem, initialBranch, initialSubject, initialCategory, onDismiss }: any) {
+function UploadMaterialDialog({ user, isHod, teachingConfig, initialSem, initialDivision, initialSubject, initialCategory, globalStructure, onDismiss }: any) {
   const [isUploading, setIsUploading] = useState(false);
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
   const [upSem, setUpSem] = useState(initialSem || "Semester 3");
-  const [upBranch, setUpBranch] = useState(initialBranch);
+  const [upDivision, setUpDivision] = useState(initialDivision);
   const [upSubject, setUpSubject] = useState(initialSubject);
   const [upCategory, setUpCategory] = useState(initialCategory);
   
@@ -209,11 +225,14 @@ function UploadMaterialDialog({ user, isHod, teachingConfig, initialSem, initial
   }, []);
 
   const validSems = isHod ? AVAILABLE_SEMESTERS : Array.from(new Set(Object.keys(teachingConfig).map(k => k.split("|")[0])));
-  const validBranches = isHod ? AVAILABLE_BRANCHES : Array.from(new Set(Object.keys(teachingConfig).filter(k => k.startsWith(upSem)).map(k => k.split("|")[1])));
   
+  const validDivisions = isHod
+    ? (globalStructure[upSem] || []).map((d: any) => d.divisionName)
+    : Array.from(new Set(Object.keys(teachingConfig).filter(k => k.startsWith(upSem)).map(k => k.split("|")[2]).filter(Boolean)));
+
   const availableSubjects = isHod
-    ? getDynamicSubjects(upSem, upBranch, globalSubjects)
-    : Array.from(new Set(Object.keys(teachingConfig).filter(k => k.startsWith(`${upSem}|${upBranch}`)).flatMap(k => teachingConfig[k])));
+    ? Array.from(new Set(AVAILABLE_BRANCHES.flatMap(b => getDynamicSubjects(upSem, b, globalSubjects)))).sort()
+    : Array.from(new Set(Object.keys(teachingConfig).filter(k => k.startsWith(upSem) && k.split("|")[2] === upDivision).flatMap(k => teachingConfig[k])));
 
   const handleUpload = async () => {
     if (!title || !upSubject || (files.length === 0 && links.length === 0)) return alert("Please provide a title and at least one file or link.");
@@ -224,7 +243,7 @@ function UploadMaterialDialog({ user, isHod, teachingConfig, initialSem, initial
         const formData = new FormData();
         formData.append('file', file);
         formData.append('fileName', file.name);
-        formData.append('path', `materials/${upSem}/${upBranch}`);
+        formData.append('path', `materials/${upSem}/${upDivision}`);
         const res = await fetch('/api/upload-drive', { method: 'POST', body: formData });
         if (res.ok) {
           const { downloadUrl } = await res.json();
@@ -238,7 +257,7 @@ function UploadMaterialDialog({ user, isHod, teachingConfig, initialSem, initial
         attachments: uploadedAttachments,
         links,
         semester: upSem, 
-        branch: upBranch, 
+        division: upDivision, 
         subject: upSubject, 
         category: upCategory, 
         timestamp: Date.now(),
@@ -247,7 +266,7 @@ function UploadMaterialDialog({ user, isHod, teachingConfig, initialSem, initial
 
       await fetch('/api/send-fcm', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetTopic: `topic_${upSem.replace(/ /g, "_")}_${upBranch.replace(/[ ()]/g, "_")}`, title: "📚 New Study Material", message: `${upCategory} for ${upSubject} uploaded.`, targetTab: "Materials" })
+        body: JSON.stringify({ targetTopic: `topic_${upSem.replace(/ /g, "_")}_${upDivision.replace(/[ ()]/g, "_")}`, title: "📚 New Study Material", message: `${upCategory} for ${upSubject} uploaded.`, targetTab: "Materials" })
       });
 
       alert("Material published successfully!"); onDismiss();
@@ -263,7 +282,7 @@ function UploadMaterialDialog({ user, isHod, teachingConfig, initialSem, initial
           
           <div className="flex gap-2">
             <GlassDropdown label="Sem" value={upSem} options={validSems} onChange={setUpSem} isDark={true} zIndex={130} />
-            <GlassDropdown label="Branch" value={upBranch} options={validBranches} onChange={setUpBranch} isDark={true} zIndex={120} />
+            <GlassDropdown label="Division" value={upDivision} options={validDivisions} onChange={setUpDivision} isDark={true} zIndex={120} />
           </div>
           
           <GlassDropdown label="Subject" value={upSubject} options={availableSubjects} onChange={setUpSubject} isDark={true} zIndex={115} />
