@@ -143,7 +143,7 @@ export default function ParentLinking() {
                 <div className="p-6 bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-[2rem] space-y-4">
                   <input type="number" placeholder="Enter Roll Number" value={rollNo} onChange={e => setRollNo(e.target.value)} className="w-full bg-black/20 border border-white/10 rounded-xl p-4 outline-none" />
                   <select value={semester} onChange={e => setSemester(e.target.value)} className="w-full bg-black/20 border border-white/10 rounded-xl p-4 outline-none">
-                    {["Semester 1", "Semester 2", "Semester 3", "Semester 4"].map(s => <option key={s} value={s}>{s}</option>)}
+                    {["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8"].map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                   <div className="flex gap-3 pt-2">
                     <button onClick={() => setShowLinkForm(false)} className="flex-1 py-3 bg-white/5 rounded-xl font-bold">Cancel</button>

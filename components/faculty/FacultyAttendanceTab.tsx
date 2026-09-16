@@ -1,13 +1,13 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { collection, doc, getDoc, onSnapshot, addDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, onSnapshot, addDoc, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { CheckCircle, XCircle, Search, Loader2 } from 'lucide-react';
 import GlassDropdown from '../GlassDropdown';
 import GlassButton from '../ui/GlassButton';
 
-const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4"];
+const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8"];
 const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
 const matchSem = (a: string, b: string) => (a || "").toLowerCase().replace("semester", "sem") === (b || "").toLowerCase().replace("semester", "sem");
 const matchDiv = (a: string, b: string) => (a || "").toLowerCase().replace("div ", "") === (b || "").toLowerCase().replace("div ", "");
@@ -52,26 +52,24 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
     
     setIsLoadingStudents(true);
     try {
-      // Manual filter to avoid composite index requirements
-      import('firebase/firestore').then(async ({ getDocs, query, where, collection }) => {
-        const q = query(collection(db, "students_directory"), where("semester", "==", selectedSem));
-        const snap = await getDocs(q);
-        
-        let fetchedStudents = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }))
-          .filter(s => matchDiv(s.division, selectedDivision));
-        
-        if (selectedBatch !== "All") {
-          fetchedStudents = fetchedStudents.filter(s => s.batch === selectedBatch);
-        }
-        
-        fetchedStudents.sort((a, b) => a.rollNo - b.rollNo);
-        setStudents(fetchedStudents);
+      // THE FIX: Cleaned up dynamic imports so errors are caught properly
+      const q = query(collection(db, "students_directory"), where("semester", "==", selectedSem));
+      const snap = await getDocs(q);
+      
+      let fetchedStudents = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }))
+        .filter(s => matchDiv(s.division, selectedDivision));
+      
+      if (selectedBatch !== "All") {
+        fetchedStudents = fetchedStudents.filter(s => s.batch === selectedBatch);
+      }
+      
+      fetchedStudents.sort((a, b) => a.rollNo - b.rollNo);
+      setStudents(fetchedStudents);
 
-        const initialAttendance: Record<string, boolean> = {};
-        fetchedStudents.forEach(s => initialAttendance[s.id] = true);
-        setAttendance(initialAttendance);
-        setIsLoadingStudents(false);
-      });
+      const initialAttendance: Record<string, boolean> = {};
+      fetchedStudents.forEach(s => initialAttendance[s.id] = true);
+      setAttendance(initialAttendance);
+      setIsLoadingStudents(false);
     } catch (e) {
       alert("Failed to fetch student roster.");
       setIsLoadingStudents(false);
@@ -148,11 +146,14 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
       <div className={`p-6 rounded-[2rem] border ${cardBg}`}>
         <h3 className="font-bold text-lg mb-4">Class Configuration</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+          {/* THE FIX: Bound the dropdowns to the global constant variables */}
           <GlassDropdown label="Semester" value={selectedSem} options={AVAILABLE_SEMESTERS} onChange={setSelectedSem} isDark={isDark} zIndex={100} />
           <GlassDropdown label="Branch Tag" value={selectedBranch} options={AVAILABLE_BRANCHES} onChange={setSelectedBranch} isDark={isDark} zIndex={90} />
+          
           {availableDivisions.length > 0 ? (
             <GlassDropdown label="Division" value={selectedDivision} options={availableDivisions} onChange={setSelectedDivision} isDark={isDark} zIndex={80} />
           ) : <div className="flex items-end"><p className="text-red-500 font-bold text-xs pb-3">No Divs Built</p></div>}
+          
           <GlassDropdown label="Batch (Optional)" value={selectedBatch} options={["All", "A", "B", "C", "A1", "A2", "B1", "B2"]} onChange={setSelectedBatch} isDark={isDark} zIndex={70} />
         </div>
         <div className="mb-4">

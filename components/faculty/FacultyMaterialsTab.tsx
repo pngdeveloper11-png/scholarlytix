@@ -8,7 +8,7 @@ import { Loader2, UploadCloud, Trash2, FileQuestion, BookOpen, ExternalLink, Pap
 import GlassDropdown from '../GlassDropdown';
 import GlassButton from '../ui/GlassButton';
 
-const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4"];
+const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8"];
 const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
 
 type SubjectDef = { shortName: string; longName: string; type: string };

@@ -6,7 +6,7 @@ import { db } from '@/lib/firebase';
 import { DivisionDef, BatchDef } from '@/types';
 import { X, Plus, Trash2, Save, Loader2 } from 'lucide-react';
 
-const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4"];
+const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8"];
 
 export default function CollegeStructureManager({ isDark, onClose }: { isDark: boolean, onClose: () => void }) {
   const [selectedSem, setSelectedSem] = useState(AVAILABLE_SEMESTERS[2]);

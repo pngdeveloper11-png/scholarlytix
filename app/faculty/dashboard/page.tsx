@@ -863,7 +863,7 @@ function UploadTimetableModal({ onDismiss, modalBg, isDark, onShowAlert }: { onD
         
         <div className="space-y-4">
           <div className="flex space-x-3">
-            <GlassDropdown value={upSem} options={["Semester 1", "Semester 2", "Semester 3", "Semester 4"]} onChange={setUpSem} isDark={isDark} />
+            <GlassDropdown value={upSem} options={["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8"]} onChange={setUpSem} isDark={isDark} />
             <GlassDropdown value={upBranch} options={["IT", "CSE", "CSE(AIML)", "EE"]} onChange={setUpBranch} isDark={isDark} />
           </div>
           

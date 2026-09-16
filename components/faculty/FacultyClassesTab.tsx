@@ -12,7 +12,7 @@ import GlassButton from '../ui/GlassButton';
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
-const SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8"];
+const SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8", "Semester 5", "Semester 6", "Semester 7", "Semester 8"];
 
 // Fuzzy Matching helpers to guarantee compatibility with all DB string formats
 const matchSem = (a: string, b: string) => (a || "").toLowerCase().replace("semester", "sem") === (b || "").toLowerCase().replace("semester", "sem");

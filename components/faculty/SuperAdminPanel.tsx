@@ -12,7 +12,7 @@ const ROLES = ["Teacher", "Class Teacher", "HOD", "Registrar", "Principal", "Dir
 const STREAMS = ["Engineering", "Management"];
 const ENGINEERING_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE"];
 const MANAGEMENT_BRANCHES = ["BMS", "MMS"];
-const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4"];
+const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8"];
 
 export default function SuperAdminPanel({ isDark, onClose }: { isDark: boolean, onClose: () => void }) {
   const [facultyList, setFacultyList] = useState<any[]>([]);
