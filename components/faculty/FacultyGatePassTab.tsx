@@ -8,8 +8,8 @@ import GlassDropdown from '../GlassDropdown';
 import GlassButton from '../ui/GlassButton';
 
 const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8"];
-const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
 const matchSem = (a: string, b: string) => (a || "").toLowerCase().replace("semester", "sem") === (b || "").toLowerCase().replace("semester", "sem");
+const matchDiv = (a: string, b: string) => (a || "").toLowerCase().replace("div ", "") === (b || "").toLowerCase().replace("div ", "");
 
 export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
   const [activeSubTab, setActiveSubTab] = useState<"issue" | "history" | "leaves">("issue");
@@ -20,7 +20,6 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
   const [globalStructure, setGlobalStructure] = useState<any>({});
   
   const [selectedSem, setSelectedSem] = useState(AVAILABLE_SEMESTERS[2]);
-  const [selectedBranch, setSelectedBranch] = useState(AVAILABLE_BRANCHES[0]);
   const [selectedDivision, setSelectedDivision] = useState("");
 
   const [selectedStudent, setSelectedStudent] = useState<any | null>(null);
@@ -82,7 +81,7 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
         rollNo: selectedStudent.rollNo,
         branch: selectedStudent.branch,
         semester: selectedStudent.semester,
-        division: selectedStudent.division, // THE FIX: Division attached to pass
+        division: selectedStudent.division, 
         reason: finalReason,
         issuedBy: facultyName,
         issuedByName: facultyName,
@@ -137,9 +136,10 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
     } catch (e) { alert("Action failed."); }
   };
 
+  // THE FIX: Student filtering now completely relies on Semester and Division
   const filteredStudents = searchQuery 
     ? students.filter(s => s.fullName?.toLowerCase().includes(searchQuery.toLowerCase()) || s.rollNo?.toString().includes(searchQuery)).slice(0, 5)
-    : students.filter(s => s.branch === selectedBranch && s.semester === selectedSem && s.division === selectedDivision).sort((a, b) => a.rollNo - b.rollNo);
+    : students.filter(s => matchSem(s.semester, selectedSem) && matchDiv(s.division, selectedDivision)).sort((a, b) => a.rollNo - b.rollNo);
 
   const cardBg = isDark ? 'bg-white/[0.08] border-white/20 backdrop-blur-2xl' : 'bg-white border-black/10 shadow-lg';
 
@@ -165,9 +165,8 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
           {!searchQuery && (
             <div className="flex gap-3">
               <GlassDropdown label="Semester" value={selectedSem} options={AVAILABLE_SEMESTERS} onChange={setSelectedSem} isDark={isDark} zIndex={50} />
-              <GlassDropdown label="Branch" value={selectedBranch} options={AVAILABLE_BRANCHES} onChange={setSelectedBranch} isDark={isDark} zIndex={40} />
               {availableDivisions.length > 0 ? (
-                <GlassDropdown label="Division" value={selectedDivision} options={availableDivisions} onChange={setSelectedDivision} isDark={isDark} zIndex={30} />
+                <GlassDropdown label="Division" value={selectedDivision} options={availableDivisions} onChange={setSelectedDivision} isDark={isDark} zIndex={40} />
               ) : <p className="text-red-500 font-bold text-xs self-end pb-3">No Divs</p>}
             </div>
           )}
