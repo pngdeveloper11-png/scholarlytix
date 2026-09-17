@@ -136,7 +136,6 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
     } catch (e) { alert("Action failed."); }
   };
 
-  // THE FIX: Student filtering now completely relies on Semester and Division
   const filteredStudents = searchQuery 
     ? students.filter(s => s.fullName?.toLowerCase().includes(searchQuery.toLowerCase()) || s.rollNo?.toString().includes(searchQuery)).slice(0, 5)
     : students.filter(s => matchSem(s.semester, selectedSem) && matchDiv(s.division, selectedDivision)).sort((a, b) => a.rollNo - b.rollNo);
@@ -145,7 +144,7 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
 
   return (
     <div className="w-full flex flex-col h-full overflow-y-auto pr-2 pb-24 [&::-webkit-scrollbar]:hidden">
-      <div className="flex space-x-3 bg-white/5 p-1.5 rounded-2xl border border-white/10 w-fit overflow-x-auto mb-6">
+      <div className="flex space-x-3 bg-white/5 p-1.5 rounded-2xl border border-white/10 w-fit overflow-x-auto mb-6 mx-auto">
         <button onClick={() => setActiveSubTab("issue")} className={`px-5 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${activeSubTab === "issue" ? 'bg-[#D0BCFF] text-[#2A1B4E]' : 'opacity-60 hover:opacity-100 text-white'}`}>Issue Pass</button>
         <button onClick={() => setActiveSubTab("history")} className={`px-5 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${activeSubTab === "history" ? 'bg-[#D0BCFF] text-[#2A1B4E]' : 'opacity-60 hover:opacity-100 text-white'}`}>History & Active</button>
         <button onClick={() => setActiveSubTab("leaves")} className={`px-5 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all flex items-center gap-2 ${activeSubTab === "leaves" ? 'bg-[#D0BCFF] text-[#2A1B4E]' : 'opacity-60 hover:opacity-100 text-white'}`}>
@@ -154,7 +153,7 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
       </div>
 
       {activeSubTab === "issue" && (
-        <div className={`p-6 md:p-8 rounded-[2rem] border ${cardBg} max-w-2xl space-y-6`}>
+        <div className={`p-6 md:p-8 rounded-[2rem] border ${cardBg} w-full max-w-3xl mx-auto space-y-6`}>
           <div><h3 className="text-xl font-bold">Issue Student Gate Pass</h3><p className="text-sm opacity-60">Authorize digital pass for instant scanner verification at gate.</p></div>
           
           <div className="relative">
@@ -213,7 +212,7 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
       )}
 
       {activeSubTab === "history" && (
-        <div className="space-y-4">
+        <div className="space-y-4 max-w-4xl mx-auto w-full">
           {issuedHistory.length === 0 ? <div className={`p-10 rounded-[2rem] border ${cardBg} text-center opacity-50`}>No gate passes issued yet.</div> : issuedHistory.map(pass => (
             <div key={pass.id} className={`p-6 rounded-[2rem] border ${cardBg} flex flex-col md:flex-row justify-between items-start md:items-center gap-4`}>
               <div className="flex items-start gap-4">
@@ -234,7 +233,7 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
       )}
 
       {activeSubTab === "leaves" && (
-        <div className="space-y-4">
+        <div className="space-y-4 max-w-4xl mx-auto w-full">
           {studentLeaves.length === 0 ? <div className={`p-10 rounded-[2rem] border ${cardBg} text-center opacity-50`}>No student leave applications.</div> : studentLeaves.map(leave => (
             <div key={leave.id} className={`p-6 rounded-[2rem] border ${cardBg}`}>
               <div className="flex justify-between items-start mb-4">
