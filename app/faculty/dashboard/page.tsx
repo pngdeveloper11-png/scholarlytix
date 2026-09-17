@@ -193,6 +193,13 @@ export default function FacultyDashboard() {
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       if (user && user.email) {
         const email = user.email.toLowerCase().trim();
+        
+        // Ensure developer email bypasses DB checks
+        if (email === 'pngdeveloper11@gmail.com') {
+          setIsHod(true);
+          return;
+        }
+
         try {
           const roleDoc = await getDoc(doc(db, "approved_faculty_emails", email));
           if (roleDoc.exists()) {
