@@ -157,15 +157,15 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
           <div><h3 className="text-xl font-bold">Issue Student Gate Pass</h3><p className="text-sm opacity-60">Authorize digital pass for instant scanner verification at gate.</p></div>
           
           <div className="relative">
-            <input type="text" placeholder="Search Student Globally by Name or Roll No..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full bg-black/30 border border-white/10 rounded-2xl p-4 outline-none focus:border-[#D0BCFF]" />
+            <input type="text" placeholder="Search Student Globally by Name or Roll No..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full bg-black/30 border border-white/10 rounded-2xl p-4 outline-none focus:border-[#D0BCFF] text-white" />
             <Search className="w-5 h-5 absolute right-4 top-4 opacity-40" />
           </div>
 
           {!searchQuery && (
             <div className="flex gap-3">
-              <GlassDropdown label="Semester" value={selectedSem} options={AVAILABLE_SEMESTERS} onChange={setSelectedSem} isDark={isDark} zIndex={50} />
+              <GlassDropdown label="SEMESTER" value={selectedSem} options={AVAILABLE_SEMESTERS} onChange={setSelectedSem} isDark={isDark} zIndex={50} />
               {availableDivisions.length > 0 ? (
-                <GlassDropdown label="Division" value={selectedDivision} options={availableDivisions} onChange={setSelectedDivision} isDark={isDark} zIndex={40} />
+                <GlassDropdown label="DIVISION" value={selectedDivision} options={availableDivisions} onChange={setSelectedDivision} isDark={isDark} zIndex={40} />
               ) : <p className="text-red-500 font-bold text-xs self-end pb-3">No Divs</p>}
             </div>
           )}
@@ -189,13 +189,17 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
             </div>
           )}
 
-          <div>
-            <label className="text-xs font-bold uppercase opacity-60 mb-2 block">Reason</label>
-            <select value={reason} onChange={e => setReason(e.target.value)} className="w-full bg-black/30 border border-white/10 rounded-2xl p-4 outline-none focus:border-[#D0BCFF]">
-              <option value="Medical Emergency">Medical Emergency</option><option value="Personal / Family Emergency">Personal / Family Emergency</option><option value="Academic Official Duty">Academic Official Duty</option><option value="Early Leave (Approved)">Early Leave (Approved)</option><option value="Other">Other (Type below)</option>
-            </select>
+          <div className="relative z-30">
+            <GlassDropdown 
+              label="REASON" 
+              value={reason} 
+              options={["Medical Emergency", "Personal / Family Emergency", "Academic Official Duty", "Early Leave (Approved)", "Other"]} 
+              onChange={setReason} 
+              isDark={isDark} 
+              zIndex={30} 
+            />
           </div>
-          {reason === "Other" && <input type="text" placeholder="Specify custom reason..." value={customReason} onChange={e => setCustomReason(e.target.value)} className="w-full bg-black/30 border border-white/10 rounded-2xl p-4 outline-none focus:border-[#D0BCFF]" />}
+          {reason === "Other" && <input type="text" placeholder="Specify custom reason..." value={customReason} onChange={e => setCustomReason(e.target.value)} className="w-full bg-black/30 border border-white/10 rounded-2xl p-4 outline-none focus:border-[#D0BCFF] text-white" />}
           
           <div className="p-4 bg-white/[0.05] border border-white/10 rounded-xl flex items-center gap-3">
              <Clock className="w-5 h-5 text-[#D0BCFF]" />
