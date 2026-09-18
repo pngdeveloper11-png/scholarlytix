@@ -272,7 +272,6 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
   }
 
   const matchingLectures = history.filter(h => matchSem(h.semester, selectedSemester) && matchDiv(h.divisionName || h.division, selectedDivision) && (isHod ? true : (h.subjectName === selectedSubject || h.subject === selectedSubject)));
-  const totalConducted = matchingLectures.length;
 
   const studentStats = divisionRoster.map((student) => {
     let studentBatch = (student as any).batch;
@@ -296,6 +295,7 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
     return { ...student, attended, studentTotalConducted, pct };
   });
 
+  const totalConducted = studentStats.reduce((max, s) => Math.max(max, s.studentTotalConducted), 0);
   const classAverage = studentStats.length > 0 && totalConducted > 0 ? studentStats.reduce((acc, curr) => acc + curr.pct, 0) / studentStats.length : 100;
   const defaulterCount = studentStats.filter(s => s.pct < 75).length;
 
@@ -344,11 +344,11 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
       {showImportDialog && <ImportStudentsDialog isDynamicHue={isDark} onDismiss={() => setShowImportDialog(false)} globalStructure={globalStructure} />}
 
       {isHod && (
-        <div className="flex justify-between items-center mb-6">
-          <div>
+        <div className="flex justify-between items-center mb-6 gap-4 w-full">
+          <div className="shrink-0">
             <h3 className={`font-bold text-[18px] ${textColor}`}>HOD Overview Mode</h3>
           </div>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-2 overflow-x-auto whitespace-nowrap custom-scrollbar pb-1 min-w-0 justify-end flex-1">
             <button onClick={() => setSortMode(s => s === 'default' ? 'az' : 'default')} className={`flex items-center text-xs font-bold px-3 py-2 rounded-xl transition-colors ${sortMode === 'az' ? 'bg-[#D0BCFF]/20 text-[#D0BCFF]' : 'text-white/60 hover:bg-white/5'}`}>
               <ArrowDownAZ className="w-4 h-4 mr-1.5"/> {sortMode === 'az' ? 'Sorted A-Z' : 'Sort A-Z'}
             </button>
@@ -387,13 +387,13 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
         </div>
       </div>
 
-      <div className="flex justify-between items-center mb-4">
-        <h3 className={`text-lg font-bold ${textColor} flex items-center`}>
+      <div className="flex justify-between items-center mb-4 gap-4 w-full">
+        <h3 className={`text-lg font-bold ${textColor} flex items-center shrink-0`}>
           <Users className="w-5 h-5 mr-2 text-[#D0BCFF]" /> Student Roster
         </h3>
         
         {isHod && (
-          <div className="flex items-center space-x-3 text-xs font-bold text-white/50">
+          <div className="flex items-center space-x-3 text-xs font-bold text-white/50 overflow-x-auto whitespace-nowrap custom-scrollbar pb-1 min-w-0 justify-end flex-1">
             <button className="flex items-center hover:text-white transition-colors" onClick={() => alert("Navigate to College Structure Manager to edit batches.")}><Settings className="w-3.5 h-3.5 mr-1"/> Batches</button>
             <button className="flex items-center hover:text-white transition-colors" onClick={openAdd}><UserPlus className="w-3.5 h-3.5 mr-1"/> Add</button>
             <button className="flex items-center hover:text-white transition-colors" onClick={() => setShowPromoteModal(true)}><TrendingUp className="w-3.5 h-3.5 mr-1"/> Promote</button>
