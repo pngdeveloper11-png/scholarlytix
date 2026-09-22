@@ -4,13 +4,14 @@ import React, { useState, useEffect } from 'react';
 import { collection, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { Bug, X, CheckCircle, Clock, Trash2, ShieldAlert, Download, Maximize, PlayCircle } from 'lucide-react';
+import InAppMediaViewer from '../ui/InAppMediaViewer'; // <-- THE FIX: Import the Native Viewer
 
 export default function BugCenterPanel({ isDark, onClose }: { isDark: boolean, onClose: () => void }) {
   const [reports, setReports] = useState<any[]>([]);
   const [selectedFilter, setSelectedFilter] = useState("All");
   
-  // NEW STATE: For handling the full-screen lightbox preview
-  const [previewMedia, setPreviewMedia] = useState<{url: string, type: 'image' | 'video'} | null>(null);
+  // THE FIX: Upgraded State for the In-App Media Viewer
+  const [viewMedia, setViewMedia] = useState<{url: string, name: string} | null>(null);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "user_reports"), (snap) => {
@@ -93,18 +94,17 @@ export default function BugCenterPanel({ isDark, onClose }: { isDark: boolean, o
                 const userBranch = report.userBranch || report.branch || "";
                 const userSem = report.userSemester || report.semester || "";
                 
-                // Bulletproof content extraction (Fixes the blank spaces in screenshot)
                 const reportTitle = report.title || report.issue || report.subject || "User Report";
                 const reportDesc = report.description || report.message || report.details || "No additional details provided.";
 
                 // Smart Media Detection
                 const attachmentUrl = report.evidenceUrl || report.attachmentUrl || report.imageUrl || "";
-                const attachmentName = report.attachmentName || report.fileName || "";
+                const attachmentName = report.attachmentName || report.fileName || "Attached Media";
                 const combinedString = (attachmentUrl + attachmentName).toLowerCase();
                 
                 const isVid = combinedString.includes('.mp4') || combinedString.includes('.mov') || combinedString.includes('.webm') || combinedString.includes('video');
                 const isPdfDoc = combinedString.includes('.pdf') || combinedString.includes('.doc') || combinedString.includes('.csv');
-                const isImg = !isVid && !isPdfDoc && attachmentUrl; // Default to image if not explicitly a document
+                const isImg = !isVid && !isPdfDoc && attachmentUrl; 
 
                 return (
                   <div key={report.id} className={`p-6 rounded-2xl border ${cardBg} flex flex-col md:flex-row gap-6`}>
@@ -123,13 +123,13 @@ export default function BugCenterPanel({ isDark, onClose }: { isDark: boolean, o
                       <h3 className="text-xl font-bold mb-2 text-white">{reportTitle}</h3>
                       <p className="text-sm opacity-80 whitespace-pre-line bg-black/20 p-4 rounded-xl border border-white/5 text-white/90">{reportDesc}</p>
                       
-                      {/* --- THE FIX: SMART MEDIA RENDERER --- */}
+                      {/* --- THE FIX: Hooked up to the InAppMediaViewer --- */}
                       {attachmentUrl && (
                         <div className="mt-4">
                           {isVid ? (
                             <div 
                               className="relative inline-block border border-white/10 rounded-xl overflow-hidden cursor-pointer group w-full max-w-sm"
-                              onClick={() => setPreviewMedia({ url: attachmentUrl, type: 'video' })}
+                              onClick={() => setViewMedia({ url: attachmentUrl, name: attachmentName })}
                             >
                               <video src={attachmentUrl} className="max-h-64 w-full object-cover bg-black/50" muted playsInline />
                               <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/40 transition-colors">
@@ -137,13 +137,16 @@ export default function BugCenterPanel({ isDark, onClose }: { isDark: boolean, o
                               </div>
                             </div>
                           ) : isPdfDoc ? (
-                            <a href={attachmentUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 px-4 py-3 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-xl hover:bg-blue-500/20 w-fit font-bold text-sm">
-                              <Download className="w-4 h-4"/> Download Attached Document
-                            </a>
+                            <div 
+                              onClick={() => setViewMedia({ url: attachmentUrl, name: attachmentName })}
+                              className="flex items-center cursor-pointer gap-2 px-4 py-3 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-xl hover:bg-blue-500/20 w-fit font-bold text-sm"
+                            >
+                              <Download className="w-4 h-4"/> View Attached Document
+                            </div>
                           ) : isImg ? (
                             <div 
                               className="relative inline-block border border-white/10 rounded-xl overflow-hidden cursor-pointer group"
-                              onClick={() => setPreviewMedia({ url: attachmentUrl, type: 'image' })}
+                              onClick={() => setViewMedia({ url: attachmentUrl, name: attachmentName })}
                             >
                               <img 
                                 src={attachmentUrl} 
@@ -186,36 +189,14 @@ export default function BugCenterPanel({ isDark, onClose }: { isDark: boolean, o
         </div>
       </div>
 
-      {/* --- THE FIX: LIGHTBOX MODAL --- */}
-      {previewMedia && (
-        <div 
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90 backdrop-blur-xl p-4 md:p-8" 
-          onClick={() => setPreviewMedia(null)}
-        >
-          <button 
-            className="absolute top-6 right-6 p-3 bg-white/10 hover:bg-red-500/20 hover:text-red-400 rounded-full text-white transition-colors z-[210]" 
-            onClick={() => setPreviewMedia(null)}
-          >
-            <X className="w-6 h-6" />
-          </button>
-          
-          <div className="relative max-w-full max-h-full flex items-center justify-center" onClick={e => e.stopPropagation()}>
-            {previewMedia.type === 'video' ? (
-              <video 
-                src={previewMedia.url} 
-                controls 
-                autoPlay 
-                className="max-w-[90vw] max-h-[85vh] rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.8)] border border-white/10 bg-black" 
-              />
-            ) : (
-              <img 
-                src={previewMedia.url} 
-                alt="Expanded Evidence" 
-                className="max-w-[90vw] max-h-[85vh] object-contain rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.8)] border border-white/10 bg-black" 
-              />
-            )}
-          </div>
-        </div>
+      {/* --- THE FIX: NATIVE IN-APP MEDIA VIEWER --- */}
+      {viewMedia && (
+        <InAppMediaViewer 
+          url={viewMedia.url} 
+          fileName={viewMedia.name} 
+          isDynamicHue={isDark} // Passing dark mode preference
+          onClose={() => setViewMedia(null)} 
+        />
       )}
     </>
   );

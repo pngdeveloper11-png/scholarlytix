@@ -4,9 +4,10 @@ import { useState, useEffect, useRef } from 'react';
 import { collection, doc, addDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase'; 
 import { useAuth } from '../../app/context/AuthContext';
-import { Loader2, UploadCloud, Trash2, FileQuestion, BookOpen, ExternalLink, Paperclip, X, Link as LinkIcon } from 'lucide-react';
+import { Loader2, UploadCloud, Trash2, FileQuestion, BookOpen, ExternalLink, Paperclip, X, Link as LinkIcon, Video } from 'lucide-react';
 import GlassDropdown from '../GlassDropdown';
 import GlassButton from '../ui/GlassButton';
+import InAppMediaViewer from '../ui/InAppMediaViewer'; // <-- THE FIX: Added native media viewer
 
 const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8"];
 const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
@@ -16,6 +17,11 @@ type SubjectDef = { shortName: string; longName: string; type: string };
 const getDynamicSubjects = (semester: string, branch: string, globalSubjects: any) => {
   const key = `${semester}|${branch}`;
   return (globalSubjects[key] || []).map((s: any) => s.longName);
+};
+
+const isFirstYearSem = (sem: string) => {
+  const s = (sem || "").toLowerCase().trim();
+  return s.includes("sem 1") || s.includes("sem 2") || s.includes("semester 1") || s.includes("semester 2") || s.includes("1st");
 };
 
 export default function FacultyMaterialsTab() {
@@ -34,6 +40,7 @@ export default function FacultyMaterialsTab() {
   const [categoryFilter, setCategoryFilter] = useState("All");
 
   const [showUploadDialog, setShowUploadDialog] = useState(false);
+  const [viewMedia, setViewMedia] = useState<{url: string, name: string} | null>(null);
 
   useEffect(() => {
     const unsubMaterials = onSnapshot(collection(db, "study_materials"), (snap) => {
@@ -65,14 +72,14 @@ export default function FacultyMaterialsTab() {
     });
 
     return () => { unsubMaterials(); unsubSubjects(); unsubStructure(); unsubConfig(); };
-  }, [user?.uid]);
+  }, [user?.uid, viewSem]);
 
   const handleDelete = async (mat: any) => {
-    if (confirm("Delete this material permanently from all student devices and Google Drive?")) {
+    if (confirm("Delete this material permanently from all student devices and Cloudflare R2?")) {
       try {
         if (mat.attachments) {
            for (const att of mat.attachments) {
-             await fetch('/api/upload-drive', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: att.url }) });
+             await fetch('/api/delete-file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileName: att.name || "File" }) });
            }
         }
         await deleteDoc(doc(db, "study_materials", mat.id));
@@ -102,7 +109,7 @@ export default function FacultyMaterialsTab() {
 
   const myUploads = materials.filter(m => isHod || m.facultyName === user?.displayName);
   const displayedMaterials = myUploads.filter(m => {
-    const classMatch = m.semester === viewSem && m.division === viewDivision && m.subject === viewSubject;
+    const classMatch = m.semester === viewSem && m.divisionName === viewDivision && m.subject === viewSubject;
     const categoryMatch = categoryFilter === "All" || m.category === categoryFilter;
     return classMatch && categoryMatch;
   });
@@ -139,6 +146,9 @@ export default function FacultyMaterialsTab() {
             displayedMaterials.map((mat) => {
               const timestampMs = mat.timestamp?.seconds ? mat.timestamp.seconds * 1000 : (mat.timestamp || Date.now());
               const dateStr = new Date(timestampMs).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+              
+              const isVideo = mat.downloadUrl && (mat.downloadUrl.includes(".mp4") || mat.downloadUrl.includes(".webm"));
+
               return (
                 <div key={mat.id} className="bg-white/[0.08] backdrop-blur-[40px] border border-white/20 p-6 rounded-[2rem] flex flex-col group transition-all">
                   <div className="flex items-center justify-between mb-4">
@@ -148,7 +158,7 @@ export default function FacultyMaterialsTab() {
                       </div>
                       <div>
                         <h4 className="font-bold text-lg text-white">{mat.fileName}</h4>
-                        <p className="text-xs text-[#D0BCFF] mt-0.5">{mat.semester} • {mat.division} • {mat.category || "Notes"} • {dateStr}</p>
+                        <p className="text-xs text-[#D0BCFF] mt-0.5">{mat.semester} • {mat.divisionName} • {mat.category || "Notes"} • {dateStr}</p>
                       </div>
                     </div>
                     <button onClick={() => handleDelete(mat)} className="p-2.5 text-[#FF453A] bg-[#FF453A]/10 hover:bg-[#FF453A]/20 rounded-xl transition-all">
@@ -157,6 +167,30 @@ export default function FacultyMaterialsTab() {
                   </div>
                   
                   {mat.message && <div className="bg-black/20 p-4 rounded-xl border border-white/5 text-sm text-white/80 mb-4">{mat.message}</div>}
+
+                  {/* THE FIX: Support for Native PDF and Cloudflare R2 preview logic */}
+                  {mat.downloadUrl && (
+                      <div 
+                        onClick={() => setViewMedia({ url: mat.downloadUrl, name: mat.fileName })}
+                        className="w-full h-48 bg-black/50 border border-white/10 rounded-xl overflow-hidden cursor-pointer group relative flex items-center justify-center hover:border-[#D0BCFF]/50 transition-colors mt-2 mb-4"
+                      >
+                         {isVideo ? (
+                             <div className="flex flex-col items-center text-white/70 group-hover:text-white transition-colors">
+                                 <Video className="w-12 h-12 mb-2" />
+                                 <span className="text-sm font-bold">Tap to Play Video</span>
+                             </div>
+                         ) : mat.thumbnailBase64 ? (
+                             <img src={`data:image/jpeg;base64,${mat.thumbnailBase64}`} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" alt="Preview"/>
+                         ) : mat.downloadUrl.includes(".pdf") ? (
+                             <div className="flex flex-col items-center text-white/70 group-hover:text-white transition-colors">
+                                <FileQuestion className="w-12 h-12 mb-2" />
+                                <span className="text-sm font-bold">Tap to Open Document</span>
+                             </div>
+                         ) : (
+                             <img src={mat.downloadUrl} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" alt="Preview"/>
+                         )}
+                      </div>
+                  )}
 
                   {(mat.links?.length > 0 || mat.attachments?.length > 0) && (
                     <div className="flex flex-wrap gap-3">
@@ -167,16 +201,16 @@ export default function FacultyMaterialsTab() {
                       ))}
                       {mat.attachments?.map((att: any, i: number) => (
                          att.type.startsWith('image/') ? (
-                           <div key={i} className="w-full sm:w-48 h-32 rounded-xl overflow-hidden border border-white/10 cursor-pointer relative group" onClick={() => window.open(att.url)}>
+                           <div key={i} className="w-full sm:w-48 h-32 rounded-xl overflow-hidden border border-white/10 cursor-pointer relative group" onClick={() => setViewMedia({ url: att.url, name: att.name || "Attachment" })}>
                              <img src={att.url} alt="Attachment" className="w-full h-full object-cover group-hover:scale-110 transition-transform" />
                              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                <ExternalLink className="w-6 h-6 text-white" />
                              </div>
                            </div>
                          ) : (
-                           <a key={i} href={att.url} target="_blank" rel="noopener noreferrer" className="flex items-center px-4 py-2 bg-white/5 border border-white/10 text-white rounded-xl text-xs font-bold hover:bg-white/10 transition">
-                             <Paperclip className="w-3 h-3 mr-2" /> Download Document
-                           </a>
+                           <button key={i} onClick={() => setViewMedia({ url: att.url, name: att.name || "Document" })} className="flex items-center px-4 py-2 bg-white/5 border border-white/10 text-white rounded-xl text-xs font-bold hover:bg-white/10 transition">
+                             <Paperclip className="w-3 h-3 mr-2" /> Preview Document
+                           </button>
                          )
                       ))}
                     </div>
@@ -197,6 +231,15 @@ export default function FacultyMaterialsTab() {
       {showUploadDialog && (
         <UploadMaterialDialog user={user} isHod={isHod} teachingConfig={teachingConfig} initialSem={viewSem} initialDivision={viewDivision} initialSubject={viewSubject} initialCategory={categoryFilter === "All" ? "Notes" : categoryFilter} globalStructure={globalStructure} onDismiss={() => setShowUploadDialog(false)} />
       )}
+
+      {viewMedia && (
+        <InAppMediaViewer 
+          url={viewMedia.url} 
+          fileName={viewMedia.name} 
+          isDynamicHue={true} 
+          onClose={() => setViewMedia(null)} 
+        />
+      )}
     </div>
   );
 }
@@ -206,16 +249,15 @@ function UploadMaterialDialog({ user, isHod, teachingConfig, initialSem, initial
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
   const [upSem, setUpSem] = useState(initialSem || "Semester 3");
-  const [upDivision, setUpDivision] = useState(initialDivision);
+  const [upClass, setUpClass] = useState("");
   const [upSubject, setUpSubject] = useState(initialSubject);
   const [upCategory, setUpCategory] = useState(initialCategory);
   
-  const [files, setFiles] = useState<File[]>([]);
-  const [links, setLinks] = useState<string[]>([]);
-  const [linkInput, setLinkInput] = useState("");
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [customFileName, setCustomFileName] = useState("");
+  
   const [globalSubjects, setGlobalSubjects] = useState<any>({});
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "app_config", "subject_master"), (snap) => {
@@ -224,49 +266,72 @@ function UploadMaterialDialog({ user, isHod, teachingConfig, initialSem, initial
     return () => unsub();
   }, []);
 
-  const validSems = isHod ? AVAILABLE_SEMESTERS : Array.from(new Set(Object.keys(teachingConfig).map(k => k.split("|")[0])));
-  
-  const validDivisions = isHod
+  const isFirstYear = isFirstYearSem(upSem);
+  const streamBranches = isHod ? AVAILABLE_BRANCHES : Array.from(new Set(Object.keys(teachingConfig).filter(k => k.startsWith(upSem)).map(k => k.split("|")[1]).filter(Boolean)));
+
+  const availableClasses = isFirstYear 
     ? (globalStructure[upSem] || []).map((d: any) => d.divisionName)
-    : Array.from(new Set(Object.keys(teachingConfig).filter(k => k.startsWith(upSem)).map(k => k.split("|")[2]).filter(Boolean)));
+    : streamBranches.flatMap(b => (globalStructure[`${upSem}|${b}`] || []).map((d: any) => `${d.divisionName} - ${b}`));
+
+  useEffect(() => {
+    if (!availableClasses.includes(upClass)) setUpClass(availableClasses[0] || "");
+  }, [upSem, availableClasses, upClass]);
+
+  const upDivision = isFirstYear ? upClass : upClass.split(" - ")[0];
+  const upBranch = isFirstYear ? "General" : upClass.split(" - ")[1];
 
   const availableSubjects = isHod
-    ? Array.from(new Set(AVAILABLE_BRANCHES.flatMap(b => getDynamicSubjects(upSem, b, globalSubjects)))).sort()
-    : Array.from(new Set(Object.keys(teachingConfig).filter(k => k.startsWith(upSem) && k.split("|")[2] === upDivision).flatMap(k => teachingConfig[k])));
+    ? getDynamicSubjects(upSem, upBranch, globalSubjects).sort()
+    : (teachingConfig[isFirstYear ? `${upSem}|${upDivision}` : `${upSem}|${upBranch}|${upDivision}`] || []);
+
+  useEffect(() => {
+    if (!availableSubjects.includes(upSubject)) setUpSubject(availableSubjects[0] || "");
+  }, [upSem, upBranch, upDivision, availableSubjects, upSubject]);
 
   const handleUpload = async () => {
-    if (!title || !upSubject || (files.length === 0 && links.length === 0)) return alert("Please provide a title and at least one file or link.");
+    if (!title || !upSubject || !selectedFile) return alert("Please provide a title, subject, and select a file.");
     setIsUploading(true);
+    
     try {
-      const uploadedAttachments = [];
-      for (const file of files) {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('fileName', file.name);
-        formData.append('path', `materials/${upSem}/${upDivision}`);
-        const res = await fetch('/api/upload-drive', { method: 'POST', body: formData });
-        if (res.ok) {
-          const { downloadUrl } = await res.json();
-          uploadedAttachments.push({ url: downloadUrl, name: file.name, type: file.type });
-        }
-      }
+      // 1. Get Cloudflare Ticket
+      const ticketRes = await fetch('/api/upload-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: `Material_${Date.now()}_${customFileName || selectedFile.name}`, fileType: selectedFile.type })
+      });
+      if (!ticketRes.ok) throw new Error("Failed to get R2 ticket.");
+      const { uploadUrl, downloadUrl } = await ticketRes.json();
+
+      // 2. Upload natively to R2
+      const uploadRes = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': selectedFile.type, 'Content-Disposition': 'inline' },
+        body: selectedFile
+      });
+      if (!uploadRes.ok) throw new Error("Cloudflare R2 upload failed.");
 
       await addDoc(collection(db, "study_materials"), { 
-        fileName: title, 
+        fileName: customFileName || selectedFile.name, 
         message,
-        attachments: uploadedAttachments,
-        links,
+        downloadUrl,
         semester: upSem, 
-        division: upDivision, 
+        branch: upBranch,
+        divisionName: upDivision, 
         subject: upSubject, 
         category: upCategory, 
         timestamp: Date.now(),
-        facultyName: user?.displayName || "Faculty"
+        facultyName: user?.displayName || "Faculty",
+        uploaderId: user?.uid || ""
       });
+
+      const cleanSem = upSem.replace(/ /g, "_");
+      const cleanDiv = upDivision.replace(/ /g, "_");
+      const cleanBranch = (upBranch || "").replace(/[ ()]/g, "_");
+      const topicName = isFirstYear ? `topic_${cleanSem}_${cleanDiv}` : `topic_${cleanSem}_${cleanBranch}`;
 
       await fetch('/api/send-fcm', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetTopic: `topic_${upSem.replace(/ /g, "_")}_${upDivision.replace(/[ ()]/g, "_")}`, title: "📚 New Study Material", message: `${upCategory} for ${upSubject} uploaded.`, targetTab: "Materials" })
+        body: JSON.stringify({ targetTopic: topicName, title: "📚 New Study Material", message: `${upCategory} for ${upSubject} uploaded.`, targetTab: "Materials" })
       });
 
       alert("Material published successfully!"); onDismiss();
@@ -281,32 +346,32 @@ function UploadMaterialDialog({ user, isHod, teachingConfig, initialSem, initial
           <input type="text" placeholder="Title (e.g. Chapter 1 PYQ)" value={title} onChange={(e) => setTitle(e.target.value)} className="w-full bg-white/[0.05] border border-white/20 rounded-xl p-4 text-white focus:ring-2 focus:ring-[#D0BCFF] outline-none" />
           
           <div className="flex gap-2">
-            <GlassDropdown label="Sem" value={upSem} options={validSems} onChange={setUpSem} isDark={true} zIndex={130} />
-            <GlassDropdown label="Division" value={upDivision} options={validDivisions} onChange={setUpDivision} isDark={true} zIndex={120} />
+            <GlassDropdown label="Sem" value={upSem} options={isHod ? AVAILABLE_SEMESTERS : Array.from(new Set(Object.keys(teachingConfig).map(k => k.split("|")[0])))} onChange={setUpSem} isDark={true} zIndex={130} />
+            <GlassDropdown label={isFirstYear ? "Division" : "Class (Div - Branch)"} value={upClass} options={availableClasses} onChange={setUpClass} isDark={true} zIndex={120} />
           </div>
           
           <GlassDropdown label="Subject" value={upSubject} options={availableSubjects} onChange={setUpSubject} isDark={true} zIndex={115} />
 
           <textarea placeholder="Message / Instructions (Optional)" value={message} onChange={e => setMessage(e.target.value)} className="w-full bg-white/[0.05] border border-white/20 rounded-xl p-4 text-white text-sm outline-none resize-none" rows={3} />
-          
-          <GlassDropdown label="" value={upCategory} options={["Notes", "Question Paper", "Assignment"]} onChange={setUpCategory} isDark={true} zIndex={110} />
+          <GlassDropdown label="" value={upCategory} options={["Notes", "Question Papers"]} onChange={setUpCategory} isDark={true} zIndex={110} />
           
           <div className="bg-black/30 p-4 rounded-xl border border-white/10">
-             <div className="flex gap-2 mb-3">
-               <input type="url" placeholder="https://" value={linkInput} onChange={e => setLinkInput(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none text-white" />
-               <button onClick={() => { if(linkInput) { setLinks([...links, linkInput]); setLinkInput(""); } }} className="px-3 bg-blue-500/20 text-blue-300 rounded-lg text-xs font-bold">Add Link</button>
-             </div>
-             <div className="flex gap-2 flex-wrap mb-3">
-               {links.map((lnk, i) => <span key={i} className="px-2 py-1 bg-blue-500/10 text-blue-300 rounded text-[10px] flex items-center"><LinkIcon className="w-3 h-3 mr-1"/> Link {i+1} <X onClick={() => setLinks(links.filter((_, idx) => idx !== i))} className="w-3 h-3 ml-2 cursor-pointer"/></span>)}
-               {files.map((f, i) => <span key={i} className="px-2 py-1 bg-white/10 text-white rounded text-[10px] flex items-center"><Paperclip className="w-3 h-3 mr-1"/> {f.name} <X onClick={() => setFiles(files.filter((_, idx) => idx !== i))} className="w-3 h-3 ml-2 cursor-pointer"/></span>)}
-             </div>
-             <input type="file" multiple ref={fileInputRef} onChange={e => e.target.files && setFiles(files.concat(Array.from(e.target.files)))} className="hidden" />
-             <button onClick={() => fileInputRef.current?.click()} className="w-full py-2 bg-white/5 border border-white/10 text-white rounded-lg text-xs font-bold hover:bg-white/10 flex justify-center items-center"><UploadCloud className="w-4 h-4 mr-2" /> Add Files / Images</button>
+             {selectedFile ? (
+               <div className="flex justify-between items-center bg-white/10 p-3 rounded-lg border border-white/20">
+                 <span className="text-xs font-bold truncate text-white">{selectedFile.name}</span>
+                 <X className="w-4 h-4 text-red-400 cursor-pointer" onClick={() => setSelectedFile(null)}/>
+               </div>
+             ) : (
+               <>
+                 <input type="file" ref={fileInputRef} onChange={e => e.target.files && setSelectedFile(e.target.files[0])} className="hidden" />
+                 <button onClick={() => fileInputRef.current?.click()} className="w-full py-2 bg-white/5 border border-white/10 text-white rounded-lg text-xs font-bold hover:bg-white/10 flex justify-center items-center"><UploadCloud className="w-4 h-4 mr-2" /> Select File</button>
+               </>
+             )}
           </div>
         </div>
         <div className="flex space-x-3 mt-auto">
           <GlassButton onClick={onDismiss} variant="glass" className="flex-1">Cancel</GlassButton>
-          <GlassButton onClick={handleUpload} disabled={isUploading || !title} variant="primary" className="flex-1" icon={isUploading ? <Loader2 className="w-5 h-5 animate-spin" /> : undefined}>
+          <GlassButton onClick={handleUpload} disabled={isUploading || !title || !selectedFile} variant="primary" className="flex-1" icon={isUploading ? <Loader2 className="w-5 h-5 animate-spin" /> : undefined}>
             {isUploading ? null : "Upload"}
           </GlassButton>
         </div>

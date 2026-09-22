@@ -6,18 +6,38 @@ import { db } from '@/lib/firebase';
 import { DivisionDef, BatchDef } from '@/types';
 import { X, Plus, Trash2, Save, Loader2 } from 'lucide-react';
 
+const STREAMS = ["Engineering", "Management"];
+const ENGINEERING_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE"];
+const MANAGEMENT_BRANCHES = ["BMS", "MMS"];
 const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8"];
 
+const isFirstYearSem = (sem: string) => {
+  const s = (sem || "").toLowerCase().trim();
+  return s.includes("sem 1") || s.includes("sem 2") || s.includes("semester 1") || s.includes("semester 2") || s.includes("1st");
+};
+
 export default function CollegeStructureManager({ isDark, onClose }: { isDark: boolean, onClose: () => void }) {
+  const [selectedStream, setSelectedStream] = useState(STREAMS[0]);
   const [selectedSem, setSelectedSem] = useState(AVAILABLE_SEMESTERS[2]);
+  const [selectedBranch, setSelectedBranch] = useState(ENGINEERING_BRANCHES[0]);
+  
   const [currentDivisions, setCurrentDivisions] = useState<DivisionDef[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
+  const currentBranches = selectedStream === "Engineering" ? ENGINEERING_BRANCHES : MANAGEMENT_BRANCHES;
+
   useEffect(() => {
-    // THE FIX: Key is strictly the Semester now
-    const classKey = selectedSem;
-    const docRef = doc(db, 'app_config', 'college_structure');
+    if (!currentBranches.includes(selectedBranch)) {
+      setSelectedBranch(currentBranches[0] || "");
+    }
+  }, [selectedStream, currentBranches]);
+
+  useEffect(() => {
+    // THE FIX: Accurately fetches the 3-Tier Key matching the Android App
+    const isFirstYear = isFirstYearSem(selectedSem);
+    const classKey = isFirstYear ? selectedSem : `${selectedSem}|${selectedBranch}`;
     
+    const docRef = doc(db, 'app_config', 'college_structure');
     const unsubscribe = onSnapshot(docRef, (snap) => {
       if (snap.exists()) {
         const data = snap.data() as any;
@@ -28,12 +48,13 @@ export default function CollegeStructureManager({ isDark, onClose }: { isDark: b
       }
     });
     return () => unsubscribe();
-  }, [selectedSem]);
+  }, [selectedSem, selectedBranch]);
 
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      const classKey = selectedSem;
+      const isFirstYear = isFirstYearSem(selectedSem);
+      const classKey = isFirstYear ? selectedSem : `${selectedSem}|${selectedBranch}`;
       
       const divListForDb = currentDivisions.map(div => ({
         divisionName: div.divisionName.trim(),
@@ -62,7 +83,7 @@ export default function CollegeStructureManager({ isDark, onClose }: { isDark: b
   const inputBg = isDark ? "bg-white/5 border-white/10 text-white" : "bg-gray-50 border-gray-300 text-gray-900";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
       <div className={`w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl border ${bgStyle} p-6 shadow-2xl`}>
         
         <div className="flex justify-between items-center mb-6">
@@ -72,11 +93,26 @@ export default function CollegeStructureManager({ isDark, onClose }: { isDark: b
           </button>
         </div>
 
-        <div className="flex gap-4 mb-6">
+        <div className="flex gap-4 mb-4">
+          <select value={selectedStream} onChange={e => setSelectedStream(e.target.value)} className={`flex-1 p-3 rounded-xl border outline-none ${inputBg}`}>
+            {STREAMS.map(stream => <option key={stream} value={stream}>{stream}</option>)}
+          </select>
           <select value={selectedSem} onChange={e => setSelectedSem(e.target.value)} className={`flex-1 p-3 rounded-xl border outline-none ${inputBg}`}>
             {AVAILABLE_SEMESTERS.map(sem => <option key={sem} value={sem}>{sem}</option>)}
           </select>
         </div>
+
+        {!isFirstYearSem(selectedSem) && (
+          <div className="flex gap-4 mb-6">
+            <select value={selectedBranch} onChange={e => setSelectedBranch(e.target.value)} className={`flex-1 p-3 rounded-xl border outline-none ${inputBg}`}>
+              {currentBranches.map(branch => <option key={branch} value={branch}>{branch}</option>)}
+            </select>
+          </div>
+        )}
+
+        <p className="text-[#D0BCFF] text-sm font-bold mb-6">
+          {isFirstYearSem(selectedSem) ? "Sem 1 & 2: Building Common Divisions across all branches." : `Building Branch Classes for ${selectedBranch}.`}
+        </p>
 
         <div className="space-y-6">
           {currentDivisions.map((div, divIndex) => (
@@ -103,30 +139,32 @@ export default function CollegeStructureManager({ isDark, onClose }: { isDark: b
               <h4 className="text-[#D0BCFF] font-bold text-sm mb-3">Lab / Practical Batches:</h4>
               <div className="space-y-3">
                 {div.batches.map((batch, batchIndex) => (
-                  <div key={batchIndex} className={`flex items-center gap-3 p-3 rounded-lg border ${isDark ? 'bg-black/40 border-white/5' : 'bg-white border-gray-200'}`}>
+                  <div key={batchIndex} className={`flex flex-col md:flex-row items-center gap-3 p-3 rounded-lg border ${isDark ? 'bg-black/40 border-white/5' : 'bg-white border-gray-200'}`}>
                     <input type="text" placeholder="Name (e.g. A1)" value={batch.name} onChange={e => {
                       const newDivs = [...currentDivisions];
                       newDivs[divIndex].batches[batchIndex].name = e.target.value;
                       setCurrentDivisions(newDivs);
-                    }} className={`w-1/3 p-2 rounded-md border outline-none ${inputBg}`} />
+                    }} className={`w-full md:w-1/3 p-2 rounded-md border outline-none ${inputBg}`} />
                     
-                    <input type="number" placeholder="Start Roll" value={batch.startRoll} onChange={e => {
-                      const newDivs = [...currentDivisions];
-                      newDivs[divIndex].batches[batchIndex].startRoll = Number(e.target.value);
-                      setCurrentDivisions(newDivs);
-                    }} className={`w-1/3 p-2 rounded-md border outline-none ${inputBg}`} />
-                    
-                    <input type="number" placeholder="End Roll" value={batch.endRoll} onChange={e => {
-                      const newDivs = [...currentDivisions];
-                      newDivs[divIndex].batches[batchIndex].endRoll = Number(e.target.value);
-                      setCurrentDivisions(newDivs);
-                    }} className={`w-1/3 p-2 rounded-md border outline-none ${inputBg}`} />
+                    <div className="flex gap-3 w-full md:w-2/3">
+                      <input type="number" placeholder="Start Roll" value={batch.startRoll} onChange={e => {
+                        const newDivs = [...currentDivisions];
+                        newDivs[divIndex].batches[batchIndex].startRoll = Number(e.target.value);
+                        setCurrentDivisions(newDivs);
+                      }} className={`w-1/2 p-2 rounded-md border outline-none ${inputBg}`} />
+                      
+                      <input type="number" placeholder="End Roll" value={batch.endRoll} onChange={e => {
+                        const newDivs = [...currentDivisions];
+                        newDivs[divIndex].batches[batchIndex].endRoll = Number(e.target.value);
+                        setCurrentDivisions(newDivs);
+                      }} className={`w-1/2 p-2 rounded-md border outline-none ${inputBg}`} />
+                    </div>
                     
                     <button onClick={() => {
                       const newDivs = [...currentDivisions];
                       newDivs[divIndex].batches.splice(batchIndex, 1);
                       setCurrentDivisions(newDivs);
-                    }} className="text-red-500 p-2"><X className="w-5 h-5"/></button>
+                    }} className="text-red-500 p-2 w-full md:w-auto hover:bg-red-500/10 rounded-lg transition"><X className="w-5 h-5 mx-auto"/></button>
                   </div>
                 ))}
               </div>

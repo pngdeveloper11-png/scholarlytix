@@ -24,6 +24,26 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing title or message' }, { status: 400 });
     }
 
+    // Smart routing fallback: If the client didn't explicitly provide a targetTab,
+    // deduce the exact tab based on the notification title or topic.
+    let finalTargetTab = targetTab;
+    if (!finalTargetTab) {
+      const lowerTitle = String(title).toLowerCase();
+      if (download_link) finalTargetTab = "Settings";
+      else if (lowerTitle.includes("grievance")) finalTargetTab = "Grievances";
+      else if (lowerTitle.includes("proxy") || lowerTitle.includes("transfer")) finalTargetTab = "Faculty Leaves";
+      else if (lowerTitle.includes("leave")) {
+        if (targetTopic && targetTopic.startsWith('hod_')) finalTargetTab = "Student Leaves";
+        else finalTargetTab = "Leave";
+      }
+      else if (lowerTitle.includes("timetable")) finalTargetTab = "Timetable";
+      else if (lowerTitle.includes("gate pass")) finalTargetTab = "Gate Pass";
+      else if (lowerTitle.includes("attendance")) finalTargetTab = "Attendance";
+      else if (lowerTitle.includes("material")) finalTargetTab = "Materials";
+      else if (lowerTitle.includes("test") || lowerTitle.includes("score")) finalTargetTab = "Tests";
+      else finalTargetTab = "Notice Board";
+    }
+
     // CRITICAL: We send a DATA-ONLY payload with HIGH priority.
     // All values inside the "data" object MUST be strings for FCM to process them correctly.
     const messagePayload: any = {
@@ -31,7 +51,7 @@ export async function POST(request: Request) {
         title: String(title),
         message: String(message),
         channelId: String(channelId || 'general_alerts'),
-        targetTab: String(targetTab || 'Notice Board') // The crucial Deep Link variable
+        targetTab: String(finalTargetTab) // The crucial Deep Link variable for both Web and Android
       },
       android: {
         priority: 'high', // Wakes the Android device in the background

@@ -32,7 +32,7 @@ export async function POST(request: Request) {
       }
     `;
 
-    // Locked explicitly to 3.6-flash
+    // THE FIX: Standardized versioning to the lightning-fast 3.6-flash model
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${API_KEY}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

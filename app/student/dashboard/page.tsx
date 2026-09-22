@@ -10,12 +10,16 @@ import {
   Settings, LogOut, ChevronLeft, Bell, BookOpen, 
   FileQuestion, ExternalLink, Loader2, User, 
   Plus, ShieldAlert, Smartphone, Download, 
-  Lock, Edit, Clock, Camera, AlertCircle, Trash2, LinkIcon
+  Lock, Edit, Clock, Camera, AlertCircle, Trash2, LinkIcon,
+  FileText, XCircle
 } from 'lucide-react';
 import DynamicHueBackground from '@/components/DynamicHueBackground';
 import CursorGlow from '@/components/CursorGlow';
 
-const TABS = ["Attendance", "Timetable", "Notice Board", "Materials", "Tests", "Gate Pass", "Leave"];
+import StudentGrievancesTab from '@/components/student/StudentGrievancesTab';
+import InAppMediaViewer from '@/components/ui/InAppMediaViewer'; // <-- THE FIX: Added Viewer Import
+
+const TABS = ["Attendance", "Timetable", "Notice Board", "Materials", "Tests", "Gate Pass", "Leave", "Grievances"];
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const LEAVE_TYPES = ["Medical Leave", "Casual Leave", "Duty Leave", "Family Event", "Emergency"];
 
@@ -23,6 +27,18 @@ export default function StudentDashboard() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("Attendance");
+
+  // THE FIX: Listen for URL parameters so Web Push Notifications land on the exact tab!
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab');
+      if (tabParam && TABS.includes(tabParam)) {
+        setActiveTab(tabParam);
+        window.history.replaceState({}, '', window.location.pathname); // Cleans the URL after routing
+      }
+    }
+  }, []);
   
   const [studentProfile, setStudentProfile] = useState<any>(null);
   const [attendanceHistory, setAttendanceHistory] = useState<any[]>([]);
@@ -158,7 +174,6 @@ export default function StudentDashboard() {
             <div>
               <p className="text-sm text-white/70">Welcome,</p>
               <h1 className="text-xl font-bold tracking-tight uppercase leading-tight">{studentProfile.fullName}</h1>
-              {/* THE FIX: Visually shows the Division now! */}
               <p className="text-xs text-[#D0BCFF] mt-0.5">{studentProfile.semester} • {studentProfile.branch} ({studentProfile.division}) • Batch {studentProfile.batch || "A"}</p>
             </div>
           </div>
@@ -194,10 +209,12 @@ export default function StudentDashboard() {
           {activeTab === "Attendance" && <AttendanceView history={attendanceHistory} student={studentProfile} cardBg={cardBg} />}
           {activeTab === "Timetable" && <TimetableView timetable={timetable} student={studentProfile} cardBg={cardBg} />}
           {activeTab === "Notice Board" && <NoticeBoardView notices={notices} cardBg={cardBg} />}
-          {activeTab === "Materials" && <MaterialsView materials={materials} cardBg={cardBg} />}
+          {activeTab === "Materials" && <MaterialsView materials={materials} cardBg={cardBg} isDynamicHue={isDynamicHue} />}
           {activeTab === "Tests" && <TestsView student={studentProfile} cardBg={cardBg} />}
           {activeTab === "Gate Pass" && <GatePassView passes={gatePasses} cardBg={cardBg} />}
-          {activeTab === "Leave" && <LeaveView student={studentProfile} leaves={leaveApplications} cardBg={cardBg} />}
+          {/* THE FIX: Passing isDynamicHue down to LeaveView so the native viewer blends perfectly */}
+          {activeTab === "Leave" && <LeaveView student={studentProfile} leaves={leaveApplications} cardBg={cardBg} isDynamicHue={isDynamicHue} />}
+          {activeTab === "Grievances" && <StudentGrievancesTab student={studentProfile} isDynamicHue={isDynamicHue} cardBg={cardBg} />}
         </div>
       </div>
     </main>
@@ -318,9 +335,14 @@ function NoticeBoardView({ notices, cardBg }: any) {
   );
 }
 
-function MaterialsView({ materials, cardBg }: any) {
+function MaterialsView({ materials, cardBg, isDynamicHue }: any) {
   const [filter, setFilter] = useState("All");
+  const [viewMediaUrl, setViewMediaUrl] = useState("");
+  const [viewMediaName, setViewMediaName] = useState("");
+  const [showMediaViewer, setShowMediaViewer] = useState(false);
+
   const displayed = materials.filter((m: any) => filter === "All" || m.category === filter);
+
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="flex gap-2 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden">
@@ -328,7 +350,7 @@ function MaterialsView({ materials, cardBg }: any) {
       </div>
       <div className="space-y-3">
         {displayed.length === 0 ? <p className="text-center py-10 opacity-50">No materials uploaded.</p> : displayed.map((m: any) => (
-            <div key={m.id} onClick={() => m.downloadUrl && window.open(m.downloadUrl, '_blank')} className={`p-5 rounded-2xl border flex items-center justify-between cursor-pointer hover:bg-white/10 transition-colors ${cardBg}`}>
+            <div key={m.id} onClick={() => { setViewMediaUrl(m.downloadUrl); setViewMediaName(m.fileName); setShowMediaViewer(true); }} className={`p-5 rounded-2xl border flex items-center justify-between cursor-pointer hover:bg-white/10 transition-colors ${cardBg}`}>
                <div className="flex items-center gap-4">
                  <div className="p-3 bg-white/5 rounded-xl border border-white/10">{m.category === 'Question Paper' ? <FileQuestion className="w-6 h-6" /> : <BookOpen className="w-6 h-6" />}</div>
                  <div><h4 className="font-bold text-[15px]">{m.fileName}</h4><p className="text-xs opacity-60 mt-1">{m.subject} • {m.category}</p></div>
@@ -338,11 +360,14 @@ function MaterialsView({ materials, cardBg }: any) {
           ))
         }
       </div>
+
+      {showMediaViewer && viewMediaUrl && (
+        <InAppMediaViewer url={viewMediaUrl} fileName={viewMediaName} isDynamicHue={isDynamicHue} onClose={() => { setShowMediaViewer(false); setViewMediaUrl(""); }} />
+      )}
     </div>
   );
 }
 
-// THE FIX: Parses and pulls tests exclusively using the Division architecture
 function TestsView({ student, cardBg }: any) {
   const [marks, setMarks] = useState<any[]>([]);
 
@@ -353,7 +378,6 @@ function TestsView({ student, cardBg }: any) {
       
       const classMarks = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter((d: any) => {
         const docIdClean = d.id.toLowerCase().replace(/\s+/g, '');
-        // Matches newly formatted `${sem}_${div}_${subject}` keys OR old legacy keys
         return (docIdClean.includes(targetSem) && docIdClean.includes(targetDiv)) || 
                (d.semester === student.semester && d.division === student.division);
       });
@@ -463,24 +487,79 @@ function GatePassView({ passes, cardBg }: any) {
   );
 }
 
-function LeaveView({ student, leaves, cardBg }: any) {
+// --- THE FIX: UPGRADED LEAVE VIEW WITH R2 MEDICAL CERTIFICATE UPLOADS ---
+function LeaveView({ student, leaves, cardBg, isDynamicHue, isParent = false, parentEmail = "" }: any) {
   const [showModal, setShowModal] = useState(false);
   const [leaveType, setLeaveType] = useState(LEAVE_TYPES[0]);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [reason, setReason] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const [viewMediaUrl, setViewMediaUrl] = useState("");
+  const [viewMediaName, setViewMediaName] = useState("");
+  const [showMediaViewer, setShowMediaViewer] = useState(false);
 
   const handleApply = async () => {
     if (!startDate || !endDate || !reason.trim()) return alert("Please specify dates and a detailed reason.");
     setSubmitting(true);
+    
     try {
+      let finalUrl = null;
+      let finalFileName = null;
+
+      if (selectedFile) {
+        // Fetch Vercel Pre-signed Cloudflare URL
+        const ticketRes = await fetch('/api/upload-url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileName: `Leave_${student.rollNo}_${selectedFile.name}`, fileType: selectedFile.type })
+        });
+        
+        if (!ticketRes.ok) throw new Error("Failed to get upload ticket.");
+        const { uploadUrl, downloadUrl } = await ticketRes.json();
+
+        // Upload directly to Cloudflare R2
+        const uploadRes = await fetch(uploadUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': selectedFile.type, 'Content-Disposition': 'inline' },
+          body: selectedFile
+        });
+
+        if (!uploadRes.ok) throw new Error("Failed to upload certificate.");
+        finalUrl = downloadUrl;
+        finalFileName = selectedFile.name;
+      }
+
       await addDoc(collection(db, "leave_applications"), {
         studentId: student.id, studentName: student.fullName, rollNo: student.rollNo, branch: student.branch, semester: student.semester, division: student.division,
-        leaveType, startDate, endDate, reason: reason.trim(), status: "PENDING", mentorApproval: "PENDING", hodApproval: "PENDING", appliedAt: Date.now()
+        leaveType, startDate: new Date(startDate).getTime(), endDate: new Date(endDate).getTime(), reason: reason.trim(), status: "PENDING", mentorApproval: "PENDING", hodApproval: "PENDING", appliedAt: Date.now(),
+        appliedByRole: isParent ? "Parent" : "Student",
+        appliedByEmail: isParent ? parentEmail : student.email,
+        attachmentUrl: finalUrl,
+        attachmentName: finalFileName
       });
-      setShowModal(false); setStartDate(""); setEndDate(""); setReason("");
-    } catch (e) { alert("Failed to submit."); } finally { setSubmitting(false); }
+
+      // Fire Push Notification to HOD
+      await fetch('/api/send-fcm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetTopic: `hod_${student.branch.replace(/[ ()]/g, "_")}`,
+          title: "New Leave Request 📝",
+          message: `${student.fullName} (${student.semester}) applied for leave.`,
+          channelId: "academic_alerts",
+          targetTab: "Student Leaves"
+        })
+      });
+
+      setShowModal(false); setStartDate(""); setEndDate(""); setReason(""); setSelectedFile(null);
+    } catch (e: any) { 
+      alert(`Failed to submit: ${e.message}`); 
+    } finally { 
+      setSubmitting(false); 
+    }
   };
 
   return (
@@ -492,12 +571,27 @@ function LeaveView({ student, leaves, cardBg }: any) {
       {leaves.length === 0 ? <div className="py-20 text-center opacity-50">No leave applications recorded.</div> : leaves.map((l: any) => (
           <div key={l.id} className={`p-6 rounded-[2rem] border ${cardBg}`}>
             <div className="flex justify-between items-start mb-2">
-              <div><h4 className="font-bold text-lg text-white">{l.leaveType}</h4><p className="text-xs opacity-60">{l.startDate} to {l.endDate}</p></div>
+              <div>
+                <h4 className="font-bold text-lg text-white">{l.leaveType}</h4>
+                <p className="text-xs opacity-60">{new Date(l.startDate).toLocaleDateString()} to {new Date(l.endDate).toLocaleDateString()}</p>
+                <p className="text-[10px] text-[#D0BCFF] mt-1 font-bold">Applied by {l.appliedByRole}</p>
+              </div>
               <span className={`px-3 py-1 text-[11px] font-black uppercase rounded-md border ${l.status === 'APPROVED' ? 'bg-green-500/20 text-green-400 border-green-500/30' : l.status === 'REJECTED' ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-orange-500/20 text-orange-400 border-orange-500/30'}`}>{l.status}</span>
             </div>
-            <p className="text-sm opacity-80 mt-2 bg-black/20 p-3 rounded-xl border border-white/5">{l.reason}</p>
+            <p className="text-sm opacity-80 mt-3 bg-black/20 p-3 rounded-xl border border-white/5">{l.reason}</p>
+            
+            {l.attachmentUrl && (
+               <div 
+                 onClick={() => { setViewMediaUrl(l.attachmentUrl); setViewMediaName(l.attachmentName || "Medical Certificate"); setShowMediaViewer(true); }}
+                 className="flex items-center cursor-pointer gap-2 px-4 py-3 mt-3 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-xl hover:bg-blue-500/20 w-fit font-bold text-sm"
+               >
+                 <FileText className="w-4 h-4"/> View Attached Certificate
+               </div>
+            )}
+
+            {l.hodRemarks && <p className="text-xs text-red-400 mt-3 font-bold bg-red-500/10 p-3 rounded-xl">HOD Remarks: {l.hodRemarks}</p>}
+
             <div className="flex gap-4 mt-3 pt-3 border-t border-white/5 text-[11px] opacity-60">
-              <span>Mentor: <strong className="text-white">{l.mentorApproval || "PENDING"}</strong></span>
               <span>HOD: <strong className="text-white">{l.hodApproval || "PENDING"}</strong></span>
             </div>
           </div>
@@ -505,16 +599,32 @@ function LeaveView({ student, leaves, cardBg }: any) {
       }
       {showModal && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-          <div className="bg-[#161616] border border-white/10 p-6 rounded-[2rem] max-w-md w-full text-white shadow-2xl">
-            <h3 className="text-xl font-bold mb-4">Submit Leave Request</h3>
-            <div className="space-y-4">
-              <div><label className="text-xs font-bold opacity-60 mb-1 block">Category</label><select value={leaveType} onChange={e => setLeaveType(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none">{LEAVE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
-              <div className="flex gap-3"><div className="flex-1"><label className="text-xs font-bold opacity-60 mb-1 block">From</label><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none" /></div><div className="flex-1"><label className="text-xs font-bold opacity-60 mb-1 block">To</label><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none" /></div></div>
-              <div><label className="text-xs font-bold opacity-60 mb-1 block">Reason for absence</label><textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none resize-none" /></div>
+          <div className="bg-[#161616] border border-white/10 p-6 rounded-[2rem] max-w-md w-full text-white shadow-2xl overflow-y-auto max-h-[90vh]">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold">Submit Leave Request</h3>
+              <button onClick={() => !submitting && setShowModal(false)} className="text-white/50 hover:text-red-500 transition-colors"><XCircle className="w-6 h-6"/></button>
             </div>
-            <div className="flex gap-3 mt-6"><button onClick={() => setShowModal(false)} className="flex-1 py-3 bg-white/10 rounded-xl font-bold text-sm">Cancel</button><button onClick={handleApply} disabled={submitting} className="flex-1 py-3 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold text-sm disabled:opacity-50">{submitting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "Submit"}</button></div>
+            <div className="space-y-4">
+              <div><label className="text-xs font-bold opacity-60 mb-1 block">Category</label><select value={leaveType} onChange={e => setLeaveType(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none text-white">{LEAVE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+              <div className="flex gap-3"><div className="flex-1"><label className="text-xs font-bold opacity-60 mb-1 block">From</label><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none text-white" /></div><div className="flex-1"><label className="text-xs font-bold opacity-60 mb-1 block">To</label><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none text-white" /></div></div>
+              <div><label className="text-xs font-bold opacity-60 mb-1 block">Reason for absence</label><textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none resize-none text-white" /></div>
+              
+              <div>
+                <label className="text-xs font-bold opacity-60 mb-1 block">Medical Certificate / Proof (Optional)</label>
+                <input type="file" accept="image/*,.pdf" onChange={e => setSelectedFile(e.target.files?.[0] || null)} className="w-full text-sm file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:font-bold file:bg-[#D0BCFF] file:text-[#2A1B4E] bg-black/40 border border-white/10 rounded-xl p-2 text-white" />
+              </div>
+
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => !submitting && setShowModal(false)} className="flex-1 py-3 bg-white/10 rounded-xl font-bold text-sm">Cancel</button>
+              <button onClick={handleApply} disabled={submitting} className="flex-1 py-3 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold text-sm disabled:opacity-50">{submitting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "Submit"}</button>
+            </div>
           </div>
         </div>
+      )}
+
+      {showMediaViewer && viewMediaUrl && (
+        <InAppMediaViewer url={viewMediaUrl} fileName={viewMediaName} isDynamicHue={isDynamicHue} onClose={() => { setShowMediaViewer(false); setViewMediaUrl(""); }} />
       )}
     </div>
   );

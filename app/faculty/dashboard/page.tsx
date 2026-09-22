@@ -26,6 +26,7 @@ import FacultyMaterialsTab from '@/components/faculty/FacultyMaterialsTab';
 import FacultyNoticeBoardTab from '@/components/faculty/FacultyNoticeBoardTab';
 import FacultyGatePassTab from '@/components/faculty/FacultyGatePassTab';
 import FacultyLeavesAndTransfersTab from '@/components/faculty/FacultyLeavesAndTransfersTab';
+import FacultyGrievancesTab from '@/components/faculty/FacultyGrievancesTab';
 import SuperAdminPanel from '@/components/faculty/SuperAdminPanel';
 import BugCenterPanel from '@/components/faculty/BugCenterPanel';
 
@@ -89,9 +90,21 @@ export default function FacultyDashboard() {
   const [facultyId, setFacultyId] = useState("");
   const [isHod, setIsHod] = useState(false);
   
-  // Tab State matches the exact order of the video
+// Tab State matches the exact order of the video
   const [activeTab, setActiveTab] = useState("Classes");
-  const tabs = ["Classes", "Metrics", "Materials", "Notice Board", "History", "Tests", "Gate Pass", "Leaves & Transfers"];
+  const tabs = ["Classes", "Metrics", "Materials", "Notice Board", "History", "Tests", "Gate Pass", "Leaves & Transfers", "Grievances"];
+
+  // THE FIX: Listen for URL parameters so Web Push Notifications land on the exact tab!
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab');
+      if (tabParam && tabs.includes(tabParam)) {
+        setActiveTab(tabParam);
+        window.history.replaceState({}, '', window.location.pathname); // Cleans the URL after routing
+      }
+    }
+  }, []);
   
   const [teachingConfig, setTeachingConfig] = useState<Record<string, string[]>>({});
   const [facultySchedule, setFacultySchedule] = useState<any[]>([]);
@@ -721,8 +734,8 @@ export default function FacultyDashboard() {
         {activeTab === "Tests" && <div className="flex-1 flex flex-col pb-10 relative"><FacultyTestsTab isDark={isDark} /></div>}
         {activeTab === "Gate Pass" && <div className="flex-1 flex flex-col pb-10"><FacultyGatePassTab isDark={isDark} /></div>}
         {activeTab === "Leaves & Transfers" && <div className="flex-1 flex flex-col pb-10"><FacultyLeavesAndTransfersTab isDark={isDark} userTimetable={facultySchedule} /></div>}
+        {activeTab === "Grievances" && <div className="flex-1 flex flex-col pb-10"><FacultyGrievancesTab isDynamicHue={isDynamicHue} /></div>}
       </div>
-
       {showEditClasses && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
           <div className={`border p-8 rounded-[2rem] w-full max-w-lg flex flex-col max-h-[85vh] ${modalBg}`}>

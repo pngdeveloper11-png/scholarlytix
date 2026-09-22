@@ -6,13 +6,19 @@ import { db } from '@/lib/firebase';
 import { X, Trash2, ShieldAlert, Loader2, KeyRound } from 'lucide-react';
 import CollegeStructureManager from './CollegeStructureManager';
 import SubjectManagerDialog from './SubjectManagerDialog';
-import { CollegeStructureConfig } from '@/types';
+import { CollegeStructureConfig, DivisionDef, BatchDef } from '@/types';
+import GlassDropdown from '../GlassDropdown';
 
 const ROLES = ["Teacher", "Class Teacher", "HOD", "Registrar", "Principal", "Director"];
 const STREAMS = ["Engineering", "Management"];
 const ENGINEERING_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE"];
 const MANAGEMENT_BRANCHES = ["BMS", "MMS"];
 const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8"];
+
+const isFirstYearSem = (sem: string) => {
+  const s = (sem || "").toLowerCase().trim();
+  return s.includes("sem 1") || s.includes("sem 2") || s.includes("semester 1") || s.includes("semester 2") || s.includes("1st");
+};
 
 export default function SuperAdminPanel({ isDark, onClose }: { isDark: boolean, onClose: () => void }) {
   const [facultyList, setFacultyList] = useState<any[]>([]);
@@ -32,10 +38,13 @@ export default function SuperAdminPanel({ isDark, onClose }: { isDark: boolean, 
   const [selectedBranches, setSelectedBranches] = useState<string[]>([]);
   
   // Class Teacher States
+  const [ctStream, setCtStream] = useState("Engineering");
   const [ctSem, setCtSem] = useState(AVAILABLE_SEMESTERS[0]);
+  const [ctBranch, setCtBranch] = useState("CSE");
   const [ctDivision, setCtDivision] = useState("");
 
   const currentBranches = selectedStream === "Engineering" ? ENGINEERING_BRANCHES : MANAGEMENT_BRANCHES;
+  const currentCtBranches = ctStream === "Engineering" ? ENGINEERING_BRANCHES : MANAGEMENT_BRANCHES;
 
   useEffect(() => {
     const unsubFaculty = onSnapshot(collection(db, 'approved_faculty_emails'), (snap) => {
@@ -54,9 +63,17 @@ export default function SuperAdminPanel({ isDark, onClose }: { isDark: boolean, 
   }, []);
 
   useEffect(() => {
-    const divs = globalStructure[ctSem]?.map(d => d.divisionName) || [];
+    if (!currentCtBranches.includes(ctBranch)) {
+      setCtBranch(currentCtBranches[0] || "");
+    }
+  }, [ctStream, currentCtBranches]);
+
+  useEffect(() => {
+    const isFirstYear = isFirstYearSem(ctSem);
+    const structKey = isFirstYear ? ctSem : `${ctSem}|${ctBranch}`;
+    const divs = globalStructure[structKey]?.map(d => d.divisionName) || [];
     if (!divs.includes(ctDivision)) setCtDivision(divs[0] || "");
-  }, [ctSem, globalStructure]);
+  }, [ctSem, ctBranch, globalStructure]);
 
   const handleAuthorize = async () => {
     if (!newName.trim() || !newEmail.trim() || !newEmail.includes('@')) {
@@ -72,12 +89,19 @@ export default function SuperAdminPanel({ isDark, onClose }: { isDark: boolean, 
     setIsProcessing(true);
     let finalScopeStr = "NONE";
     
+    // THE FIX: Exact resolution of the Class Teacher string
     switch (selectedRole) {
       case "Director": finalScopeStr = "DIRECTOR"; break;
       case "Principal": finalScopeStr = "PRINCIPAL"; break;
       case "Registrar": finalScopeStr = "REGISTRAR"; break;
       case "HOD": finalScopeStr = `HOD|${selectedBranches.join(',')}`; break;
-      case "Class Teacher": finalScopeStr = `CLASS_TEACHER|${ctSem}|${ctDivision}`; break;
+      case "Class Teacher": 
+        if (isFirstYearSem(ctSem)) {
+          finalScopeStr = `CLASS_TEACHER|${ctSem}|${ctDivision}`; 
+        } else {
+          finalScopeStr = `CLASS_TEACHER|${ctSem}|${ctBranch}|${ctDivision}`; 
+        }
+        break;
     }
 
     try {
@@ -187,13 +211,35 @@ export default function SuperAdminPanel({ isDark, onClose }: { isDark: boolean, 
               )}
 
               {selectedRole === "Class Teacher" && (
-                <div className="flex gap-4">
-                  <select value={ctSem} onChange={e => setCtSem(e.target.value)} className={`flex-1 p-3 rounded-xl border outline-none ${inputBg}`}>
-                    {AVAILABLE_SEMESTERS.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                  <select value={ctDivision} onChange={e => setCtDivision(e.target.value)} className={`flex-1 p-3 rounded-xl border outline-none ${inputBg}`}>
-                    {globalStructure[ctSem]?.map(d => <option key={d.divisionName} value={d.divisionName}>{d.divisionName}</option>) || <option value="">No Divs Built</option>}
-                  </select>
+                <div>
+                  <p className="text-sm text-[#D0BCFF] mb-2 font-bold">{isFirstYearSem(ctSem) ? "Sem 1 & 2: Assign to Common Division" : "Assign to Branch & Class"}</p>
+                  <div className="flex gap-4">
+                    <div className="flex-1">
+                      <select value={ctStream} onChange={e => setCtStream(e.target.value)} className={`w-full p-3 rounded-xl border outline-none ${inputBg}`}>
+                        {STREAMS.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex-1">
+                      <select value={ctSem} onChange={e => setCtSem(e.target.value)} className={`w-full p-3 rounded-xl border outline-none ${inputBg}`}>
+                        {AVAILABLE_SEMESTERS.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  
+                  <div className="flex gap-4 mt-4">
+                    {!isFirstYearSem(ctSem) && (
+                      <div className="flex-1">
+                        <select value={ctBranch} onChange={e => setCtBranch(e.target.value)} className={`w-full p-3 rounded-xl border outline-none ${inputBg}`}>
+                          {currentCtBranches.map(b => <option key={b} value={b}>{b}</option>)}
+                        </select>
+                      </div>
+                    )}
+                    <div className="flex-1">
+                      <select value={ctDivision} onChange={e => setCtDivision(e.target.value)} className={`w-full p-3 rounded-xl border outline-none ${inputBg}`}>
+                        {globalStructure[isFirstYearSem(ctSem) ? ctSem : `${ctSem}|${ctBranch}`]?.map(d => <option key={d.divisionName} value={d.divisionName}>{d.divisionName}</option>) || <option value="">No Divs Built</option>}
+                      </select>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

@@ -16,22 +16,40 @@ const messaging = firebase.messaging();
 messaging.onBackgroundMessage((payload) => {
   const title = payload.data?.title || payload.notification?.title || "Scholarlytix Alert";
   
-  // Dynamically determine the route based on the targetTab data
-  let targetUrl = '/';
-  if (payload.data?.targetTab) {
-      targetUrl = `/?tab=${encodeURIComponent(payload.data.targetTab)}`;
-  }
+  // Extract the target tab from the payload
+  const targetTab = payload.data?.targetTab || "Notice Board";
 
   const options = {
     body: payload.data?.message || payload.notification?.body || "You have a new academic update.",
     icon: '/favicon.ico',
-    data: { url: targetUrl }
+    data: { tab: targetTab } // Store the tab inside the notification data payload
   };
   return self.registration.showNotification(title, options);
 });
 
-// Handle Banner Clicks
+// Handle Banner Clicks and Route to the correct Dashboard Tab
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  event.waitUntil(self.clients.openWindow(event.notification.data.url));
+  const targetTab = event.notification.data.tab;
+  
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      // 1. Check if there is already an app window open on a dashboard
+      for (let client of windowClients) {
+        const clientUrl = new URL(client.url);
+        // If the user is currently on the student or faculty dashboard, navigate them instantly
+        if (clientUrl.pathname.includes('/dashboard')) {
+          // Seamlessly swap the tab without opening a duplicate browser tab
+          const newUrl = `${clientUrl.origin}${clientUrl.pathname}?tab=${encodeURIComponent(targetTab)}`;
+          return client.navigate(newUrl).then((c) => c.focus());
+        }
+      }
+      
+      // 2. If the app is completely closed, open the root domain with the tab param.
+      // The Next.js layout auth guards will carry the param over to the respective dashboard.
+      if (clients.openWindow) {
+        return clients.openWindow(`/?tab=${encodeURIComponent(targetTab)}`);
+      }
+    })
+  );
 });

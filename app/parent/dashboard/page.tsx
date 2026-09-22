@@ -2,15 +2,16 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { collection, query, where, onSnapshot, doc, getDoc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, getDoc, updateDoc, addDoc } from 'firebase/firestore';
 import { signOut, onAuthStateChanged } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase';
 import { motion } from 'framer-motion';
-import { Settings, LogOut, ChevronLeft, User, Loader2, Link2Off } from 'lucide-react';
+import { Settings, LogOut, ChevronLeft, User, Loader2, Link2Off, Plus, Clock, FileText, XCircle } from 'lucide-react';
 import DynamicHueBackground from '@/components/DynamicHueBackground';
 import CursorGlow from '@/components/CursorGlow';
 
-const TABS = ["Attendance", "Timetable", "Notice Board", "Tests", "Gate Pass"];
+const TABS = ["Attendance", "Timetable", "Notice Board", "Tests", "Gate Pass", "Leave"];
+const LEAVE_TYPES = ["Medical Leave", "Casual Leave", "Duty Leave", "Family Event", "Emergency"];
 
 export default function ParentDashboard() {
   const router = useRouter();
@@ -25,9 +26,22 @@ export default function ParentDashboard() {
   const [notices, setNotices] = useState<any[]>([]);
   const [gatePasses, setGatePasses] = useState<any[]>([]);
   const [testMarks, setTestMarks] = useState<any[]>([]);
+  const [leaveApplications, setLeaveApplications] = useState<any[]>([]);
   
   const [showSettings, setShowSettings] = useState(false);
   const [theme, setTheme] = useState("indigo");
+
+  // THE FIX: Smart Routing from Web Push Notifications
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab');
+      if (tabParam && TABS.includes(tabParam)) {
+        setActiveTab(tabParam);
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     const savedTheme = localStorage.getItem("academiq_theme");
@@ -35,26 +49,32 @@ export default function ParentDashboard() {
 
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       if (!user) {
-        router.replace('/parent/linking');
+        router.replace('/parent/login');
         return;
       }
       setParentEmail(user.email || "");
 
       const sessionStr = localStorage.getItem("academiq_student_session");
       if (!sessionStr) {
-        router.replace('/parent/linking');
+        router.replace('/parent/login');
         return;
       }
       const session = JSON.parse(sessionStr);
 
       onSnapshot(doc(db, "students_directory", session.studentId), (snap) => {
-        if (!snap.exists() || snap.data().linkedParentEmail !== user.email?.toLowerCase().trim()) {
+        const data = snap.data();
+        // Check array or legacy string for parent email
+        const parentEmailsArray = data?.linkedParentEmails || [];
+        const legacyEmail = data?.linkedParentEmail;
+        const currentEmail = user.email?.toLowerCase().trim();
+
+        if (!snap.exists() || (!parentEmailsArray.includes(currentEmail) && legacyEmail !== currentEmail)) {
           signOut(auth);
           localStorage.removeItem("academiq_student_session");
-          router.replace('/parent/linking');
+          router.replace('/parent/login');
           return;
         }
-        setStudentProfile({ id: snap.id, ...(snap.data() as any) });
+        setStudentProfile({ id: snap.id, ...(data as any) });
       });
     });
 
@@ -64,7 +84,6 @@ export default function ParentDashboard() {
   useEffect(() => {
     if (!studentProfile) return;
 
-    // THE FIX: Syncs perfectly with the Faculty's Division-first document generation
     const classRef = `${studentProfile.semester}_${studentProfile.division}`.replace(/\s+/g, '').replace(/&/g, 'and');
     
     const unsubAtt = onSnapshot(collection(db, "attendance_history"), (snap) => {
@@ -94,22 +113,29 @@ export default function ParentDashboard() {
       
       setTestMarks(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter((d: any) => {
         const docIdClean = d.id.toLowerCase().replace(/\s+/g, '');
-        // Match the division-based ID safely
         return (docIdClean.includes(targetSem) && docIdClean.includes(targetDiv)) || 
                (d.semester === studentProfile.semester && d.division === studentProfile.division);
       }));
     });
 
+    const unsubLeaves = onSnapshot(collection(db, "leave_applications"), (snap) => {
+      setLeaveApplications(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter((l: any) => l.studentId === studentProfile.id || l.rollNo === studentProfile.rollNo).sort((a, b) => (b.appliedAt || 0) - (a.appliedAt || 0)));
+    });
+
     setLoading(false);
 
-    return () => { unsubAtt(); unsubTime(); unsubNotices(); unsubPass(); unsubMarks(); };
+    return () => { unsubAtt(); unsubTime(); unsubNotices(); unsubPass(); unsubMarks(); unsubLeaves(); };
   }, [studentProfile?.id, studentProfile?.branch, studentProfile?.semester, studentProfile?.division]);
 
   const handleDisconnect = async () => {
     if (confirm("Disconnect from this student? You will need to link them again later.")) {
-      await updateDoc(doc(db, "students_directory", studentProfile.id), { linkedParentEmail: null });
+      // Remove from array or legacy field
+      const parentEmailsArray = studentProfile.linkedParentEmails || [];
+      const updatedArray = parentEmailsArray.filter((e: string) => e !== parentEmail);
+      await updateDoc(doc(db, "students_directory", studentProfile.id), { linkedParentEmails: updatedArray, linkedParentEmail: null });
+      
       localStorage.removeItem("academiq_student_session");
-      router.replace('/parent/linking');
+      router.replace('/parent/login');
     }
   };
 
@@ -170,7 +196,6 @@ export default function ParentDashboard() {
             <div>
               <p className="text-sm text-white/70">Monitoring:</p>
               <h1 className="text-xl font-bold tracking-tight uppercase leading-tight">{studentProfile.fullName}</h1>
-              {/* THE FIX: Visually shows the Division now! */}
               <p className="text-xs text-[#D0BCFF] mt-0.5">{studentProfile.semester} • {studentProfile.branch} ({studentProfile.division})</p>
             </div>
           </div>
@@ -268,8 +293,140 @@ export default function ParentDashboard() {
             ))
           )}
 
+          {activeTab === "Leave" && <LeaveView student={studentProfile} leaves={leaveApplications} cardBg={cardBg} isParent={true} parentEmail={parentEmail} />}
+
         </div>
       </div>
     </main>
+  );
+}
+
+// --- THE FIX: UPGRADED LEAVE VIEW WITH R2 MEDICAL CERTIFICATE UPLOADS ---
+// Please also copy-paste this identical function into your student/dashboard/page.tsx file at the bottom!
+function LeaveView({ student, leaves, cardBg, isParent = false, parentEmail = "" }: any) {
+  const [showModal, setShowModal] = useState(false);
+  const [leaveType, setLeaveType] = useState(LEAVE_TYPES[0]);
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [reason, setReason] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleApply = async () => {
+    if (!startDate || !endDate || !reason.trim()) return alert("Please specify dates and a detailed reason.");
+    setSubmitting(true);
+    
+    try {
+      let finalUrl = null;
+      let finalFileName = null;
+
+      if (selectedFile) {
+        // Fetch Vercel Pre-signed Cloudflare URL
+        const ticketRes = await fetch('/api/upload-url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileName: `Leave_${student.rollNo}_${selectedFile.name}`, fileType: selectedFile.type })
+        });
+        
+        if (!ticketRes.ok) throw new Error("Failed to get upload ticket.");
+        const { uploadUrl, downloadUrl } = await ticketRes.json();
+
+        // Upload directly to Cloudflare R2
+        const uploadRes = await fetch(uploadUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': selectedFile.type, 'Content-Disposition': 'inline' },
+          body: selectedFile
+        });
+
+        if (!uploadRes.ok) throw new Error("Failed to upload certificate.");
+        finalUrl = downloadUrl;
+        finalFileName = selectedFile.name;
+      }
+
+      await addDoc(collection(db, "leave_applications"), {
+        studentId: student.id, studentName: student.fullName, rollNo: student.rollNo, branch: student.branch, semester: student.semester, division: student.division,
+        leaveType, startDate: new Date(startDate).getTime(), endDate: new Date(endDate).getTime(), reason: reason.trim(), status: "PENDING", mentorApproval: "PENDING", hodApproval: "PENDING", appliedAt: Date.now(),
+        appliedByRole: isParent ? "Parent" : "Student",
+        appliedByEmail: isParent ? parentEmail : student.email,
+        attachmentUrl: finalUrl,
+        attachmentName: finalFileName
+      });
+
+      // Fire Push Notification to HOD
+      await fetch('/api/send-fcm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetTopic: `hod_${student.branch.replace(/[ ()]/g, "_")}`,
+          title: "New Leave Request 📝",
+          message: `${student.fullName} (${student.semester}) applied for leave.`,
+          channelId: "academic_alerts",
+          targetTab: "Student Leaves"
+        })
+      });
+
+      setShowModal(false); setStartDate(""); setEndDate(""); setReason(""); setSelectedFile(null);
+    } catch (e: any) { 
+      alert(`Failed to submit: ${e.message}`); 
+    } finally { 
+      setSubmitting(false); 
+    }
+  };
+
+  return (
+    <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="font-bold text-lg">Leave Applications</h3>
+        <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold text-sm flex items-center shadow-[0_0_15px_rgba(208,188,255,0.4)] hover:scale-105 transition-transform"><Plus className="w-4 h-4 mr-1" /> Apply</button>
+      </div>
+      {leaves.length === 0 ? <div className="py-20 text-center opacity-50">No leave applications recorded.</div> : leaves.map((l: any) => (
+          <div key={l.id} className={`p-6 rounded-[2rem] border ${cardBg}`}>
+            <div className="flex justify-between items-start mb-2">
+              <div>
+                <h4 className="font-bold text-lg text-white">{l.leaveType}</h4>
+                <p className="text-xs opacity-60">{new Date(l.startDate).toLocaleDateString()} to {new Date(l.endDate).toLocaleDateString()}</p>
+                <p className="text-[10px] text-[#D0BCFF] mt-1 font-bold">Applied by {l.appliedByRole}</p>
+              </div>
+              <span className={`px-3 py-1 text-[11px] font-black uppercase rounded-md border ${l.status === 'APPROVED' ? 'bg-green-500/20 text-green-400 border-green-500/30' : l.status === 'REJECTED' ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-orange-500/20 text-orange-400 border-orange-500/30'}`}>{l.status}</span>
+            </div>
+            <p className="text-sm opacity-80 mt-3 bg-black/20 p-3 rounded-xl border border-white/5">{l.reason}</p>
+            
+            {l.attachmentUrl && (
+               <a href={l.attachmentUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 px-4 py-3 mt-3 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-xl hover:bg-blue-500/20 w-fit font-bold text-sm">
+                 <FileText className="w-4 h-4"/> View Attached Certificate
+               </a>
+            )}
+
+            {l.hodRemarks && <p className="text-xs text-red-400 mt-3 font-bold bg-red-500/10 p-3 rounded-xl">HOD Remarks: {l.hodRemarks}</p>}
+
+            <div className="flex gap-4 mt-3 pt-3 border-t border-white/5 text-[11px] opacity-60">
+              <span>HOD: <strong className="text-white">{l.hodApproval || "PENDING"}</strong></span>
+            </div>
+          </div>
+        ))
+      }
+      {showModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <div className="bg-[#161616] border border-white/10 p-6 rounded-[2rem] max-w-md w-full text-white shadow-2xl overflow-y-auto max-h-[90vh]">
+            <h3 className="text-xl font-bold mb-4">Submit Leave Request</h3>
+            <div className="space-y-4">
+              <div><label className="text-xs font-bold opacity-60 mb-1 block">Category</label><select value={leaveType} onChange={e => setLeaveType(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none text-white">{LEAVE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+              <div className="flex gap-3"><div className="flex-1"><label className="text-xs font-bold opacity-60 mb-1 block">From</label><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none text-white" /></div><div className="flex-1"><label className="text-xs font-bold opacity-60 mb-1 block">To</label><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none text-white" /></div></div>
+              <div><label className="text-xs font-bold opacity-60 mb-1 block">Reason for absence</label><textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none resize-none text-white" /></div>
+              
+              <div>
+                <label className="text-xs font-bold opacity-60 mb-1 block">Medical Certificate / Proof (Optional)</label>
+                <input type="file" accept="image/*,.pdf" onChange={e => setSelectedFile(e.target.files?.[0] || null)} className="w-full text-sm file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:font-bold file:bg-[#D0BCFF] file:text-[#2A1B4E] bg-black/40 border border-white/10 rounded-xl p-2 text-white" />
+              </div>
+
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => !submitting && setShowModal(false)} className="flex-1 py-3 bg-white/10 rounded-xl font-bold text-sm">Cancel</button>
+              <button onClick={handleApply} disabled={submitting} className="flex-1 py-3 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold text-sm disabled:opacity-50">{submitting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "Submit"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

@@ -4,9 +4,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { collection, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../app/context/AuthContext';
-import { Bell, Plus, Trash2, Calendar, Loader2, X, Link as LinkIcon, Paperclip, ExternalLink, UploadCloud } from 'lucide-react';
+import { Bell, Plus, Trash2, Calendar, Loader2, X, Link as LinkIcon, Paperclip, ExternalLink, UploadCloud, Video } from 'lucide-react';
 import GlassButton from '../ui/GlassButton';
 import GlassDropdown from '../GlassDropdown';
+import InAppMediaViewer from '../ui/InAppMediaViewer'; // <-- THE FIX: Added native media viewer
 
 const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8"];
 const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
@@ -23,6 +24,9 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
   const [showNewNoticeDialog, setShowNewNoticeDialog] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
 
+  // THE FIX: Hook state for the Media Viewer
+  const [viewMedia, setViewMedia] = useState<{url: string, name: string} | null>(null);
+
   // Advanced Filtering States
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
@@ -31,7 +35,7 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
   const [targetBranch, setTargetBranch] = useState("All");
   const [targetDivision, setTargetDivision] = useState("All");
   
-  const [files, setFiles] = useState<File[]>([]);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [links, setLinks] = useState<string[]>([]);
   const [linkInput, setLinkInput] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -55,7 +59,6 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
     return () => { unsubStruct(); unsub(); };
   }, []);
 
-  // Dynamically load divisions if a specific semester is picked
   const availableDivisions = targetSem !== "All" 
     ? (globalStructure[targetSem] || []).map((d: any) => d.divisionName) 
     : [];
@@ -73,16 +76,21 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
 
     try {
       const uploadedAttachments = [];
-      for (const file of files) {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('fileName', file.name);
-        formData.append('path', `notices/${Date.now()}`);
+      if (selectedFile) {
+        // Upload cleanly to Cloudflare R2
+        const ticketRes = await fetch('/api/upload-url', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileName: `Notice_${Date.now()}_${selectedFile.name}`, fileType: selectedFile.type })
+        });
+        if (!ticketRes.ok) throw new Error("Failed to get R2 ticket.");
+        const { uploadUrl, downloadUrl } = await ticketRes.json();
 
-        const res = await fetch('/api/upload-drive', { method: 'POST', body: formData });
-        if (res.ok) {
-          const { downloadUrl } = await res.json();
-          uploadedAttachments.push({ url: downloadUrl, name: file.name, type: file.type });
+        const uploadRes = await fetch(uploadUrl, {
+          method: 'PUT', headers: { 'Content-Type': selectedFile.type, 'Content-Disposition': 'inline' },
+          body: selectedFile
+        });
+        if (uploadRes.ok) {
+          uploadedAttachments.push({ url: downloadUrl, name: selectedFile.name, type: selectedFile.type });
         }
       }
 
@@ -97,7 +105,8 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
         attachments: uploadedAttachments,
         authorName: user?.displayName || "Admin",
         authorRole: role?.replace("HOD|", "HOD ") || "Management",
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        authorUid: user?.uid || ""
       });
 
       // Execute targeted FCM Logic
@@ -118,18 +127,23 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
 
       await fetch('/api/send-fcm', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetTopic: pushTopic, title: `📢 ${title}`, message, targetTab: "NoticeBoard" })
+        body: JSON.stringify({ targetTopic: pushTopic, title: `📢 ${title}`, message, targetTab: "Notice Board" }) // The exact string mapped in Android
       });
 
       setShowNewNoticeDialog(false);
-      setTitle(""); setMessage(""); setFiles([]); setLinks([]); 
+      setTitle(""); setMessage(""); setSelectedFile(null); setLinks([]); 
       setTargetRole("All"); setTargetSem("All"); setTargetBranch("All"); setTargetDivision("All");
     } catch (e) { alert("Failed to publish notice."); } finally { setIsPublishing(false); }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: string, atts: any[]) => {
     if (confirm("Delete this notice permanently?")) {
-      await deleteDoc(doc(db, "announcements", id));
+       if (atts && atts.length > 0) {
+         for (const att of atts) {
+           await fetch('/api/delete-file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileName: att.name || "File" }) });
+         }
+       }
+       await deleteDoc(doc(db, "announcements", id));
     }
   };
 
@@ -177,8 +191,8 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
                       </span>
                     </div>
                   </div>
-                  {isHod && (
-                    <button onClick={() => handleDelete(notice.id)} className="p-2 bg-red-500/10 text-red-500 hover:bg-red-500/20 rounded-xl transition-colors">
+                  {(isHod || notice.authorUid === user?.uid) && (
+                    <button onClick={() => handleDelete(notice.id, notice.attachments)} className="p-2 bg-red-500/10 text-red-500 hover:bg-red-500/20 rounded-xl transition-colors">
                       <Trash2 className="w-4 h-4" />
                     </button>
                   )}
@@ -192,23 +206,38 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
                   <div className="flex flex-wrap gap-3 mb-4">
                     {notice.links?.map((link: string, i: number) => (
                       <a key={i} href={link} target="_blank" rel="noopener noreferrer" className="flex items-center px-4 py-2 bg-blue-500/10 border border-blue-500/20 text-blue-300 rounded-xl text-xs font-bold hover:bg-blue-500/20 transition">
-                        <LinkIcon className="w-3 h-3 mr-2" /> External Link {i+1}
+                        <LinkIcon className="w-3 h-3 mr-2" /> View Link
                       </a>
                     ))}
-                    {notice.attachments?.map((att: any, i: number) => (
-                       att.type.startsWith('image/') ? (
-                         <div key={i} className="w-full sm:w-48 h-32 rounded-xl overflow-hidden border border-white/10 cursor-pointer relative group" onClick={() => window.open(att.url)}>
-                           <img src={att.url} alt="Attachment" className="w-full h-full object-cover group-hover:scale-110 transition-transform" />
-                           <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                             <ExternalLink className="w-6 h-6 text-white" />
+                    {notice.attachments?.map((att: any, i: number) => {
+                       const lowerName = (att.name || "attachment").toLowerCase();
+                       const isImage = lowerName.endsWith(".jpg") || lowerName.endsWith(".png") || lowerName.endsWith(".jpeg");
+                       const isVid = lowerName.endsWith(".mp4") || lowerName.endsWith(".webm") || lowerName.endsWith(".mov");
+                       
+                       if (isImage || isVid) {
+                         return (
+                           <div key={i} className="w-full sm:w-48 h-32 rounded-xl overflow-hidden border border-white/10 cursor-pointer relative group" onClick={() => setViewMedia({ url: att.url, name: att.name || "Attachment" })}>
+                             {isVid ? (
+                               <div className="w-full h-full bg-black flex flex-col items-center justify-center text-white/70 group-hover:text-white transition-colors">
+                                  <Video className="w-8 h-8 mb-1" />
+                                  <span className="text-[10px] font-bold">Play Video</span>
+                               </div>
+                             ) : (
+                               <img src={att.url} alt="Attachment" className="w-full h-full object-cover group-hover:scale-110 transition-transform" />
+                             )}
+                             <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                               <ExternalLink className="w-6 h-6 text-white" />
+                             </div>
                            </div>
-                         </div>
-                       ) : (
-                         <a key={i} href={att.url} target="_blank" rel="noopener noreferrer" className="flex items-center px-4 py-2 bg-white/5 border border-white/10 text-white rounded-xl text-xs font-bold hover:bg-white/10 transition">
-                           <Paperclip className="w-3 h-3 mr-2" /> {att.name || "Download File"}
-                         </a>
-                       )
-                    ))}
+                         );
+                       } else {
+                         return (
+                           <button key={i} onClick={() => setViewMedia({ url: att.url, name: att.name || "Document" })} className="flex items-center px-4 py-2 bg-white/5 border border-white/10 text-white rounded-xl text-xs font-bold hover:bg-white/10 transition">
+                             <Paperclip className="w-3 h-3 mr-2" /> Preview {att.name || "Document"}
+                           </button>
+                         );
+                       }
+                    })}
                   </div>
                 )}
 
@@ -262,16 +291,20 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
                       <LinkIcon className="w-3 h-3 mr-1"/> {lnk.slice(0, 15)}... <X onClick={() => setLinks(links.filter((_, idx) => idx !== i))} className="w-3 h-3 ml-2 cursor-pointer hover:text-red-400"/>
                     </span>
                   ))}
-                  {files.map((f, i) => (
-                    <span key={i} className="px-2 py-1 bg-white/10 text-white rounded text-[10px] flex items-center">
-                      <Paperclip className="w-3 h-3 mr-1"/> {f.name} <X onClick={() => setFiles(files.filter((_, idx) => idx !== i))} className="w-3 h-3 ml-2 cursor-pointer hover:text-red-400"/>
+                  {selectedFile && (
+                    <span className="px-2 py-1 bg-white/10 text-white rounded text-[10px] flex items-center">
+                      <Paperclip className="w-3 h-3 mr-1"/> {selectedFile.name} <X onClick={() => setSelectedFile(null)} className="w-3 h-3 ml-2 cursor-pointer hover:text-red-400"/>
                     </span>
-                  ))}
+                  )}
                 </div>
-                <input type="file" multiple ref={fileInputRef} onChange={e => e.target.files && setFiles(files.concat(Array.from(e.target.files as any)))} className="hidden" />
-                <button onClick={() => fileInputRef.current?.click()} className="w-full py-2 bg-white/5 border border-white/10 rounded-lg text-xs font-bold hover:bg-white/10 flex justify-center items-center">
-                  <UploadCloud className="w-4 h-4 mr-2" /> Add Files / Images
-                </button>
+                {!selectedFile && (
+                   <>
+                     <input type="file" ref={fileInputRef} onChange={e => e.target.files && setSelectedFile(e.target.files[0])} className="hidden" />
+                     <button onClick={() => fileInputRef.current?.click()} className="w-full py-2 bg-white/5 border border-white/10 rounded-lg text-xs font-bold hover:bg-white/10 flex justify-center items-center">
+                       <UploadCloud className="w-4 h-4 mr-2" /> Add Single File / Image
+                     </button>
+                   </>
+                )}
               </div>
             </div>
 
@@ -283,6 +316,15 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
             </div>
           </div>
         </div>
+      )}
+
+      {viewMedia && (
+        <InAppMediaViewer 
+          url={viewMedia.url} 
+          fileName={viewMedia.name} 
+          isDynamicHue={isDark} 
+          onClose={() => setViewMedia(null)} 
+        />
       )}
     </div>
   );

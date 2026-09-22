@@ -21,6 +21,11 @@ const getDynamicSubjects = (semester: string, branch: string, globalSubjects: an
   return (globalSubjects[key] || []).map((s: any) => s.longName);
 };
 
+const isFirstYearSem = (sem: string) => {
+  const s = (sem || "").toLowerCase().trim();
+  return s.includes("sem 1") || s.includes("sem 2") || s.includes("semester 1") || s.includes("semester 2") || s.includes("1st");
+};
+
 // --- BROWSER IMAGE COMPRESSOR ---
 const compressImage = async (file: File): Promise<File> => {
   if (!file.type.startsWith('image/')) return file;
@@ -62,8 +67,9 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
   const [roster, setRoster] = useState<any[]>([]);
   const [fullMarksMap, setFullMarksMap] = useState<Record<string, any>>({});
 
+  const [selectedStream, setSelectedStream] = useState("Engineering");
   const [selectedSemester, setSelectedSemester] = useState("");
-  const [selectedDivision, setSelectedDivision] = useState("");
+  const [selectedClass, setSelectedClass] = useState("");
   const [selectedSubject, setSelectedSubject] = useState("");
   const [selectedTest, setSelectedTest] = useState("IAT 1");
 
@@ -96,17 +102,28 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
     return () => { unsubRoster(); unsubStruct(); unsubSubjects(); unsubConfig(); };
   }, [user?.uid]);
 
-  const availableDivisions = isHod
-    ? (globalStructure[selectedSemester] || []).map((d: any) => d.divisionName)
-    : Array.from(new Set(Object.keys(teachingConfig).filter(k => matchSem(k.split("|")[0], selectedSemester)).map(k => k.split("|")[2]).filter(Boolean)));
+  const isFirstYear = isFirstYearSem(selectedSemester);
+  const streamBranches = isHod ? (selectedStream === "Engineering" ? ["CSE", "CSE(AIML)", "IT", "EE"] : ["BMS", "MMS"]) : [];
+
+  const availableClasses = isHod 
+    ? (isFirstYear 
+        ? (globalStructure[selectedSemester] || []).map((d: any) => d.divisionName)
+        : streamBranches.flatMap(b => (globalStructure[`${selectedSemester}|${b}`] || []).map((d: any) => `${d.divisionName} - ${b}`))
+      )
+    : Array.from(new Set(Object.keys(teachingConfig).filter(k => matchSem(k.split("|")[0], selectedSemester)).map(k => {
+        const parts = k.split("|");
+        return isFirstYear ? parts[1] : `${parts[2]} - ${parts[1]}`;
+    }).filter(Boolean)));
 
   useEffect(() => {
-    if (!availableDivisions.includes(selectedDivision)) {
-      setSelectedDivision(availableDivisions[0] || "");
+    if (!availableClasses.includes(selectedClass)) {
+      setSelectedClass(availableClasses[0] || "");
     }
-  }, [selectedSemester, globalStructure, teachingConfig, isHod, selectedDivision, availableDivisions]);
+  }, [selectedSemester, availableClasses, selectedClass]);
 
-  // Aggregate subjects based on division/semester
+  const selectedDivision = isFirstYear ? selectedClass : selectedClass.split(" - ")[0];
+  const selectedBranch = isFirstYear ? "General" : selectedClass.split(" - ")[1];
+
   const aggregatedSubjectsList = isHod
     ? Array.from(new Set(AVAILABLE_BRANCHES.flatMap(b => getDynamicSubjects(selectedSemester, b, globalSubjects))))
     : Array.from(new Set(
@@ -119,9 +136,13 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
     if (!aggregatedSubjectsList.includes(selectedSubject)) setSelectedSubject(aggregatedSubjectsList[0] || "");
   }, [selectedSemester, selectedDivision, teachingConfig, isHod, selectedSubject, aggregatedSubjectsList]);
 
+  // THE FIX: Strict 3-Tier ID formulation matching the Android logic exactly
   useEffect(() => {
     if (!selectedSubject || !selectedDivision) return;
+    
+    // We bind the Document ID using the EXACT Division-First logic expected by the student portal!
     const docId = `${selectedSemester}_${selectedDivision}_${selectedSubject}`.replace(/\s+/g, '').replace(/&/g, 'and');
+    
     const unsub = onSnapshot(doc(db, "test_marks", docId), (docSnap) => {
       if (docSnap.exists()) setFullMarksMap(docSnap.get("marks") || {});
       else setFullMarksMap({});
@@ -129,7 +150,10 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
     return () => unsub();
   }, [selectedSemester, selectedDivision, selectedSubject]);
 
-  const classRoster = roster.filter(s => s.division === selectedDivision && s.semester === selectedSemester).sort((a: any, b: any) => parseInt(a.rollNo) - parseInt(b.rollNo));
+  const classRoster = roster.filter(s => {
+    if (isFirstYear) return s.division === selectedDivision && s.semester === selectedSemester;
+    return s.division === selectedDivision && s.semester === selectedSemester && (isHod ? streamBranches.includes(s.branch) : true);
+  }).sort((a: any, b: any) => parseInt(a.rollNo) - parseInt(b.rollNo));
   
   const textColor = isDark ? 'text-white' : 'text-neutral-900';
   const cardBg = isDark ? 'bg-white/[0.08] border-white/20' : 'bg-black/5 border-black/10 shadow-sm';
@@ -200,13 +224,15 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
   return (
     <div className="w-full flex flex-col h-full overflow-y-auto pr-2 pb-24 [&::-webkit-scrollbar]:hidden">
       <div className="flex space-x-3 mb-4">
+        {isHod && <GlassDropdown label="COURSE" value={selectedStream} options={["Engineering", "Management"]} onChange={setSelectedStream} isDark={isDark} zIndex={70} />}
         <GlassDropdown label="SEM" value={selectedSemester} options={isHod ? AVAILABLE_SEMESTERS : Array.from(new Set(Object.keys(teachingConfig).map(k => k.split("|")[0])))} onChange={setSelectedSemester} isDark={isDark} zIndex={60} />
-        {availableDivisions.length > 0 ? (
-          <GlassDropdown label="DIVISION" value={selectedDivision} options={availableDivisions} onChange={setSelectedDivision} isDark={isDark} zIndex={50} />
+        {availableClasses.length > 0 ? (
+          <GlassDropdown label={isFirstYear ? "DIVISION" : "CLASS (DIV - BRANCH)"} value={selectedClass} options={availableClasses} onChange={setSelectedClass} isDark={isDark} zIndex={50} />
         ) : (
-          <p className="text-red-500 font-bold text-sm flex items-end pb-2">No Divisions Built</p>
+          <p className="text-red-500 font-bold text-sm flex items-end pb-2">No Classes Built</p>
         )}
       </div>
+      
       <div className="flex space-x-3 mb-8">
         <div className="flex-[1.5]">
           <GlassDropdown label="SUBJECT" value={selectedSubject} options={aggregatedSubjectsList} onChange={setSelectedSubject} isDark={isDark} zIndex={40} />
@@ -267,10 +293,11 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
         <GlassButton onClick={async () => {
           setIsLoading(true);
           try {
+            // THE FIX: Save perfectly to the Division-matched document key!
             const docId = `${selectedSemester}_${selectedDivision}_${selectedSubject}`.replace(/\s+/g, '').replace(/&/g, 'and');
+            
             await setDoc(doc(db, "test_marks", docId), { marks: fullMarksMap, isPublished: true, semester: selectedSemester, division: selectedDivision, subject: selectedSubject }, { merge: true });
             
-            // Note: Since branches are mixed in divisions, we alert all branches in that semester (or just the generic semester channel)
             await fetch('/api/send-fcm', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ targetTopic: `topic_${selectedSemester.replace(/ /g, "_")}`, title: "📊 Test Results", message: `Marks for ${selectedSubject} published.`, targetTab: "Tests" })
