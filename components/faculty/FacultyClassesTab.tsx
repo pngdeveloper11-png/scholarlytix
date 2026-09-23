@@ -1,6 +1,5 @@
 'use client';
 
-// VERSION 6.0 - Fully Integrated Proxy Modal & Robust Schedule Resolution
 import React, { useState, useEffect, useRef } from 'react';
 import { doc, collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
@@ -12,7 +11,7 @@ import GlassButton from '../ui/GlassButton';
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
-const SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8", "Semester 5", "Semester 6", "Semester 7", "Semester 8"];
+const SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8"];
 
 // Fuzzy Matching helpers to guarantee compatibility with all DB string formats
 const matchSem = (a: string, b: string) => (a || "").toLowerCase().replace("semester", "sem") === (b || "").toLowerCase().replace("semester", "sem");
@@ -38,21 +37,18 @@ export default function FacultyClassesTab({
   const [scheduleView, setScheduleView] = useState<"Today" | "Week">("Today");
   const [myTimetable, setMyTimetable] = useState<any[]>([]);
   
-  // Publish Modal State
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [publishSem, setPublishSem] = useState("Semester 3");
   const [publishBranch, setPublishBranch] = useState("CSE");
   const [publishFile, setPublishFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Proxy Modal State
   const [showProxyModal, setShowProxyModal] = useState(false);
   const [proxySem, setProxySem] = useState("Semester 3");
   const [proxyBranch, setProxyBranch] = useState("CSE");
   const [proxyBatch, setProxyBatch] = useState("All");
   const [proxySubject, setProxySubject] = useState("");
 
-  // --- ABSOLUTE SYNCHRONOUS OVERRIDE ---
   const currentEmail = (user?.email || "").toLowerCase();
   const isDeveloper = currentEmail === 'pngdeveloper11@gmail.com';
   const isHod = role?.startsWith("HOD|") || role === "SUPER_ADMIN" || role === "DIRECTOR" || role === "PRINCIPAL" || role === "REGISTRAR";
@@ -81,7 +77,6 @@ export default function FacultyClassesTab({
     return () => { unsubConfig(); unsubTimetables(); };
   }, [user?.displayName]);
 
-  // Dynamically feed all proxy subjects explicitly assigned to this class configuration
   const proxyClassKey1 = `${proxySem}|${proxyBranch}`;
   const proxyClassKey2 = `${proxySem.replace("Semester ", "Sem ")}|${proxyBranch}`;
   const classSubjects = Array.from(new Set(
@@ -98,17 +93,16 @@ export default function FacultyClassesTab({
     }
   }, [proxySem, proxyBranch, teachingConfig]);
 
-  // Robust Reverse Lookup: Fixes the "All • A1" bug to resolve to actual Branch (CSE) and Division
   const getResolvedClassInfo = (entry: any) => {
     let resolvedBranch = entry.branch;
     let resolvedBatch = entry.batch;
-    let division = "";
+    let division = entry.divisionName || "";
 
     if ((!resolvedBranch || resolvedBranch === "All") && resolvedBatch && resolvedBatch !== "All") {
       for (const [key, divs] of Object.entries(globalStructure)) {
         if (matchSem(key.split("|")[0], entry.semester)) {
-          for (const d of divs) {
-            if (d.batches?.some(b => b.name === resolvedBatch)) {
+          for (const d of (divs as any[])) {
+            if (d.batches?.some((b: any) => b.name === resolvedBatch)) {
               resolvedBranch = key.split("|")[1]; 
               division = d.divisionName;
               break;
@@ -116,12 +110,12 @@ export default function FacultyClassesTab({
           }
         }
       }
-    } else if (resolvedBranch && resolvedBranch !== "All") {
+    } else if (resolvedBranch && resolvedBranch !== "All" && !division) {
       const classKey1 = `${entry.semester}|${resolvedBranch}`;
       const classKey2 = `${(entry.semester || "").replace("Semester ", "Sem ")}|${resolvedBranch}`;
-      const divs = globalStructure[classKey1] || globalStructure[classKey2] || [];
+      const divs = (globalStructure[classKey1] || globalStructure[classKey2] || []) as any[];
       for (const d of divs) {
-        if (d.batches?.some(b => b.name === resolvedBatch)) {
+        if (d.batches?.some((b: any) => b.name === resolvedBatch)) {
           division = d.divisionName;
           break;
         }
@@ -132,6 +126,24 @@ export default function FacultyClassesTab({
     if (division) result += result ? ` (${division})` : division;
     if (resolvedBatch && resolvedBatch !== "All") result += result ? ` • ${resolvedBatch}` : resolvedBatch;
     return result || "General";
+  };
+
+  const handleDirectMarkClick = (slot: any) => {
+    const safeBatch = (!slot.batch || slot.batch === "null") ? "All" : slot.batch;
+    // Extract exact division from the resolved info
+    let safeDiv = slot.divisionName || "";
+    if (!safeDiv) {
+        const resolvedStr = getResolvedClassInfo(slot);
+        if (resolvedStr.includes('(') && resolvedStr.includes(')')) {
+            safeDiv = resolvedStr.split('(')[1].split(')')[0];
+        }
+    }
+    
+    // Dispatch custom event to trigger parent tab switch and state passing
+    const customEvent = new CustomEvent("directMarkAttendance", {
+        detail: { sem: slot.semester, branch: slot.branch || "General", division: safeDiv, subject: slot.subject, batch: safeBatch }
+    });
+    window.dispatchEvent(customEvent);
   };
 
   const handlePublishSubmit = () => {
@@ -181,8 +193,13 @@ export default function FacultyClassesTab({
                     <h4 className="font-bold text-white text-[15px]">{lecture.subject}</h4>
                     <p className="text-xs text-[#D0BCFF] font-medium mt-0.5">{getResolvedClassInfo(lecture)}</p>
                   </div>
-                  <div className="text-right">
-                    <p className="text-sm font-bold text-white/90">{lecture.startTime} - {lecture.endTime}</p>
+                  <div className="text-right flex flex-col items-end">
+                    <p className="text-sm font-bold text-white/90 mb-2">{lecture.startTime} - {lecture.endTime}</p>
+                    {scheduleView === "Today" && (
+                        <button onClick={() => handleDirectMarkClick(lecture)} className="px-4 py-1.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-lg font-bold text-xs hover:scale-[1.02] shadow-[0_0_15px_rgba(208,188,255,0.4)]">
+                            Mark
+                        </button>
+                    )}
                     {scheduleView === "Week" && <p className="text-[10px] text-white/40 uppercase mt-0.5">{lecture.dayOfWeek}</p>}
                   </div>
                 </div>
@@ -232,7 +249,7 @@ export default function FacultyClassesTab({
 
       {/* --- PROXY LECTURE MODAL --- */}
       {showProxyModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className={`p-8 rounded-[2rem] border w-full max-w-md ${isDark ? 'bg-[#111] border-white/10' : 'bg-white border-gray-200'} shadow-2xl`}>
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-white flex items-center">
@@ -246,7 +263,7 @@ export default function FacultyClassesTab({
             <div className="flex gap-3 mb-4">
               <GlassDropdown label="Semester" value={proxySem} options={SEMESTERS} onChange={setProxySem} isDark={isDark} zIndex={100} />
               <GlassDropdown label="Branch" value={proxyBranch} options={BRANCHES} onChange={setProxyBranch} isDark={isDark} zIndex={90} />
-              <GlassDropdown label="Batch (Optional)" value={proxyBatch} options={["All", "A", "B", "C", "A1", "A2", "B1", "B2"]} onChange={setProxyBatch} isDark={isDark} zIndex={80} />
+              <GlassDropdown label="Batch" value={proxyBatch} options={["All", "A", "B", "C", "A1", "A2", "B1", "B2"]} onChange={setProxyBatch} isDark={isDark} zIndex={80} />
             </div>
 
             <div className="mb-8 z-40 relative">
@@ -260,7 +277,13 @@ export default function FacultyClassesTab({
               />
             </div>
 
-            <GlassButton onClick={() => alert(`Loading roster for ${proxySubject || "No Subject"} in ${proxyBranch}...`)} variant="primary" size="lg" className="w-full">
+            <GlassButton onClick={() => {
+                const customEvent = new CustomEvent("directMarkAttendance", {
+                    detail: { sem: proxySem, branch: proxyBranch, division: "", subject: proxySubject, batch: proxyBatch, isProxy: true }
+                });
+                window.dispatchEvent(customEvent);
+                setShowProxyModal(false);
+            }} variant="primary" size="lg" className="w-full">
               Load Student Roster
             </GlassButton>
           </div>
@@ -269,7 +292,7 @@ export default function FacultyClassesTab({
 
       {/* --- PUBLISH TIMETABLE MODAL --- */}
       {showPublishModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className={`p-6 rounded-[2rem] w-full max-w-sm flex flex-col ${isDark ? 'bg-[#121212] border border-white/10' : 'bg-white border-gray-200'} shadow-2xl`}>
             
             <div className="mb-5">

@@ -1,73 +1,47 @@
 import { NextResponse } from 'next/server';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
-export const maxDuration = 60; 
+export const maxDuration = 60;
 
 export async function POST(request: Request) {
   try {
     const API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
     if (!API_KEY) throw new Error("API Key is missing in Vercel.");
 
-    const formData = await request.formData();
-    const file = formData.get('file') as File;
-    const maxMarks = formData.get('maxMarks') as string || '20';
+    const { subjectName, presentCount, totalCount, manualNotes } = await request.json();
 
-    if (!file) throw new Error("No file provided");
-
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const base64Data = buffer.toString('base64');
-
-    const prompt = `
-      You are an AI grading assistant.
-      Analyze this uploaded image/document of an exam marksheet.
-      Extract the Student Roll Numbers and their corresponding Marks.
-      The maximum marks for this test is ${maxMarks}. If a student is marked absent, use "AB".
-
-      Return ONLY a pure, strict JSON object mapping the roll number (as a string) to the mark (as a string).
-      Do not include any student names. Do not include markdown.
-      Example format:
-      {
-        "101": "18",
-        "102": "AB",
-        "103": "15"
-      }
-    `;
-
-    // Locked explicitly to 3.6-flash
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${API_KEY}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { text: prompt },
-            { inlineData: { mimeType: file.type || 'image/jpeg', data: base64Data } }
-          ]
-        }]
-      })
-    });
-
-    if (!response.ok) {
-        const errorData = await response.text();
-        console.error("Google API Rejection:", errorData);
-        throw new Error("Google servers rejected the image.");
+    let prompt = "";
+    if (manualNotes && manualNotes.trim() !== "") {
+      prompt = `
+        You are an academic assistant. Please take the following raw, unformatted lecture notes written by a professor for the subject "${subjectName}" and format them into clean, highly professional, easy-to-read bullet points.
+        Remove any spelling errors. Do not add conversational filler. Output only the formatted notes.
+        
+        Raw Notes:
+        "${manualNotes}"
+      `;
+    } else {
+      prompt = `
+        Write a single, concise, professional sentence stating that the session for '${subjectName}' has concluded, noting that ${presentCount} of ${totalCount} attendees were present. Do not use hashtags or quotes.
+      `;
     }
 
-    const data = await response.json();
-    let text = data.candidates[0].content.parts[0].text;
+    const genAI = new GoogleGenerativeAI(API_KEY);
+    // Locked to fast flash model for rapid summarization
+    const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
 
-    // SAFE JSON PARSER
-    text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-    const startIndex = text.indexOf('{');
-    const endIndex = text.lastIndexOf('}');
+    const result = await model.generateContent(prompt);
+    let summaryText = result.response.text().trim();
     
-    if (startIndex === -1 || endIndex === -1) throw new Error("AI did not return a JSON object.");
-    
-    const cleanJsonString = text.substring(startIndex, endIndex + 1);
-    const marks = JSON.parse(cleanJsonString);
+    // Clean up any rogue markdown formatting returned by AI
+    summaryText = summaryText.replace(/^"|"$/g, '').trim();
 
-    return NextResponse.json({ marks });
+    return NextResponse.json({ summary: summaryText });
   } catch (error: any) {
-    console.error("Marks API Error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("AI Summarizer Error:", error);
+    // Graceful fallback string if the AI is busy
+    return NextResponse.json(
+      { error: error.message, summary: "Completed session. System generated fallback." },
+      { status: 500 }
+    );
   }
-} 
+}

@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 // Initialize the S3 Client for Cloudflare R2
 const s3Client = new S3Client({
   region: "auto",
-  endpoint: process.env.R2_ENDPOINT, // e.g., https://<account_id>.r2.cloudflarestorage.com
+  endpoint: process.env.R2_ENDPOINT, 
   credentials: {
     accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
     secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
@@ -13,15 +13,30 @@ const s3Client = new S3Client({
 
 export async function POST(request: Request) {
   try {
-    const { fileName } = await request.json();
+    const { fileName, url } = await request.json();
 
-    if (!fileName) {
-      return NextResponse.json({ error: "Missing fileName" }, { status: 400 });
+    if (!fileName && !url) {
+      return NextResponse.json({ error: "Missing fileName or url" }, { status: 400 });
+    }
+
+    // Attempt to extract the exact R2 Object Key
+    // If the frontend passed a full URL, split by the public domain to get the key
+    let objectKey = fileName;
+    
+    if (url) {
+       try {
+           const parsedUrl = new URL(url);
+           // R2 keys are the path name without the leading slash
+           objectKey = parsedUrl.pathname.substring(1); 
+       } catch (e) {
+           // Fallback to fileName if URL parsing fails
+           objectKey = fileName;
+       }
     }
 
     const command = new DeleteObjectCommand({
       Bucket: process.env.R2_BUCKET_NAME,
-      Key: fileName, // The exact name of the file in the bucket (e.g., "semester3/IT/maths_notes.pdf")
+      Key: objectKey, 
     });
 
     await s3Client.send(command);

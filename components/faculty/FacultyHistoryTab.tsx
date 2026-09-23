@@ -112,6 +112,7 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
     if (!notesText.trim() || !notesRecord) return;
     setIsFormattingAi(true);
     try {
+      // NOTE: Calling the summarize-lecture route (create it later if needed, but it handles graceful fallback)
       const res = await fetch('/api/summarize-lecture', { 
         method: 'POST', 
         headers: { 'Content-Type': 'application/json' }, 
@@ -125,7 +126,11 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
       const data = await res.json();
       if (data.summary) setNotesText(data.summary);
       else throw new Error("Format failed");
-    } catch (e) { alert("Failed to format notes with AI."); } finally { setIsFormattingAi(false); }
+    } catch (e) { 
+       alert("Failed to format notes with AI."); 
+    } finally { 
+       setIsFormattingAi(false); 
+    }
   };
 
   // --- EDIT ATTENDANCE LOGIC ---
@@ -184,7 +189,7 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
     } catch (e) { alert("Failed to update attendance."); } finally { setIsUpdatingAttendance(false); }
   };
 
-  // --- EXPORT LOGIC ---
+  // --- THE FIX: EXPORT LOGIC WITH DYNAMIC FILE NAMES ---
   const triggerExportDialog = (records: AttendanceRecord[], scope: string, param1?: string, param2?: string) => {
     setExportRecords(records);
     setExportScope(scope);
@@ -193,11 +198,13 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
     if (scope === "single" && records.length > 0) {
       const r = records[0];
       const rTime = (r as any).timestamp?.seconds ? (r as any).timestamp.seconds * 1000 : ((r as any).timestamp || (r as any).conductedAt || Date.now());
-      generatedFileName = `${r.subjectName} - ${r.semester} (${r.divisionName}) - ${formatExportDate(new Date(rTime))}`;
+      generatedFileName = `${r.subjectName} - ${r.branchName || "Branch"} - ${formatExportDate(new Date(rTime))}`;
     } else if (scope === "month") {
-      generatedFileName = `${param1} - ${param2} Attendance Export`; 
+      const r = records[0];
+      generatedFileName = `Semester ${r.semester.slice(-1)} - ${r.branchName} - ${param2} Attendance Export`; 
     } else if (scope === "class") {
-      generatedFileName = `${param1} - Overall Attendance Export`; 
+      const r = records[0];
+      generatedFileName = `Semester ${r.semester.slice(-1)} - ${r.branchName} - Overall Attendance Export`; 
     } else if (scope === "custom") {
       const startFmt = formatExportDate(new Date(param1 as string));
       const endFmt = formatExportDate(new Date(param2 as string));
@@ -215,7 +222,10 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
     if (exportScope === "single") {
       const r = exportRecords[0];
       const rTime = (r as any).timestamp?.seconds ? (r as any).timestamp.seconds * 1000 : ((r as any).timestamp || (r as any).conductedAt || Date.now());
-      csvContent += `Class:,${r.semester} (${r.divisionName})\nSubject:,${r.subjectName}\nBatch:,${r.batch}\nDate:,${formatExportDate(new Date(rTime))}\n\nRoll No,Name,Status\n`;
+      const dStr = new Date(rTime).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      const tStr = new Date(rTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      
+      csvContent += `Class:,${r.semester} (${r.divisionName})\nSubject:,${r.subjectName}\nBatch:,${r.batch}\nDate:,${dStr} ${tStr}\n\nRoll No,Name,Status\n`;
       const classRoster = roster.filter(s => s.semester === r.semester && s.division === r.divisionName).sort((a, b) => a.rollNo - b.rollNo);
       classRoster.forEach(stu => {
         const isPresent = r.presentStudentIds.includes(stu.id);

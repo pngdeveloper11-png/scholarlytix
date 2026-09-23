@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { collection, onSnapshot, doc, writeBatch, getDocs, deleteDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase'; 
 import { useAuth } from '../../app/context/AuthContext';
-import { Loader2, UploadCloud, Users, Trash2, Check, ArrowDownAZ, Settings, UserPlus, TrendingUp, Edit3 } from 'lucide-react'; 
+import { Loader2, UploadCloud, Users, Trash2, Check, ArrowDownAZ, Settings, UserPlus, TrendingUp, Edit3, FileSpreadsheet } from 'lucide-react'; 
 import GlassDropdown from '../GlassDropdown';
 import GlassButton from '../ui/GlassButton';
 import { CollegeStructureConfig, StudentData } from '../../types';
@@ -179,6 +179,105 @@ function ImportStudentsDialog({ isDynamicHue, onDismiss, globalStructure }: { is
   );
 }
 
+// --- THE FIX: LEGACY ATTENDANCE IMPORTER DIALOG ---
+function LegacyAttendanceImportDialog({ isDynamicHue, semester, division, roster, onDismiss }: { isDynamicHue: boolean, semester: string, division: string, roster: StudentData[], onDismiss: () => void }) {
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const textColor = isDynamicHue ? 'text-white' : 'text-neutral-900';
+  const modalBg = isDynamicHue ? 'bg-black/90 border-white/20' : 'bg-white border-black/10';
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    try {
+      const text = await file.text();
+      const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
+      if (lines.length < 2) throw new Error("File is empty or missing headers.");
+
+      const headerLine = lines[0].toLowerCase();
+      const headers = headerLine.split(',').map(s => s.replace(/"/g, '').trim());
+
+      const rollIndex = headers.findIndex(h => h.includes('roll'));
+      const conductedIndex = headers.findIndex(h => h.includes('conducted') || h.includes('total'));
+      const attendedIndex = headers.findIndex(h => h.includes('attended') || h.includes('present'));
+
+      if (rollIndex === -1 || conductedIndex === -1 || attendedIndex === -1) {
+        throw new Error("CSV must contain 'Roll', 'Conducted', and 'Attended' columns.");
+      }
+
+      let currentBatch = writeBatch(db);
+      let batchCount = 0;
+      let updateCount = 0;
+
+      const dataLines = lines.slice(1);
+      for (const line of dataLines) {
+        const partsMatch = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || line.split(',');
+        const parts = partsMatch.map(p => p.replace(/^"|"$/g, '').trim());
+
+        const rollNo = parseInt(parts[rollIndex]) || 0;
+        const conducted = parseInt(parts[conductedIndex]) || 0;
+        const attended = parseInt(parts[attendedIndex]) || 0;
+
+        if (rollNo > 0) {
+          const student = roster.find(s => s.rollNo === rollNo);
+          if (student) {
+            const docRef = doc(db, "students_directory", student.id);
+            currentBatch.update(docRef, { legacyConducted: conducted, legacyAttended: attended });
+            updateCount++;
+            batchCount++;
+
+            if (batchCount >= 400) {
+              await currentBatch.commit();
+              currentBatch = writeBatch(db);
+              batchCount = 0;
+            }
+          }
+        }
+      }
+      if (batchCount > 0) await currentBatch.commit();
+
+      alert(`Successfully imported legacy attendance for ${updateCount} students!`);
+      onDismiss();
+    } catch (e: any) {
+      alert(`Import Failed: ${e.message}`);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+      <div className={`border p-8 rounded-[2rem] w-full max-w-md flex flex-col ${modalBg} shadow-2xl`}>
+        <h2 className={`text-xl font-bold mb-2 ${textColor}`}>Import Legacy Attendance</h2>
+        <p className="text-sm opacity-80 mb-6">Upload a CSV for {semester} ({division}) to fuse previously maintained physical attendance with the app's digital metrics.</p>
+        
+        <div className="bg-white/[0.05] p-4 rounded-xl border border-white/10 mb-6">
+          <h4 className="text-xs font-bold text-[#D0BCFF] mb-2 uppercase">Required CSV Columns:</h4>
+          <ul className="text-xs opacity-80 space-y-1 list-disc pl-4">
+            <li>Roll (Student Roll Number)</li>
+            <li>Conducted (Total physical lectures)</li>
+            <li>Attended (Total physically attended)</li>
+          </ul>
+        </div>
+
+        {isUploading && <div className="flex items-center mb-6"><Loader2 className="w-5 h-5 mr-3 text-[#D0BCFF] animate-spin" /><span className="text-[#D0BCFF] font-bold">Processing Database...</span></div>}
+        
+        <div className="flex space-x-3 mt-auto">
+          <GlassButton onClick={onDismiss} disabled={isUploading} variant="glass" className="flex-1">Cancel</GlassButton>
+          <input type="file" accept=".csv" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
+          <GlassButton onClick={() => fileInputRef.current?.click()} disabled={isUploading} variant="primary" className="flex-1" icon={<FileSpreadsheet className="w-4 h-4" />}>
+            {isUploading ? "Processing..." : "Select CSV"}
+          </GlassButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // --- FACULTY METRICS TAB ---
 export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean }) {
   const { user, role } = useAuth();
@@ -201,6 +300,7 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
   const [sortMode, setSortMode] = useState<"default" | "az">("default");
   
   const [showImportDialog, setShowImportDialog] = useState(false);
+  const [showLegacyImportDialog, setShowLegacyImportDialog] = useState(false); // NEW STATE
   const [showAddModal, setShowAddModal] = useState(false);
   const [showPromoteModal, setShowPromoteModal] = useState(false);
   const [editingStudent, setEditingStudent] = useState<StudentData | null>(null);
@@ -273,6 +373,7 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
 
   const matchingLectures = history.filter(h => matchSem(h.semester, selectedSemester) && matchDiv(h.divisionName || h.division, selectedDivision) && (isHod ? true : (h.subjectName === selectedSubject || h.subject === selectedSubject)));
 
+  // THE FIX: Fusing Digital Attendance with the CSV Legacy Attendance
   const studentStats = divisionRoster.map((student) => {
     let studentBatch = (student as any).batch;
     if (!studentBatch && globalStructure[selectedSemester]) {
@@ -286,11 +387,19 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
         const sTime = (student as any).admissionTimestamp?.seconds ? (student as any).admissionTimestamp.seconds * 1000 : ((student as any).admissionTimestamp || 0);
         return lTime >= sTime && (l.batch === "All" || l.batch === studentBatch);
     });
-    const studentTotalConducted = validLectures.length;
-    const attended = validLectures.filter(l => {
+    
+    const digitalConducted = validLectures.length;
+    const digitalAttended = validLectures.filter(l => {
       const presentIds = (l as any).presentStudentIds || (l as any).presentUids || [];
       return presentIds.includes(student.id);
     }).length;
+
+    const legacyCond = Number((student as any).legacyConducted) || 0;
+    const legacyAtt = Number((student as any).legacyAttended) || 0;
+
+    const studentTotalConducted = digitalConducted + legacyCond;
+    const attended = digitalAttended + legacyAtt;
+
     const pct = studentTotalConducted > 0 ? (attended / studentTotalConducted) * 100 : 100;
     return { ...student, attended, studentTotalConducted, pct };
   });
@@ -342,6 +451,7 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
     <div className="w-full flex flex-col h-full overflow-y-auto pr-2 pb-24 [&::-webkit-scrollbar]:hidden">
       
       {showImportDialog && <ImportStudentsDialog isDynamicHue={isDark} onDismiss={() => setShowImportDialog(false)} globalStructure={globalStructure} />}
+      {showLegacyImportDialog && <LegacyAttendanceImportDialog isDynamicHue={isDark} semester={selectedSemester} division={selectedDivision} roster={divisionRoster} onDismiss={() => setShowLegacyImportDialog(false)} />}
 
       {isHod && (
         <div className="flex justify-between items-center mb-6 gap-4 w-full">
@@ -394,6 +504,9 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
         
         {isHod && (
           <div className="flex items-center space-x-3 text-xs font-bold text-white/50 overflow-x-auto whitespace-nowrap custom-scrollbar pb-1 min-w-0 justify-end flex-1">
+            <button className="flex items-center hover:text-white transition-colors" onClick={() => setShowLegacyImportDialog(true)}>
+              <FileSpreadsheet className="w-3.5 h-3.5 mr-1"/> Legacy Att.
+            </button>
             <button className="flex items-center hover:text-white transition-colors" onClick={() => alert("Navigate to College Structure Manager to edit batches.")}><Settings className="w-3.5 h-3.5 mr-1"/> Batches</button>
             <button className="flex items-center hover:text-white transition-colors" onClick={openAdd}><UserPlus className="w-3.5 h-3.5 mr-1"/> Add</button>
             <button className="flex items-center hover:text-white transition-colors" onClick={() => setShowPromoteModal(true)}><TrendingUp className="w-3.5 h-3.5 mr-1"/> Promote</button>

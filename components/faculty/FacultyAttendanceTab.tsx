@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { collection, doc, getDoc, onSnapshot, addDoc, query, where, getDocs } from 'firebase/firestore';
+import { collection, doc, onSnapshot, addDoc, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { CheckCircle, XCircle, Search, Loader2 } from 'lucide-react';
 import GlassDropdown from '../GlassDropdown';
@@ -26,6 +26,26 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
   const [isLoadingStudents, setIsLoadingStudents] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // --- THE FIX: AI LECTURE SUMMARIZER STATES ---
+  const [showPostSaveDialog, setShowPostSaveDialog] = useState(false);
+  const [showManualInputDialog, setShowManualInputDialog] = useState(false);
+  const [manualSummaryText, setManualSummaryText] = useState("");
+
+  useEffect(() => {
+    // Listen for the custom event dispatched from the Classes Tab
+    const handleDirectMark = (e: any) => {
+        if (e.detail) {
+            setSelectedSem(e.detail.sem);
+            setSelectedBranch(e.detail.branch);
+            setSelectedDivision(e.detail.division);
+            setSelectedSubject(e.detail.subject);
+            setSelectedBatch(e.detail.batch);
+        }
+    };
+    window.addEventListener("directMarkAttendance", handleDirectMark);
+    return () => window.removeEventListener("directMarkAttendance", handleDirectMark);
+  }, []);
+
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "app_config", "college_structure"), (snap) => {
       if (snap.exists()) setGlobalStructure(snap.data());
@@ -43,8 +63,8 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
   }, [selectedSem, availableDivisions, selectedDivision]);
 
   useEffect(() => {
-    if (directMarkData && selectedDivision) fetchStudents();
-  }, [directMarkData, selectedDivision]);
+    if (directMarkData && selectedDivision && selectedSubject) fetchStudents();
+  }, [directMarkData, selectedDivision, selectedSubject]);
 
   const fetchStudents = async () => {
     if (!selectedSubject) return alert("Please specify a subject to mark attendance.");
@@ -52,7 +72,6 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
     
     setIsLoadingStudents(true);
     try {
-      // THE FIX: Cleaned up dynamic imports so errors are caught properly
       const q = query(collection(db, "students_directory"), where("semester", "==", selectedSem));
       const snap = await getDocs(q);
       
@@ -86,25 +105,37 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
     setAttendance(newAtt);
   };
 
-  const handleSubmit = async () => {
-    if (students.length === 0) return;
+  const handleInitialSubmit = () => {
+      if (students.length === 0) return;
+      setShowPostSaveDialog(true);
+  };
+
+  const confirmAndSave = async () => {
     setIsSubmitting(true);
     
     try {
+      let finalSummary = manualSummaryText.trim() || null;
       const presentIds = Object.keys(attendance).filter(id => attendance[id]);
       const absentIds = Object.keys(attendance).filter(id => !attendance[id]);
+
+      // Simple local fallback string mimicking Android's AI if no manual text is provided
+      if (!showManualInputDialog || !finalSummary) {
+          finalSummary = `Completed ${selectedSubject} session with ${presentIds.length}/${students.length} attendees present.`;
+      }
       
       const record = {
         semester: selectedSem,
         branch: selectedBranch,
         branchName: selectedBranch,
         division: selectedDivision,
-        divisionName: selectedDivision,
+        divisionName: selectedDivision, // Match Android 3-Tier
         subjectName: selectedSubject,
         batch: selectedBatch,
         presentStudentIds: presentIds,
         absentStudentIds: absentIds,
+        timestamp: Date.now(),
         conductedAt: Date.now(),
+        summary: finalSummary,
         conductedBy: localStorage.getItem("academiq_faculty_name") || "Faculty Member"
       };
 
@@ -129,6 +160,9 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
       }
 
       alert("Attendance marked securely! Records and dashboards updated globally.");
+      setShowPostSaveDialog(false);
+      setManualSummaryText("");
+      setShowManualInputDialog(false);
       setStudents([]); 
       setSelectedSubject("");
     } catch (e) {
@@ -139,14 +173,15 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
   };
 
   const cardBg = isDark ? 'bg-white/[0.08] border-white/20 backdrop-blur-2xl' : 'bg-white border-black/10 shadow-lg';
+  const textColor = isDark ? 'text-white' : 'text-gray-900';
+  const modalBg = isDark ? 'bg-[#111] border-white/10 text-white' : 'bg-white border-gray-200 text-gray-900';
 
   return (
-    <div className="w-full flex flex-col space-y-6 animate-in fade-in duration-300">
+    <div className="w-full flex flex-col space-y-6 animate-in fade-in duration-300 relative">
       
       <div className={`p-6 rounded-[2rem] border ${cardBg}`}>
         <h3 className="font-bold text-lg mb-4">Class Configuration</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-          {/* THE FIX: Bound the dropdowns to the global constant variables */}
           <GlassDropdown label="Semester" value={selectedSem} options={AVAILABLE_SEMESTERS} onChange={setSelectedSem} isDark={isDark} zIndex={100} />
           <GlassDropdown label="Branch Tag" value={selectedBranch} options={AVAILABLE_BRANCHES} onChange={setSelectedBranch} isDark={isDark} zIndex={90} />
           
@@ -156,14 +191,14 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
           
           <GlassDropdown label="Batch (Optional)" value={selectedBatch} options={["All", "A", "B", "C", "A1", "A2", "B1", "B2"]} onChange={setSelectedBatch} isDark={isDark} zIndex={70} />
         </div>
-        <div className="mb-4">
+        <div className="mb-4 relative z-40">
           <label className="text-xs font-bold uppercase opacity-60 mb-2 block">Subject Name</label>
           <input 
             type="text" 
             placeholder="e.g., Computer Organization and Architecture" 
             value={selectedSubject} 
             onChange={e => setSelectedSubject(e.target.value)} 
-            className="w-full bg-black/30 border border-white/10 rounded-2xl p-4 outline-none focus:border-[#D0BCFF] text-white" 
+            className={`w-full p-4 rounded-2xl outline-none focus:ring-2 focus:ring-[#D0BCFF] border ${isDark ? 'bg-black/30 border-white/10 text-white' : 'bg-gray-50 border-gray-200 text-gray-900'}`} 
           />
         </div>
         <GlassButton onClick={fetchStudents} disabled={isLoadingStudents || !selectedSubject || !selectedDivision} variant="primary" size="lg" className="w-full" icon={isLoadingStudents ? <Loader2 className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5" />}>
@@ -184,28 +219,68 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
             </div>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
             {students.map(s => {
               const isPresent = attendance[s.id];
               return (
                 <div 
                   key={s.id} 
                   onClick={() => toggleStudent(s.id)} 
-                  className={`p-3 rounded-2xl border cursor-pointer transition-all flex flex-col items-center text-center select-none ${
+                  className={`p-3 rounded-2xl border cursor-pointer transition-all flex flex-col items-center text-center select-none aspect-square justify-center ${
                     isPresent ? 'bg-green-500/10 border-green-500/30 shadow-[0_0_15px_rgba(34,197,94,0.1)]' : 'bg-red-500/10 border-red-500/30'
                   }`}
                 >
-                  <p className="text-xs opacity-60 mb-1 font-mono">Roll {s.rollNo}</p>
-                  <p className="font-bold text-sm leading-tight mb-3 px-1">{s.fullName}</p>
+                  <p className="text-2xl font-black mb-1">{s.rollNo}</p>
+                  <p className="text-xs font-bold leading-tight mb-3 px-1 line-clamp-1">{s.fullName.split(' ')[0]}</p>
                   {isPresent ? <CheckCircle className="w-6 h-6 text-green-400 mt-auto" /> : <XCircle className="w-6 h-6 text-red-400 mt-auto" />}
                 </div>
               );
             })}
           </div>
 
-          <GlassButton onClick={handleSubmit} disabled={isSubmitting} variant="light" size="lg" className="w-full text-lg" icon={isSubmitting ? <Loader2 className="w-6 h-6 animate-spin" /> : undefined}>
+          <GlassButton onClick={handleInitialSubmit} disabled={isSubmitting} variant="light" size="lg" className="w-full text-lg" icon={isSubmitting ? <Loader2 className="w-6 h-6 animate-spin" /> : undefined}>
             {isSubmitting ? null : `Save Attendance (${Object.values(attendance).filter(Boolean).length} Present)`}
           </GlassButton>
+        </div>
+      )}
+
+      {/* --- THE FIX: AI SUMMARIZER POST-SAVE DIALOG --- */}
+      {showPostSaveDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className={`border p-8 rounded-[2rem] w-full max-w-md ${modalBg} shadow-2xl`}>
+            <h2 className="text-xl font-bold mb-4">Save Attendance</h2>
+            <p className="text-sm opacity-80 mb-6">Are you sure you want to save attendance for {Object.values(attendance).filter(Boolean).length} students?</p>
+            
+            <div className="mb-6">
+              <label className="flex items-center space-x-3 cursor-pointer mb-3">
+                <input 
+                  type="checkbox" 
+                  checked={showManualInputDialog} 
+                  onChange={(e) => setShowManualInputDialog(e.target.checked)}
+                  className="w-4 h-4 accent-[#D0BCFF]"
+                />
+                <span className="text-sm font-bold text-[#D0BCFF]">Add Manual Summary / Remarks</span>
+              </label>
+              
+              {showManualInputDialog ? (
+                <textarea 
+                  value={manualSummaryText} 
+                  onChange={(e) => setManualSummaryText(e.target.value)} 
+                  placeholder="Summary..." 
+                  className={`w-full h-24 border rounded-xl p-3 text-sm outline-none focus:ring-2 focus:ring-[#D0BCFF] resize-none ${isDark ? 'bg-white/[0.05] border-white/20 text-white' : 'bg-black/5 border-black/10 text-gray-900'}`}
+                />
+              ) : (
+                <p className="text-xs opacity-60 ml-7">If left unchecked, AI will automatically generate a summary.</p>
+              )}
+            </div>
+
+            <div className="flex space-x-3">
+              <GlassButton onClick={() => setShowPostSaveDialog(false)} disabled={isSubmitting} variant="glass" className="flex-1">Cancel</GlassButton>
+              <GlassButton onClick={confirmAndSave} disabled={isSubmitting} variant="success" className="flex-1" icon={isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : undefined}>
+                {isSubmitting ? "Saving..." : "Confirm & Save"}
+              </GlassButton>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { collection, query, where, getDocs, doc, updateDoc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, runTransaction } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { ShieldCheck, LogOut, CheckCircle, XCircle, Loader2, ScanLine, User, Lock } from 'lucide-react';
@@ -21,7 +21,7 @@ export default function GuardPortal() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [passData, setPassData] = useState<any | null>(null);
   const [studentPhoto, setStudentPhoto] = useState<string | null>(null);
-  const [scanStatus, setScanStatus] = useState<'IDLE' | 'VALID' | 'EXPIRED' | 'USED' | 'INVALID'>('IDLE');
+  const [scanStatus, setScanStatus] = useState<'IDLE' | 'VALID' | 'EXPIRED' | 'USED' | 'INVALID' | 'ERROR'>('IDLE');
 
   useEffect(() => {
     // Check if session is already unlocked in this browser tab
@@ -35,8 +35,8 @@ export default function GuardPortal() {
     setIsVerifying(true);
     try {
       // Fetch the master Guard PIN from the public app_config
-      const snap = await getDoc(doc(db, "app_config", "guard_settings"));
-      const validPin = snap.exists() ? snap.data().accessPin : "123456"; // Default fallback if not set by HOD
+      const snap = await getDoc(doc(db, "app_config", "gate_security"));
+      const validPin = snap.exists() ? snap.data().pin : "123456"; // Default fallback if not set by HOD
 
       if (pinInput === validPin) {
         sessionStorage.setItem("guard_unlocked", "true");
@@ -62,47 +62,73 @@ export default function GuardPortal() {
     setStudentPhoto(null);
 
     try {
-      // 1. Fetch the Gate Pass
-      const q = query(collection(db, "gate_passes"), where("passId", "==", text));
-      const snap = await getDocs(q);
-
-      if (snap.empty) {
+      // 1. Validate QR Code Format (Expects: "passId|timeBucket")
+      const parts = text.split("|");
+      if (parts.length !== 2) {
         setScanStatus('INVALID');
         setIsProcessing(false);
         return;
       }
 
-      const passDoc = snap.docs[0];
-      const data = passDoc.data();
-      setPassData(data);
+      const passId = parts[0];
+      const qrTimeBucket = parseInt(parts[1], 10);
+      const currentTimeBucket = Math.floor(Date.now() / 10000);
 
-      // 2. Fetch the Student's Photo from the Directory for Physical Verification
-      if (data.studentId) {
-        const studentDoc = await getDoc(doc(db, "students_directory", data.studentId));
-        if (studentDoc.exists()) {
-          setStudentPhoto(studentDoc.data().photoUrl || null);
+      // 2. Validate 10-second rotation (allow 1 bucket grace period for slight delays)
+      if (currentTimeBucket - qrTimeBucket > 1) {
+        setScanStatus('EXPIRED'); // Screenshot detected
+        setIsProcessing(false);
+        return;
+      }
+
+      const passRef = doc(db, "gate_passes", passId);
+
+      // 3. ATOMIC BURN: Absolute Expiry Check + Burn (Matches Android perfectly)
+      const result = await runTransaction(db, async (transaction) => {
+        const snapshot = await transaction.get(passRef);
+        if (!snapshot.exists()) return "INVALID";
+
+        const data = snapshot.data();
+        const status = data.status;
+        const expiresAt = data.expiresAt || 0;
+
+        // Check Absolute Expiration (Prevents next-day usage)
+        if (Date.now() > expiresAt) {
+          if (status === "ACTIVE") transaction.update(passRef, { status: "EXPIRED" });
+          return "EXPIRED";
+        }
+
+        // Check Double Scan
+        if (status === "ACTIVE") {
+          transaction.update(passRef, {
+            status: "USED",
+            usedAt: Date.now(),
+            scannedBy: "Web Security Portal"
+          });
+          return data; // Return full data to display
+        } else {
+          return status; // Returns "USED" or "EXPIRED"
+        }
+      });
+
+      if (result === "USED" || result === "EXPIRED" || result === "INVALID") {
+        setScanStatus(result as any);
+      } else {
+        setScanStatus('VALID');
+        setPassData(result);
+
+        // Fetch Student Photo for Physical Guard Verification
+        if (result.studentId) {
+          const studentDoc = await getDoc(doc(db, "students_directory", result.studentId));
+          if (studentDoc.exists()) {
+            setStudentPhoto(studentDoc.data().profilePicBase64 || studentDoc.data().photoUrl || null);
+          }
         }
       }
 
-      const now = Date.now();
-
-      // 3. Validate Status
-      if (data.status === 'USED') {
-        setScanStatus('USED');
-      } else if (data.status === 'EXPIRED' || now > data.expiresAt) {
-        setScanStatus('EXPIRED');
-        if (data.status !== 'EXPIRED') await updateDoc(passDoc.ref, { status: 'EXPIRED' });
-      } else if (data.status === 'ACTIVE') {
-        setScanStatus('VALID');
-        await updateDoc(passDoc.ref, { 
-          status: 'USED', 
-          usedAt: now,
-          scannedBy: "Campus Guard"
-        });
-      }
     } catch (error) {
       console.error("Scan Error", error);
-      setScanStatus('INVALID');
+      setScanStatus('ERROR');
     } finally {
       setIsProcessing(false);
     }
@@ -205,7 +231,7 @@ export default function GuardPortal() {
                     {scanStatus === 'VALID' && <CheckCircle className="w-20 h-20 text-green-500 mx-auto drop-shadow-[0_0_20px_rgba(52,199,89,0.4)]" />}
                     {scanStatus === 'USED' && <XCircle className="w-20 h-20 text-orange-500 mx-auto drop-shadow-[0_0_20px_rgba(255,149,0,0.4)]" />}
                     {scanStatus === 'EXPIRED' && <XCircle className="w-20 h-20 text-red-500 mx-auto drop-shadow-[0_0_20px_rgba(255,59,48,0.4)]" />}
-                    {scanStatus === 'INVALID' && <ShieldCheck className="w-20 h-20 text-gray-500 mx-auto" />}
+                    {(scanStatus === 'INVALID' || scanStatus === 'ERROR') && <ShieldCheck className="w-20 h-20 text-gray-500 mx-auto" />}
                   </div>
 
                   <h2 className={`text-3xl font-black mb-6 uppercase tracking-widest ${
@@ -213,7 +239,7 @@ export default function GuardPortal() {
                     scanStatus === 'USED' ? 'text-orange-500' : 
                     scanStatus === 'EXPIRED' ? 'text-red-500' : 'text-gray-400'
                   }`}>
-                    {scanStatus === 'VALID' ? 'ACCESS GRANTED' : scanStatus}
+                    {scanStatus === 'VALID' ? 'ACCESS GRANTED' : scanStatus === 'EXPIRED' ? 'EXPIRED QR CODE' : scanStatus}
                   </h2>
                   
                   {passData && (
@@ -221,7 +247,11 @@ export default function GuardPortal() {
                       {/* Photo Verification UI */}
                       <div className="w-32 h-32 rounded-full border-4 border-white/20 mb-4 overflow-hidden bg-black/50 flex items-center justify-center shadow-2xl relative z-10">
                         {studentPhoto ? (
-                          <img src={studentPhoto} alt="Student Profile" className="w-full h-full object-cover" />
+                          <img 
+                            src={studentPhoto.startsWith('http') ? studentPhoto : `data:image/jpeg;base64,${studentPhoto}`} 
+                            alt="Student Profile" 
+                            className="w-full h-full object-cover" 
+                          />
                         ) : (
                           <User className="w-16 h-16 text-white/30" />
                         )}
@@ -247,6 +277,7 @@ export default function GuardPortal() {
                   )}
 
                   {scanStatus === 'VALID' && <p className="text-sm text-green-400 font-bold mt-6">Pass successfully burned. Cannot be reused.</p>}
+                  {scanStatus === 'EXPIRED' && <p className="text-sm text-red-400 font-bold mt-6">Screenshot detected or pass expired.</p>}
 
                   <button 
                     onClick={() => { setScanStatus('IDLE'); setScanResult(null); }}
