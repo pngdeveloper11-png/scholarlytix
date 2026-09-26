@@ -19,16 +19,11 @@ const firebaseConfig = {
   appId: "1:1054968600634:web:ad9a66e50e26b98ccf7d03"
 };
 
-// Initialize Firebase safely without duplicate initialization
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const auth = getAuth(app);
 const db = getFirestore(app);
 const storage = getStorage(app);
 const googleProvider = new GoogleAuthProvider();
-
-// ============================================================================
-// 1. MULTI-TENANT VAULT ROUTER FOR WEB
-// ============================================================================
 
 const COLLEGE_ID_KEY = "scholarlytix_selected_college_id";
 const COLLEGE_NAME_KEY = "scholarlytix_selected_college_name";
@@ -50,27 +45,20 @@ export function setActiveCollege(collegeId: string, collegeName: string) {
   window.dispatchEvent(new Event("college-changed"));
 }
 
-// Points directly to /colleges/{activeCollegeId}/{collectionName}
 export function tenantCol(collectionName: string): CollectionReference<DocumentData> {
   const safeId = getActiveCollegeId() || "mit_mumbai";
   return collection(db, "colleges", safeId, collectionName);
 }
 
-// Points directly to /colleges/{activeCollegeId}/{collectionName}/{docId}
 export function tenantDoc(collectionName: string, docId: string): DocumentReference<DocumentData> {
   const safeId = getActiveCollegeId() || "mit_mumbai";
   return doc(db, "colleges", safeId, collectionName, docId);
 }
 
-// Prefixes FCM topics with the collegeId so notifications never cross campuses
 export function tenantTopic(rawTopic: string): string {
   const safeId = getActiveCollegeId() || "mit_mumbai";
   return rawTopic.startsWith(`${safeId}_`) ? rawTopic : `${safeId}_${rawTopic}`;
 }
-
-// ============================================================================
-// 2. DYNAMIC CUSTOM POST & PERMISSION ENGINE FOR WEB
-// ============================================================================
 
 export interface CustomRoleDef {
   roleId: string;
@@ -84,6 +72,7 @@ export interface CustomRoleDef {
   canApproveStudentLeaves: boolean;
   canResolveGrievances: boolean;
   canViewBugReports: boolean;
+  canManageLibrary?: boolean;
   facultyLeaveTier: number; // 0=None, 1=Dept, 2=Admin, 3=Exec, 4=All
 }
 
@@ -109,6 +98,7 @@ export function resolveWebRole(
       canApproveStudentLeaves: true,
       canResolveGrievances: true,
       canViewBugReports: true,
+      canManageLibrary: true,
       facultyLeaveTier: 4
     };
   }
@@ -127,7 +117,8 @@ export function resolveWebRole(
       roleId: "PRINCIPAL", roleName: "Principal", scopeType: "COLLEGE",
       canManageAdminPanel: true, canManageRoster: true, canPublishTimetable: true,
       canBroadcastAll: true, canManageGatePin: true, canApproveStudentLeaves: true,
-      canResolveGrievances: true, canViewBugReports: true, facultyLeaveTier: 3
+      canResolveGrievances: true, canViewBugReports: true, canManageLibrary: true,
+      facultyLeaveTier: 3
     };
   }
   if (rawScope === "REGISTRAR") {
@@ -135,7 +126,8 @@ export function resolveWebRole(
       roleId: "REGISTRAR", roleName: "Registrar", scopeType: "COLLEGE",
       canManageAdminPanel: true, canManageRoster: true, canPublishTimetable: true,
       canBroadcastAll: true, canManageGatePin: true, canApproveStudentLeaves: true,
-      canResolveGrievances: true, canViewBugReports: true, facultyLeaveTier: 2
+      canResolveGrievances: true, canViewBugReports: true, canManageLibrary: true,
+      facultyLeaveTier: 2
     };
   }
   if (rawScope === "DIRECTOR") {
@@ -143,7 +135,17 @@ export function resolveWebRole(
       roleId: "DIRECTOR", roleName: "Director", scopeType: "COLLEGE",
       canManageAdminPanel: true, canManageRoster: true, canPublishTimetable: true,
       canBroadcastAll: true, canManageGatePin: true, canApproveStudentLeaves: false,
-      canResolveGrievances: true, canViewBugReports: true, facultyLeaveTier: 0
+      canResolveGrievances: true, canViewBugReports: true, canManageLibrary: true,
+      facultyLeaveTier: 0
+    };
+  }
+  if (rawScope === "LIBRARIAN") {
+    return {
+      roleId: "LIBRARIAN", roleName: "Librarian", scopeType: "COLLEGE",
+      canManageAdminPanel: false, canManageRoster: false, canPublishTimetable: false,
+      canBroadcastAll: true, canManageGatePin: false, canApproveStudentLeaves: false,
+      canResolveGrievances: false, canViewBugReports: false, canManageLibrary: true,
+      facultyLeaveTier: 0
     };
   }
   if (rawScope.startsWith("HOD|")) {
@@ -151,7 +153,8 @@ export function resolveWebRole(
       roleId: "HOD", roleName: "Branch HOD", scopeType: "BRANCH",
       canManageAdminPanel: false, canManageRoster: true, canPublishTimetable: true,
       canBroadcastAll: true, canManageGatePin: true, canApproveStudentLeaves: true,
-      canResolveGrievances: true, canViewBugReports: false, facultyLeaveTier: 1
+      canResolveGrievances: true, canViewBugReports: false, canManageLibrary: false,
+      facultyLeaveTier: 1
     };
   }
   if (rawScope.startsWith("CLASS_TEACHER|")) {
@@ -159,7 +162,8 @@ export function resolveWebRole(
       roleId: "CLASS_TEACHER", roleName: "Class Teacher", scopeType: "CLASS",
       canManageAdminPanel: false, canManageRoster: true, canPublishTimetable: true,
       canBroadcastAll: false, canManageGatePin: false, canApproveStudentLeaves: true,
-      canResolveGrievances: false, canViewBugReports: false, facultyLeaveTier: 0
+      canResolveGrievances: false, canViewBugReports: false, canManageLibrary: false,
+      facultyLeaveTier: 0
     };
   }
 
@@ -167,7 +171,8 @@ export function resolveWebRole(
     roleId: "NONE", roleName: "Faculty", scopeType: "SELF",
     canManageAdminPanel: false, canManageRoster: false, canPublishTimetable: false,
     canBroadcastAll: false, canManageGatePin: false, canApproveStudentLeaves: false,
-    canResolveGrievances: false, canViewBugReports: false, facultyLeaveTier: 0
+    canResolveGrievances: false, canViewBugReports: false, canManageLibrary: false,
+    facultyLeaveTier: 0
   };
 }
 
@@ -182,6 +187,7 @@ export function formatWebRoleBadge(
   if (rawScope === "DIRECTOR") return "Director";
   if (rawScope === "REGISTRAR") return "Registrar";
   if (rawScope === "PRINCIPAL") return "Principal";
+  if (rawScope === "LIBRARIAN") return "Librarian";
   if (rawScope.startsWith("HOD|")) return `HOD: ${rawScope.replace("HOD|", "")}`;
   if (rawScope.startsWith("CLASS_TEACHER|")) {
     const parts = rawScope.split("|");

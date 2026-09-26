@@ -16,11 +16,24 @@ import {
 } from '@/lib/firebase';
 import GlassDropdown from '@/components/GlassDropdown';
 import GlassButton from '@/components/ui/GlassButton';
-import { 
-  Settings, Lock, Edit, Download, 
-  Smartphone, Fingerprint, CloudUpload, LogOut, 
-  Zap, Loader2, Check, ChevronLeft, CalendarDays, AlertCircle,
-  ShieldAlert, Bug, KeyRound
+import {
+  Settings,
+  Lock,
+  Edit,
+  Download,
+  Smartphone,
+  Fingerprint,
+  CloudUpload,
+  LogOut,
+  Zap,
+  Loader2,
+  Check,
+  ChevronLeft,
+  CalendarDays,
+  AlertCircle,
+  ShieldAlert,
+  Bug,
+  KeyRound
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import DynamicHueBackground from '@/components/DynamicHueBackground';
@@ -36,17 +49,55 @@ import FacultyNoticeBoardTab from '@/components/faculty/FacultyNoticeBoardTab';
 import FacultyGatePassTab from '@/components/faculty/FacultyGatePassTab';
 import FacultyLeavesAndTransfersTab from '@/components/faculty/FacultyLeavesAndTransfersTab';
 import FacultyGrievancesTab from '@/components/faculty/FacultyGrievancesTab';
+import FacultyAssignmentsQuizzesTab from '@/components/faculty/FacultyAssignmentsQuizzesTab';
+import FacultyLibraryTab from '@/components/faculty/FacultyLibraryTab';
+import EventsAndCalendarTab from '@/components/shared/EventsAndCalendarTab';
 import SuperAdminPanel from '@/components/faculty/SuperAdminPanel';
 import BugCenterPanel from '@/components/faculty/BugCenterPanel';
 
 const SUBJECTS_DICT: Record<string, string[]> = {
-  "Semester 3_IT": ["Applied Mathematics Thinking-I", "Advance Data Structure and Analysis", "Database Management System and Application", "Automata Theory", "Full Stack Java Programming", "Entrepreneurship Development", "Environmental Science", "Financial Management"],
-  "Semester 3_CSE": ["Mathematics for Computer Engineering", "Discrete Structures and Graph Theory", "Analysis of Algorithm", "Computer Organization and Architecture", "Full Stack Java Programming", "Entrepreneurship Development", "Environmental Science for Engineers", "Financial Management"],
-  "Semester 3_CSE(AIML)": ["Mathematics for Computer Engineering", "Discrete Structures and Graph Theory", "Analysis of Algorithm", "Computer Organization and Architecture", "Full Stack Java Programming", "Entrepreneurship Development", "Environmental Science for Engineers", "Financial Management"],
-  "Semester 3_EE": ["Mathematics-III", "Electronic Devices", "Data Structures and Algorithms", "Electrical Networks Analysis and Synthesis", "Entrepreneurship Development", "Environmental Science for Engineers", "Financial Management"]
+  "Semester 3_IT": [
+    "Applied Mathematics Thinking-I",
+    "Advance Data Structure and Analysis",
+    "Database Management System and Application",
+    "Automata Theory",
+    "Full Stack Java Programming",
+    "Entrepreneurship Development",
+    "Environmental Science",
+    "Financial Management"
+  ],
+  "Semester 3_CSE": [
+    "Mathematics for Computer Engineering",
+    "Discrete Structures and Graph Theory",
+    "Analysis of Algorithm",
+    "Computer Organization and Architecture",
+    "Full Stack Java Programming",
+    "Entrepreneurship Development",
+    "Environmental Science for Engineers",
+    "Financial Management"
+  ],
+  "Semester 3_CSE(AIML)": [
+    "Mathematics for Computer Engineering",
+    "Discrete Structures and Graph Theory",
+    "Analysis of Algorithm",
+    "Computer Organization and Architecture",
+    "Full Stack Java Programming",
+    "Entrepreneurship Development",
+    "Environmental Science for Engineers",
+    "Financial Management"
+  ],
+  "Semester 3_EE": [
+    "Mathematics-III",
+    "Electronic Devices",
+    "Data Structures and Algorithms",
+    "Electrical Networks Analysis and Synthesis",
+    "Entrepreneurship Development",
+    "Environmental Science for Engineers",
+    "Financial Management"
+  ]
 };
 
-const parseTimeToMinutes = (timeStr: String) => {
+const parseTimeToMinutes = (timeStr: string) => {
   if (!timeStr) return 0;
   let t = timeStr.trim().toUpperCase();
   const isPm = t.includes("PM");
@@ -58,12 +109,12 @@ const parseTimeToMinutes = (timeStr: String) => {
   if (h >= 1 && h <= 7 && !timeStr.toUpperCase().includes("AM")) h += 12;
   if (isPm && h < 12) h += 12;
   if (!isPm && h === 12) h = 0;
-  return (h * 60) + m;
+  return h * 60 + m;
 };
 
 // COMPRESSOR FOR TIMETABLE EXTRACTOR
 const compressImage = async (file: File): Promise<File> => {
-  if (!file.type.startsWith('image/')) return file; 
+  if (!file.type.startsWith('image/')) return file;
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
@@ -72,19 +123,37 @@ const compressImage = async (file: File): Promise<File> => {
       img.src = event.target?.result as string;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_DIM = 1800; 
+        const MAX_DIM = 1800;
         let { width, height } = img;
         if (width > height) {
-          if (width > MAX_DIM) { height = Math.round((height * MAX_DIM) / width); width = MAX_DIM; }
+          if (width > MAX_DIM) {
+            height = Math.round((height * MAX_DIM) / width);
+            width = MAX_DIM;
+          }
         } else {
-          if (height > MAX_DIM) { width = Math.round((width * MAX_DIM) / height); height = MAX_DIM; }
+          if (height > MAX_DIM) {
+            width = Math.round((width * MAX_DIM) / height);
+            height = MAX_DIM;
+          }
         }
-        canvas.width = width; canvas.height = height;
+        canvas.width = width;
+        canvas.height = height;
         canvas.getContext('2d')?.drawImage(img, 0, 0, width, height);
-        canvas.toBlob((blob) => {
-          if (blob) resolve(new File([blob], file.name.replace(/\.[^/.]+$/, ".jpg"), { type: 'image/jpeg' }));
-          else resolve(file);
-        }, 'image/jpeg', 0.85); 
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(
+                new File([blob], file.name.replace(/\.[^/.]+$/, ".jpg"), {
+                  type: 'image/jpeg'
+                })
+              );
+            } else {
+              resolve(file);
+            }
+          },
+          'image/jpeg',
+          0.85
+        );
       };
       img.onerror = () => resolve(file);
     };
@@ -103,10 +172,23 @@ export default function FacultyDashboard() {
   const [isHod, setIsHod] = useState(false);
   const [collegeName, setCollegeName] = useState("MIT Mumbai");
   const [subjectsDict, setSubjectsDict] = useState<Record<string, string[]>>(SUBJECTS_DICT);
-  
-  // Tab State matches the exact order of the video
+
   const [activeTab, setActiveTab] = useState("Classes");
-  const tabs = ["Classes", "Metrics", "Materials", "Notice Board", "History", "Tests", "Gate Pass", "Leaves & Transfers", "Grievances"];
+  const tabs = [
+    "Classes",
+    "Assignments",
+    "Metrics",
+    "Materials",
+    "Library",
+    "Events",
+    "Academic Calendar",
+    "Notice Board",
+    "History",
+    "Tests",
+    "Gate Pass",
+    "Leaves & Transfers",
+    "Grievances"
+  ];
 
   // Listen for URL parameters so Web Push Notifications land on the exact tab
   useEffect(() => {
@@ -120,47 +202,46 @@ export default function FacultyDashboard() {
       }
     }
   }, []);
-  
+
   const [teachingConfig, setTeachingConfig] = useState<Record<string, string[]>>({});
   const [facultySchedule, setFacultySchedule] = useState<any[]>([]);
   const [showProxyMode, setShowProxyMode] = useState(false);
-  
   const [currentMinutes, setCurrentMinutes] = useState(0);
   const [directMarkData, setDirectMarkData] = useState<any>(null);
-  
+
   const [theme, setTheme] = useState("indigo");
   const [isDarkTheme, setIsDarkTheme] = useState(true);
   const [isDynamicHue, setIsDynamicHue] = useState(true);
   const [showThemeDialog, setShowThemeDialog] = useState(false);
-
   const [isLocked, setIsLocked] = useState(false);
   const [pinInput, setPinInput] = useState("");
   const [showSettings, setShowSettings] = useState(false);
-
   const [showEditClasses, setShowEditClasses] = useState(false);
   const [draftConfig, setDraftConfig] = useState<Record<string, string[]>>({});
   const [isSavingClasses, setIsSavingClasses] = useState(false);
-
   const [showPinModal, setShowPinModal] = useState(false);
   const [newPin, setNewPin] = useState("");
-  
+
   // HOD / PBAC Settings Modals
   const [showSuperAdminPanel, setShowSuperAdminPanel] = useState(false);
   const [showBugCenter, setShowBugCenter] = useState(false);
   const [showGuardPinModal, setShowGuardPinModal] = useState(false);
   const [guardPin, setGuardPin] = useState("");
-  
   const [showTimetableModal, setShowTimetableModal] = useState(false);
   const [showManageTimetableModal, setShowManageTimetableModal] = useState(false);
-
   const [showDevicesDialog, setShowDevicesDialog] = useState(false);
   const [activeSessions, setActiveSessions] = useState<any[]>([]);
 
-  const [alertDialog, setAlertDialog] = useState<{title: string, message: string} | null>(null);
-  const [confirmDialog, setConfirmDialog] = useState<{title: string, message: string, onConfirm: () => void} | null>(null);
+  const [alertDialog, setAlertDialog] = useState<{ title: string; message: string } | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
 
   const showAlert = (title: string, message: string) => setAlertDialog({ title, message });
-  const showConfirm = (title: string, message: string, onConfirm: () => void) => setConfirmDialog({ title, message, onConfirm });
+  const showConfirm = (title: string, message: string, onConfirm: () => void) =>
+    setConfirmDialog({ title, message, onConfirm });
 
   // Dynamic PBAC Permission Resolution
   const rolePerms = resolveWebRole(rawRoleScope, customRolesMap, facultyEmail);
@@ -186,7 +267,9 @@ export default function FacultyDashboard() {
   }, []);
 
   const safeSetTab = (tab: string) => {
-    if (activeTab === "Classes" && tab !== "Classes") window.history.pushState(null, "", window.location.href);
+    if (activeTab === "Classes" && tab !== "Classes") {
+      window.history.pushState(null, "", window.location.href);
+    }
     setActiveTab(tab);
   };
 
@@ -202,7 +285,10 @@ export default function FacultyDashboard() {
 
   useEffect(() => {
     setCurrentMinutes(new Date().getHours() * 60 + new Date().getMinutes());
-    const interval = setInterval(() => setCurrentMinutes(new Date().getHours() * 60 + new Date().getMinutes()), 60000);
+    const interval = setInterval(
+      () => setCurrentMinutes(new Date().getHours() * 60 + new Date().getMinutes()),
+      60000
+    );
     return () => clearInterval(interval);
   }, []);
 
@@ -210,17 +296,18 @@ export default function FacultyDashboard() {
     const name = localStorage.getItem("academiq_faculty_name") || "";
     const uid = localStorage.getItem("academiq_faculty_id");
     const savedPin = localStorage.getItem("academiq_pin");
-    
     const savedTheme = localStorage.getItem("academiq_theme");
     const savedDark = localStorage.getItem("academiq_dark_theme");
     const savedHue = localStorage.getItem("academiq_dynamic_hue");
-    
+
     if (savedTheme) setTheme(savedTheme);
     if (savedDark !== null) setIsDarkTheme(savedDark === "true");
     if (savedHue !== null) setIsDynamicHue(savedHue === "true");
-    
-    if (!name || !uid) { router.replace('/'); return; } 
-    
+    if (!name || !uid) {
+      router.replace('/');
+      return;
+    }
+
     setFacultyName(name);
     setFacultyId(uid);
     if (savedPin) setIsLocked(true);
@@ -228,7 +315,7 @@ export default function FacultyDashboard() {
     // Real-time listener for Custom Roles (PBAC)
     const unsubCustomRoles = onSnapshot(tenantCol("custom_roles"), (snap) => {
       const map: Record<string, CustomRoleDef> = {};
-      snap.docs.forEach(d => {
+      snap.docs.forEach((d) => {
         map[d.id] = { roleId: d.id, ...(d.data() as any) };
       });
       setCustomRolesMap(map);
@@ -237,18 +324,19 @@ export default function FacultyDashboard() {
     // Real-time listener for dynamic Subject Master
     const unsubSubjectMaster = onSnapshot(tenantDoc("app_config", "subject_master"), (snap) => {
       if (snap.exists() && snap.data().subjects) {
-        setSubjectsDict({ ...SUBJECTS_DICT, ...(snap.data().subjects as Record<string, string[]>) });
+        setSubjectsDict({
+          ...SUBJECTS_DICT,
+          ...(snap.data().subjects as Record<string, string[]>)
+        });
       }
     });
 
     let unsubRoleDoc: (() => void) | null = null;
-
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       if (user && user.email) {
         const email = user.email.toLowerCase().trim();
         setFacultyEmail(email);
-        
-        // Ensure developer email bypasses DB checks
+
         if (isFounderEmail(email)) {
           setRawRoleScope("SUPER_ADMIN");
           setIsHod(true);
@@ -265,10 +353,24 @@ export default function FacultyDashboard() {
             const data = roleDoc.data();
             const role = data.roleScope || data.role || "NONE";
             setRawRoleScope(role);
-
-            if (["hod", "principal", "admin", "owner", "developer", "director", "registrar", "super_admin"].includes(role.toLowerCase())) {
+            if (
+              [
+                "hod",
+                "principal",
+                "admin",
+                "owner",
+                "developer",
+                "director",
+                "registrar",
+                "super_admin"
+              ].includes(role.toLowerCase())
+            ) {
               setIsHod(true);
-            } else if (role.startsWith("HOD|") || role.startsWith("CLASS_TEACHER|") || role.startsWith("CUSTOM|")) {
+            } else if (
+              role.startsWith("HOD|") ||
+              role.startsWith("CLASS_TEACHER|") ||
+              role.startsWith("CUSTOM|")
+            ) {
               setIsHod(true);
             } else {
               setIsHod(false);
@@ -288,19 +390,24 @@ export default function FacultyDashboard() {
       else setFacultySchedule([]);
     });
 
-    return () => { 
+    return () => {
       if (unsubRoleDoc) unsubRoleDoc();
       unsubCustomRoles();
       unsubSubjectMaster();
       unsubscribeAuth();
-      unsubConfig(); 
-      unsubSchedule(); 
+      unsubConfig();
+      unsubSchedule();
     };
   }, [router]);
 
   const handleUnlock = () => {
-    if (pinInput === localStorage.getItem("academiq_pin")) { setIsLocked(false); setPinInput(""); } 
-    else { showAlert("Access Denied", "Incorrect PIN"); setPinInput(""); }
+    if (pinInput === localStorage.getItem("academiq_pin")) {
+      setIsLocked(false);
+      setPinInput("");
+    } else {
+      showAlert("Access Denied", "Incorrect PIN");
+      setPinInput("");
+    }
   };
 
   const handleLogout = () => {
@@ -308,14 +415,14 @@ export default function FacultyDashboard() {
     localStorage.removeItem("academiq_faculty_name");
     localStorage.removeItem("userRole");
     auth.signOut();
-    router.replace('/'); 
+    router.replace('/');
   };
 
   const fetchActiveSessions = async () => {
     if (!facultyId) return;
     const q = query(tenantCol("active_sessions"), where("userId", "==", facultyId));
     const querySnapshot = await getDocs(q);
-    const sessions = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const sessions = querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
     setActiveSessions(sessions);
     setShowDevicesDialog(true);
   };
@@ -323,39 +430,59 @@ export default function FacultyDashboard() {
   const logoutOtherDevice = async (sessionId: string) => {
     try {
       await deleteDoc(tenantDoc("active_sessions", sessionId));
-      setActiveSessions(prev => prev.filter(s => s.id !== sessionId));
+      setActiveSessions((prev) => prev.filter((s) => s.id !== sessionId));
       showAlert("Success", "Logged out of device securely.");
-    } catch(e) {
+    } catch (e) {
       console.error(e);
     }
   };
 
   const handleSaveClasses = async () => {
     setIsSavingClasses(true);
-    if (facultyId) { await setDoc(tenantDoc("teacher_configs", facultyId), { config: draftConfig }); }
+    if (facultyId) {
+      await setDoc(tenantDoc("teacher_configs", facultyId), { config: draftConfig });
+    }
     setIsSavingClasses(false);
     setShowEditClasses(false);
   };
 
   const handleSaveGuardPin = async () => {
-    if (guardPin.length !== 6) return showAlert("Invalid Format", "Gate PIN must be exactly 6 digits.");
+    if (guardPin.length !== 6) {
+      return showAlert("Invalid Format", "Gate PIN must be exactly 6 digits.");
+    }
     try {
       await Promise.all([
-        setDoc(tenantDoc("app_config", "gate_security"), { pin: guardPin, updatedAt: Date.now() }, { merge: true }),
-        setDoc(tenantDoc("app_config", "guard_settings"), { accessPin: guardPin, pin: guardPin, updatedAt: Date.now() }, { merge: true })
+        setDoc(
+          tenantDoc("app_config", "gate_security"),
+          { pin: guardPin, updatedAt: Date.now() },
+          { merge: true }
+        ),
+        setDoc(
+          tenantDoc("app_config", "guard_settings"),
+          { accessPin: guardPin, pin: guardPin, updatedAt: Date.now() },
+          { merge: true }
+        )
       ]);
       setShowGuardPinModal(false);
       setGuardPin("");
-      showAlert("Success", "Guard Gate PIN updated successfully. Guards can now use this PIN to log in.");
+      showAlert(
+        "Success",
+        "Guard Gate PIN updated successfully. Guards can now use this PIN to log in."
+      );
     } catch (e) {
       showAlert("Error", "Failed to update Guard PIN. Check your permissions.");
     }
   };
 
   const handleDirectMarkClick = (slot: any) => {
-    const safeBatch = (!slot.batch || slot.batch === "null") ? "All" : slot.batch;
+    const safeBatch = !slot.batch || slot.batch === "null" ? "All" : slot.batch;
     window.history.pushState(null, "", window.location.href);
-    setDirectMarkData({ sem: slot.semester, branch: slot.branch, subject: slot.subject, batch: safeBatch });
+    setDirectMarkData({
+      sem: slot.semester,
+      branch: slot.branch,
+      subject: slot.subject,
+      batch: safeBatch
+    });
     setActiveTab("Attendance");
   };
 
@@ -364,33 +491,70 @@ export default function FacultyDashboard() {
   };
 
   const isDark = isDynamicHue || isDarkTheme;
-  const bgMain = isDynamicHue ? 'bg-transparent text-white' : (isDarkTheme ? 'bg-black text-white' : 'bg-gray-50 text-neutral-900');
-  const cardBg = isDynamicHue ? 'bg-white/[0.08] border-white/20 backdrop-blur-[40px]' : (isDarkTheme ? 'bg-[#121212] border-white/10' : 'bg-white border-black/10 shadow-lg');
-  const modalBg = isDynamicHue ? 'bg-black/60 border-white/20 backdrop-blur-2xl shadow-[0_0_40px_rgba(0,0,0,0.5)] text-white' : (isDarkTheme ? 'bg-[#1A1A1A] border-white/10 text-white shadow-2xl' : 'bg-white border-black/10 text-neutral-900 shadow-2xl');
+  const bgMain = isDynamicHue
+    ? 'bg-transparent text-white'
+    : isDarkTheme
+    ? 'bg-black text-white'
+    : 'bg-gray-50 text-neutral-900';
+  const cardBg = isDynamicHue
+    ? 'bg-white/[0.08] border-white/20 backdrop-blur-[40px]'
+    : isDarkTheme
+    ? 'bg-[#121212] border-white/10'
+    : 'bg-white border-black/10 shadow-lg';
+  const modalBg = isDynamicHue
+    ? 'bg-black/60 border-white/20 backdrop-blur-2xl shadow-[0_0_40px_rgba(0,0,0,0.5)] text-white'
+    : isDarkTheme
+    ? 'bg-[#1A1A1A] border-white/10 text-white shadow-2xl'
+    : 'bg-white border-black/10 text-neutral-900 shadow-2xl';
 
   if (isLocked) {
     return (
-      <main className={`relative min-h-screen w-full flex flex-col items-center justify-center p-6 ${bgMain}`}>
-        {isDynamicHue && <DynamicHueBackground theme={theme} />}
+      <main
+        className={`relative min-h-screen w-full flex flex-col items-center justify-center p-6 ${bgMain}`}
+      >
+        {isDynamicHue && <DynamicHueBackground {...({ theme } as any)} />}
         <CursorGlow />
-        
         {alertDialog && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
             <div className={`border p-8 rounded-[2rem] w-full max-w-sm ${modalBg}`}>
-              <h3 className="text-xl font-bold mb-2 flex items-center"><AlertCircle className="w-6 h-6 mr-2 text-red-400"/> {alertDialog.title}</h3>
-              <p className="text-sm opacity-70 mb-8">{alertDialog.message}</p>
-              <button onClick={() => setAlertDialog(null)} className="w-full py-3.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold hover:scale-[1.02] transition-transform">OK</button>
+              <h3 className="text-xl font-bold mb-2 flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-[#D0BCFF]" /> {alertDialog.title}
+              </h3>
+              <p className="text-sm opacity-80 mb-6">{alertDialog.message}</p>
+              <button
+                onClick={() => setAlertDialog(null)}
+                className="w-full py-3.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold hover:scale-[1.02] transition-transform"
+              >
+                OK
+              </button>
             </div>
           </div>
         )}
-
-        <div className={`p-10 border rounded-[2rem] text-center max-w-sm w-full ${modalBg}`}>
-          <Fingerprint className="w-16 h-16 text-[#D0BCFF] mx-auto mb-4 drop-shadow-[0_0_15px_rgba(208,188,255,0.5)]" />
+        <div className={`p-10 border rounded-[2rem] text-center max-w-sm w-full z-10 ${modalBg}`}>
+          <Lock className="w-12 h-12 text-[#D0BCFF] mx-auto mb-4" />
           <h2 className="text-2xl font-bold mb-2">App Locked</h2>
-          <p className="opacity-70 mb-8 text-sm">Enter your PIN to access the portal.</p>
-          <input type="password" maxLength={4} value={pinInput} onChange={(e) => setPinInput(e.target.value)} className={`w-full text-center text-3xl tracking-[1em] border rounded-2xl p-5 focus:ring-2 focus:ring-[#D0BCFF] outline-none mb-8 ${isDark ? 'bg-white/[0.08] border-white/20 text-white placeholder:text-white/30' : 'bg-black/5 border-black/10 text-neutral-900'}`} placeholder="••••" />
-          <button onClick={handleUnlock} className="w-full py-4 bg-[#D0BCFF] text-[#2A1B4E] rounded-2xl font-bold text-lg hover:scale-[1.02] transition-all shadow-[0_0_20px_rgba(208,188,255,0.4)]">Unlock</button>
-          <button onClick={handleLogout} className="mt-4 text-xs text-red-400 hover:underline">Sign Out instead</button>
+          <p className="text-sm opacity-70 mb-6">Enter your PIN to access the portal.</p>
+          <input
+            type="password"
+            maxLength={4}
+            value={pinInput}
+            onChange={(e) => setPinInput(e.target.value)}
+            className={`w-full text-center text-3xl tracking-[1em] border rounded-2xl p-5 focus:ring-2 focus:ring-[#D0BCFF] outline-none mb-8 ${
+              isDark
+                ? 'bg-white/[0.08] border-white/20 text-white placeholder:text-white/30'
+                : 'bg-black/5 border-black/10 text-neutral-900'
+            }`}
+            placeholder="••••"
+          />
+          <GlassButton onClick={handleUnlock} variant="primary" className="w-full mb-4">
+            Unlock
+          </GlassButton>
+          <button
+            onClick={handleLogout}
+            className="text-sm text-red-400 font-bold hover:underline"
+          >
+            Sign Out instead
+          </button>
         </div>
       </main>
     );
@@ -398,152 +562,258 @@ export default function FacultyDashboard() {
 
   if (showSettings) {
     const hasPin = !!localStorage.getItem("academiq_pin");
-
     return (
-      <main className={`relative min-h-screen w-full flex flex-col p-6 overflow-y-auto [&::-webkit-scrollbar]:hidden ${bgMain}`}>
-        {isDynamicHue && <DynamicHueBackground theme={theme} />}
+      <main
+        className={`relative min-h-screen w-full flex flex-col p-6 overflow-y-auto [&::-webkit-scrollbar]:hidden ${bgMain}`}
+      >
+        {isDynamicHue && <DynamicHueBackground {...({ theme } as any)} />}
         <CursorGlow />
-
         {alertDialog && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
             <div className={`border p-8 rounded-[2rem] w-full max-w-sm ${modalBg}`}>
               <h3 className="text-xl font-bold mb-2">{alertDialog.title}</h3>
-              <p className="text-sm opacity-70 mb-8">{alertDialog.message}</p>
-              <button onClick={() => setAlertDialog(null)} className="w-full py-3.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold hover:scale-[1.02] transition-transform">Got it</button>
+              <p className="text-sm opacity-80 mb-6">{alertDialog.message}</p>
+              <button
+                onClick={() => setAlertDialog(null)}
+                className="w-full py-3.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold hover:scale-[1.02] transition-transform"
+              >
+                Got it
+              </button>
             </div>
           </div>
         )}
-
         {confirmDialog && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
             <div className={`border p-8 rounded-[2rem] w-full max-w-sm ${modalBg}`}>
               <h3 className="text-xl font-bold mb-2">{confirmDialog.title}</h3>
-              <p className="text-sm opacity-70 mb-8">{confirmDialog.message}</p>
-              <div className="flex space-x-3">
-                <button onClick={() => setConfirmDialog(null)} className={`flex-1 py-3.5 rounded-xl font-bold transition-colors ${isDark ? 'bg-white/[0.05] border border-white/20 hover:bg-white/10' : 'bg-black/5 border border-black/10 hover:bg-black/10'}`}>Cancel</button>
-                <button onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }} className="flex-1 py-3.5 bg-red-500/80 text-white rounded-xl font-bold hover:scale-[1.02] transition-transform shadow-[0_0_20px_rgba(239,68,68,0.3)]">Confirm</button>
+              <p className="text-sm opacity-80 mb-6">{confirmDialog.message}</p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setConfirmDialog(null)}
+                  className={`flex-1 py-3.5 rounded-xl font-bold transition-colors ${
+                    isDark
+                      ? 'bg-white/[0.05] border border-white/20 hover:bg-white/10'
+                      : 'bg-black/5 border border-black/10 hover:bg-black/10'
+                  }`}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    confirmDialog.onConfirm();
+                    setConfirmDialog(null);
+                  }}
+                  className="flex-1 py-3.5 bg-red-500/80 text-white rounded-xl font-bold hover:scale-[1.02] transition-transform shadow-[0_0_20px_rgba(239,68,68,0.3)]"
+                >
+                  Confirm
+                </button>
               </div>
             </div>
           </div>
         )}
-        
-        <div className="w-full max-w-2xl mx-auto flex flex-col pb-10 mt-6 z-10">
-          <div className="flex items-center mb-10">
-            <button onClick={() => { setShowSettings(false); window.history.back(); }} className={`p-3 border rounded-2xl transition-all backdrop-blur-xl mr-4 ${isDark ? 'bg-white/[0.08] border-white/20 text-white hover:bg-white/[0.15]' : 'bg-black/[0.05] border-black/10 text-black hover:bg-black/[0.1]'}`}>
+
+        <div className="max-w-3xl w-full mx-auto z-10 py-6">
+          <div className="flex items-center mb-8">
+            <button
+              onClick={() => {
+                setShowSettings(false);
+                window.history.back();
+              }}
+              className={`p-3 border rounded-2xl transition-all backdrop-blur-xl mr-4 ${
+                isDark
+                  ? 'bg-white/[0.08] border-white/20 text-white hover:bg-white/[0.15]'
+                  : 'bg-black/[0.05] border-black/10 text-black hover:bg-black/[0.1]'
+              }`}
+            >
               <ChevronLeft className="w-6 h-6" />
             </button>
             <div>
-              <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
-              <p className="text-xs text-[#D0BCFF] font-bold mt-0.5">{collegeName} • {roleBadgeText}</p>
+              <h1 className="text-3xl font-bold">Settings</h1>
+              <p className="text-xs text-[#D0BCFF] font-semibold mt-1">
+                {collegeName} • {roleBadgeText}
+              </p>
             </div>
           </div>
 
           <div className={`border rounded-[2rem] overflow-hidden flex flex-col ${cardBg}`}>
-            <SettingsRow icon={<Download />} title="Check for Updates" subtitle="Download the latest version of the app." isDark={isDark} onClick={() => showAlert("Up to Date", "Your version of Scholarlytix is currently up to date.")} />
-            
-            <div className={`flex items-center justify-between p-5 border-b cursor-pointer hover:bg-white/[0.02] ${isDark ? 'border-white/[0.05]' : 'border-black/[0.05]'}`} onClick={fetchActiveSessions}>
-              <div className="flex-1 pr-4">
+            <SettingsRow
+              icon={<Download className="w-5 h-5 text-[#D0BCFF]" />}
+              title="Check for Updates"
+              subtitle="Download the latest version of the app."
+              isDark={isDark}
+              onClick={() =>
+                showAlert("Up to Date", "Your version of Scholarlytix is currently up to date.")
+              }
+            />
+            <div
+              className={`flex items-center justify-between p-5 border-b cursor-pointer hover:bg-white/[0.02] ${
+                isDark ? 'border-white/[0.05]' : 'border-black/[0.05]'
+              }`}
+              onClick={fetchActiveSessions}
+            >
+              <div>
                 <h3 className="font-semibold text-lg">Manage Active Devices</h3>
-                <p className={`text-sm mt-0.5 ${isDark ? 'text-white/70' : 'text-neutral-600'}`}>Log out from other phones or tablets.</p>
+                <p className={`text-sm mt-0.5 ${isDark ? 'text-white/70' : 'text-neutral-600'}`}>
+                  Log out from other phones or tablets.
+                </p>
               </div>
-              <Smartphone className="w-5 h-5 opacity-60" />
+              <div
+                className={`p-2.5 rounded-xl ${
+                  isDark ? 'bg-white/[0.08] border border-white/20' : 'bg-black/5 border border-black/10'
+                }`}
+              >
+                <Smartphone className="w-5 h-5 text-[#D0BCFF]" />
+              </div>
             </div>
 
-            <SettingsRow 
-              icon={<Lock />} 
-              title={hasPin ? "Remove App Lock PIN" : "Secure PIN"} 
-              subtitle={hasPin ? "Disable local device security." : "Set a PIN to lock the website."} 
+            <SettingsRow
+              icon={<Fingerprint className="w-5 h-5 text-[#D0BCFF]" />}
+              title={hasPin ? "Remove App Lock PIN" : "Secure PIN"}
+              subtitle={
+                hasPin ? "Disable local device security." : "Set a PIN to lock the website."
+              }
               isDark={isDark}
               onClick={() => {
                 if (hasPin) {
-                  showConfirm("Remove PIN", "Are you sure you want to remove your App Lock PIN?", () => {
-                    localStorage.removeItem("academiq_pin");
-                    router.refresh();
-                  });
-                } else { 
-                  setShowPinModal(true); 
+                  showConfirm(
+                    "Remove PIN",
+                    "Are you sure you want to remove your App Lock PIN?",
+                    () => {
+                      localStorage.removeItem("academiq_pin");
+                      router.refresh();
+                    }
+                  );
+                } else {
+                  setShowPinModal(true);
                 }
-              }} 
+              }}
             />
-            
-            <div className={`flex items-center justify-between p-5 border-b ${isDark ? 'border-white/[0.05]' : 'border-black/[0.05]'}`}>
-              <div className="flex-1 pr-4">
+
+            <div
+              className={`flex items-center justify-between p-5 border-b ${
+                isDark ? 'border-white/[0.05]' : 'border-black/[0.05]'
+              }`}
+            >
+              <div>
                 <h3 className="font-semibold text-lg">Dark Mode</h3>
-                <p className={`text-sm mt-0.5 ${isDark ? 'text-white/70' : 'text-neutral-600'}`}>Toggle standard Light/Dark aesthetics.</p>
+                <p className={`text-sm mt-0.5 ${isDark ? 'text-white/70' : 'text-neutral-600'}`}>
+                  Toggle standard Light/Dark aesthetics.
+                </p>
               </div>
-              <ToggleSwitch checked={isDarkTheme} onChange={(val) => { setIsDarkTheme(val); updateThemePref("academiq_dark_theme", String(val)); }} />
+              <ToggleSwitch
+                checked={isDarkTheme}
+                onChange={(val) => {
+                  setIsDarkTheme(val);
+                  updateThemePref("academiq_dark_theme", String(val));
+                }}
+              />
             </div>
 
-            <div className={`flex items-center justify-between p-5 border-b ${isDark ? 'border-white/[0.05]' : 'border-black/[0.05]'}`}>
-              <div className="flex-1 pr-4">
+            <div
+              className={`flex items-center justify-between p-5 border-b ${
+                isDark ? 'border-white/[0.05]' : 'border-black/[0.05]'
+              }`}
+            >
+              <div>
                 <h3 className="font-semibold text-lg">Dynamic Hue Mode</h3>
-                <p className={`text-sm mt-0.5 ${isDark ? 'text-white/70' : 'text-neutral-600'}`}>Add a little flair &amp; tap edit to choose themes.</p>
+                <p className={`text-sm mt-0.5 ${isDark ? 'text-white/70' : 'text-neutral-600'}`}>
+                  Add a little flair & tap edit to choose themes.
+                </p>
               </div>
-              <div className="flex items-center space-x-2">
-                <button 
-                  onClick={() => setShowThemeDialog(true)} 
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setShowThemeDialog(true)}
                   disabled={!isDynamicHue}
-                  className={`p-2.5 rounded-xl border transition-all ${isDynamicHue ? (isDark ? 'bg-white/[0.08] border-white/20 text-[#D0BCFF]' : 'bg-black/[0.05] border-black/10 text-[#6750A4]') : 'opacity-30 cursor-not-allowed border-transparent'}`}
+                  className={`p-2.5 rounded-xl border transition-all ${
+                    isDynamicHue
+                      ? isDark
+                        ? 'bg-white/[0.08] border-white/20 text-[#D0BCFF]'
+                        : 'bg-black/[0.05] border-black/10 text-[#6750A4]'
+                      : 'opacity-30 cursor-not-allowed border-transparent'
+                  }`}
                 >
-                  <Edit className="w-5 h-5" />
+                  <Edit className="w-4 h-4" />
                 </button>
-                <ToggleSwitch checked={isDynamicHue} onChange={(val) => { setIsDynamicHue(val); updateThemePref("academiq_dynamic_hue", String(val)); }} />
+                <ToggleSwitch
+                  checked={isDynamicHue}
+                  onChange={(val) => {
+                    setIsDynamicHue(val);
+                    updateThemePref("academiq_dynamic_hue", String(val));
+                  }}
+                />
               </div>
             </div>
 
-            {/* --- HOD & PBAC SETTINGS --- */}
+            {/* HOD & PBAC SETTINGS */}
             {canAccessAdminPanel && (
-              <SettingsRow 
-                icon={<ShieldAlert className="text-green-400" />} 
-                title="Management Control Panel" 
-                subtitle="Add, remove, and manage HODs, Custom Roles & Teachers." 
+              <SettingsRow
+                icon={<ShieldAlert className="w-5 h-5 text-[#D0BCFF]" />}
+                title="Management Control Panel"
+                subtitle="Add, remove, and manage HODs, Custom Roles, Librarians & Teachers."
                 isDark={isDark}
-                onClick={() => { window.history.pushState(null, ""); setShowSuperAdminPanel(true); }} 
+                onClick={() => {
+                  window.history.pushState(null, "");
+                  setShowSuperAdminPanel(true);
+                }}
               />
             )}
-            
-            <SettingsRow 
-              icon={<Bug className="text-blue-400" />} 
-              title="User Reports & Bug Center" 
-              subtitle="Inspect user bug reports, attachments, and change ticket statuses." 
+
+            <SettingsRow
+              icon={<Bug className="w-5 h-5 text-[#D0BCFF]" />}
+              title="User Reports & Bug Center"
+              subtitle="Inspect user bug reports, attachments, and change ticket statuses."
               isDark={isDark}
-              onClick={() => { window.history.pushState(null, ""); setShowBugCenter(true); }} 
+              onClick={() => {
+                window.history.pushState(null, "");
+                setShowBugCenter(true);
+              }}
             />
 
             {canManageGatePin && (
-              <SettingsRow 
-                icon={<KeyRound className="text-orange-400" />} 
-                title="Manage Gate PIN" 
-                subtitle="Change the 6-digit access code for campus guards." 
+              <SettingsRow
+                icon={<KeyRound className="w-5 h-5 text-[#D0BCFF]" />}
+                title="Manage Gate PIN"
+                subtitle="Change the 6-digit access code for campus guards."
                 isDark={isDark}
-                onClick={() => setShowGuardPinModal(true)} 
+                onClick={() => setShowGuardPinModal(true)}
               />
             )}
 
-            <div className={`flex items-center justify-between p-5 hover:bg-red-500/10 transition-colors cursor-pointer group`} onClick={handleLogout}>
-              <div className="flex-1 pr-4">
+            <div
+              className="flex items-center justify-between p-5 hover:bg-red-500/10 transition-colors cursor-pointer group"
+              onClick={handleLogout}
+            >
+              <div>
                 <h3 className="font-semibold text-lg text-red-400">Sign Out</h3>
-                <p className="text-sm text-red-400/70 mt-0.5">Log out of your Faculty account.</p>
+                <p className={`text-sm mt-0.5 ${isDark ? 'text-white/70' : 'text-neutral-600'}`}>
+                  Log out of your Faculty account.
+                </p>
               </div>
-              <LogOut className="w-6 h-6 text-red-400" />
+              <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/20">
+                <LogOut className="w-5 h-5 text-red-400" />
+              </div>
             </div>
           </div>
 
-          <div className="mt-12 flex flex-col items-center text-center space-y-1">
-            <p className={`text-xs ${isDark ? 'text-white/50' : 'text-neutral-500'}`}>Version 3.5</p>
-            <p className={`text-sm font-medium ${isDark ? 'text-white/70' : 'text-neutral-600'}`}>Developed by - Pratosh Gharat</p>
-            <div className="relative h-16 w-48 flex items-center justify-center mt-2">
-              <img 
-                src="/signature.png" 
-                alt="Pratosh Gharat Signature" 
-                className={`h-full w-full object-contain ${isDark ? 'brightness-0 invert' : ''}`} 
+          <div className="mt-10 flex flex-col items-center text-center space-y-2">
+            <p className={`text-xs ${isDark ? 'text-white/50' : 'text-neutral-500'}`}>
+              Version 3.5
+            </p>
+            <p className={`text-sm font-medium ${isDark ? 'text-white/70' : 'text-neutral-600'}`}>
+              Developed by - Pratosh Gharat
+            </p>
+            <div className="h-12 w-40">
+              <img
+                src="/signature.png"
+                alt="Pratosh Gharat Signature"
+                className={`h-full w-full object-contain ${isDark ? 'brightness-0 invert' : ''}`}
               />
             </div>
           </div>
         </div>
 
         {showThemeDialog && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
             <div className={`border p-8 rounded-[2rem] w-full max-w-sm ${modalBg}`}>
               <h3 className="text-xl font-bold mb-4">Select Dynamic Hue Theme</h3>
               <div className="space-y-2 mb-6">
@@ -553,79 +823,187 @@ export default function FacultyDashboard() {
                   { key: "eclipse", label: "Solar Eclipse (Warm Luxury)" },
                   { key: "emerald", label: "Cyber Emerald (Engineering)" },
                   { key: "vibrant", label: "Vibrant Aurora (Original Multi-Color)" }
-                ].map(item => (
-                  <div 
-                    key={item.key} 
-                    onClick={() => { setTheme(item.key); updateThemePref("academiq_theme", item.key); setShowThemeDialog(false); }}
-                    className={`p-3.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${theme === item.key ? 'border-[#D0BCFF] bg-[#4F378B]/30 font-bold' : 'border-transparent hover:bg-black/10 hover:border-white/10'}`}
+                ].map((item) => (
+                  <div
+                    key={item.key}
+                    onClick={() => {
+                      setTheme(item.key);
+                      updateThemePref("academiq_theme", item.key);
+                      setShowThemeDialog(false);
+                    }}
+                    className={`p-3.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+                      theme === item.key
+                        ? 'border-[#D0BCFF] bg-[#4F378B]/30 font-bold'
+                        : 'border-transparent hover:bg-black/10 hover:border-white/10'
+                    }`}
                   >
-                    <span>{item.label}</span>
+                    <span className="text-sm">{item.label}</span>
                     {theme === item.key && <Check className="w-4 h-4 text-[#D0BCFF]" />}
                   </div>
                 ))}
               </div>
-              <button onClick={() => setShowThemeDialog(false)} className="w-full py-3 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold hover:scale-[1.02] transition-transform">Close</button>
+              <button
+                onClick={() => setShowThemeDialog(false)}
+                className="w-full py-3 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold hover:scale-[1.02] transition-transform"
+              >
+                Close
+              </button>
             </div>
           </div>
         )}
 
         {showPinModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
             <div className={`border p-8 rounded-[2rem] w-full max-w-sm ${modalBg}`}>
-              <h2 className="text-xl font-bold mb-2">Set 4-Digit PIN</h2>
-              <input type="password" maxLength={4} value={newPin} onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))} className={`w-full text-center text-3xl tracking-[1em] border rounded-2xl p-4 outline-none mb-6 ${isDark ? 'bg-white/[0.08] border-white/20 text-white' : 'bg-black/5 border-black/10 text-neutral-900'}`} placeholder="••••" />
-              <div className="flex space-x-3">
-                <button onClick={() => setShowPinModal(false)} className={`flex-1 py-3.5 rounded-xl font-bold ${isDark ? 'bg-white/[0.05] border border-white/20' : 'bg-black/5 border border-black/10'}`}>Cancel</button>
-                <button onClick={() => { if (newPin.length === 4) { localStorage.setItem("academiq_pin", newPin); setShowPinModal(false); setNewPin(""); } else showAlert("Invalid", "PIN must be exactly 4 digits."); }} className="flex-1 py-3.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold hover:scale-[1.02]">Save PIN</button>
+              <h3 className="text-xl font-bold mb-4">Set 4-Digit PIN</h3>
+              <input
+                type="password"
+                maxLength={4}
+                value={newPin}
+                onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))}
+                className={`w-full text-center text-3xl tracking-[1em] border rounded-2xl p-4 outline-none mb-6 ${
+                  isDark
+                    ? 'bg-white/[0.08] border-white/20 text-white'
+                    : 'bg-black/5 border-black/10 text-neutral-900'
+                }`}
+                placeholder="••••"
+              />
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowPinModal(false)}
+                  className={`flex-1 py-3.5 rounded-xl font-bold ${
+                    isDark
+                      ? 'bg-white/[0.05] border border-white/20'
+                      : 'bg-black/5 border border-black/10'
+                  }`}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    if (newPin.length === 4) {
+                      localStorage.setItem("academiq_pin", newPin);
+                      setShowPinModal(false);
+                      setNewPin("");
+                    } else {
+                      showAlert("Invalid", "PIN must be exactly 4 digits.");
+                    }
+                  }}
+                  className="flex-1 py-3.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold hover:scale-[1.02]"
+                >
+                  Save PIN
+                </button>
               </div>
             </div>
           </div>
         )}
 
         {showGuardPinModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
             <div className={`border p-8 rounded-[2rem] w-full max-w-sm ${modalBg}`}>
-              <h2 className="text-xl font-bold mb-2">Set Gate PIN</h2>
-              <p className="text-sm opacity-70 mb-6">Create the 6-digit access code guards use to log in to the Security Portal.</p>
-              <input type="text" maxLength={6} value={guardPin} onChange={(e) => setGuardPin(e.target.value.replace(/\D/g, ''))} className={`w-full text-center text-3xl tracking-[0.5em] border rounded-2xl p-4 outline-none mb-6 ${isDark ? 'bg-white/[0.08] border-white/20 text-white focus:border-[#D0BCFF]' : 'bg-black/5 border-black/10 text-neutral-900 focus:border-[#D0BCFF]'}`} placeholder="••••••" />
-              <div className="flex space-x-3">
-                <button onClick={() => setShowGuardPinModal(false)} className={`flex-1 py-3.5 rounded-xl font-bold ${isDark ? 'bg-white/[0.05] border border-white/20' : 'bg-black/5 border border-black/10'}`}>Cancel</button>
-                <GlassButton onClick={handleSaveGuardPin} variant="primary" className="flex-1">Update PIN</GlassButton>
+              <h3 className="text-xl font-bold mb-2">Set Gate PIN</h3>
+              <p className="text-xs opacity-70 mb-4">
+                Create the 6-digit access code guards use to log in to the Security Portal.
+              </p>
+              <input
+                type="text"
+                maxLength={6}
+                value={guardPin}
+                onChange={(e) => setGuardPin(e.target.value.replace(/\D/g, ''))}
+                className={`w-full text-center text-3xl tracking-[0.5em] border rounded-2xl p-4 outline-none mb-6 ${
+                  isDark
+                    ? 'bg-white/[0.08] border-white/20 text-white focus:border-[#D0BCFF]'
+                    : 'bg-black/5 border-black/10 text-neutral-900 focus:border-[#D0BCFF]'
+                }`}
+                placeholder="••••••"
+              />
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowGuardPinModal(false)}
+                  className={`flex-1 py-3.5 rounded-xl font-bold ${
+                    isDark
+                      ? 'bg-white/[0.05] border border-white/20'
+                      : 'bg-black/5 border border-black/10'
+                  }`}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveGuardPin}
+                  className="flex-1 py-3.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold"
+                >
+                  Update PIN
+                </button>
               </div>
             </div>
           </div>
         )}
 
         {showDevicesDialog && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
-            <div className={`border p-8 rounded-[2rem] w-full max-w-md ${modalBg} max-h-[80vh] overflow-y-auto`}>
-              <h3 className="text-xl font-bold mb-6">Active Devices</h3>
-              {activeSessions.length === 0 ? <p className="text-center opacity-60">No other active devices found.</p> : (
-                <div className="space-y-4 mb-6">
-                  {activeSessions.map(session => (
-                    <div key={session.id} className="flex justify-between items-center p-4 bg-white/5 rounded-xl border border-white/10">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
+            <div
+              className={`border p-8 rounded-[2rem] w-full max-w-md ${modalBg} max-h-[80vh] overflow-y-auto`}
+            >
+              <h3 className="text-xl font-bold mb-4">Active Devices</h3>
+              {activeSessions.length === 0 ? (
+                <p className="text-sm opacity-70 mb-6">No other active devices found.</p>
+              ) : (
+                <div className="space-y-3 mb-6">
+                  {activeSessions.map((session) => (
+                    <div
+                      key={session.id}
+                      className="p-4 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between"
+                    >
                       <div>
-                        <p className="font-bold">{session.deviceName || "Unknown Device"}</p>
+                        <p className="font-bold text-sm">
+                          {session.deviceName || "Unknown Device"}
+                        </p>
                         <p className="text-xs opacity-60">Logged in via App</p>
                       </div>
-                      <button onClick={() => logoutOtherDevice(session.id)} className="text-red-400 text-sm font-bold bg-red-500/10 px-3 py-1 rounded-lg">Log Out</button>
+                      <button
+                        onClick={() => logoutOtherDevice(session.id)}
+                        className="text-red-400 text-sm font-bold bg-red-500/10 px-3 py-1 rounded-lg"
+                      >
+                        Log Out
+                      </button>
                     </div>
                   ))}
                 </div>
               )}
-              <button onClick={() => setShowDevicesDialog(false)} className="w-full py-3 bg-white/10 rounded-xl font-bold">Close</button>
+              <button
+                onClick={() => setShowDevicesDialog(false)}
+                className="w-full py-3 bg-white/10 rounded-xl font-bold"
+              >
+                Close
+              </button>
             </div>
           </div>
         )}
 
         {/* Phase 3 Admin Panel Injection */}
         {showSuperAdminPanel && (
-          <SuperAdminPanel isDark={isDark} onClose={() => { setShowSuperAdminPanel(false); window.history.back(); }} />
+          <SuperAdminPanel
+            {...({
+              isDark,
+              onClose: () => {
+                setShowSuperAdminPanel(false);
+                window.history.back();
+              }
+            } as any)}
+          />
         )}
 
         {/* Bug Center Injection */}
         {showBugCenter && (
-          <BugCenterPanel isDark={isDark} onClose={() => { setShowBugCenter(false); window.history.back(); }} />
+          <BugCenterPanel
+            {...({
+              isDark,
+              onClose: () => {
+                setShowBugCenter(false);
+                window.history.back();
+              }
+            } as any)}
+          />
         )}
       </main>
     );
@@ -634,135 +1012,268 @@ export default function FacultyDashboard() {
   const dayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
 
   return (
-    <main className={`relative min-h-screen w-full flex flex-col overflow-x-hidden [&::-webkit-scrollbar]:hidden ${bgMain}`}>
-      {isDynamicHue && <DynamicHueBackground theme={theme} />}
+    <main
+      className={`relative min-h-screen w-full flex flex-col overflow-x-hidden [&::-webkit-scrollbar]:hidden ${bgMain}`}
+    >
+      {isDynamicHue && <DynamicHueBackground {...({ theme } as any)} />}
       <CursorGlow />
 
       {alertDialog && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
           <div className={`border p-8 rounded-[2rem] w-full max-w-sm ${modalBg}`}>
             <h3 className="text-xl font-bold mb-2">{alertDialog.title}</h3>
-            <p className="text-sm opacity-70 mb-8">{alertDialog.message}</p>
-            <button onClick={() => setAlertDialog(null)} className="w-full py-3.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold hover:scale-[1.02] transition-transform">Got it</button>
+            <p className="text-sm opacity-80 mb-6">{alertDialog.message}</p>
+            <button
+              onClick={() => setAlertDialog(null)}
+              className="w-full py-3.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold hover:scale-[1.02] transition-transform"
+            >
+              Got it
+            </button>
           </div>
         </div>
       )}
 
       {confirmDialog && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
           <div className={`border p-8 rounded-[2rem] w-full max-w-sm ${modalBg}`}>
             <h3 className="text-xl font-bold mb-2">{confirmDialog.title}</h3>
-            <p className="text-sm opacity-70 mb-8">{confirmDialog.message}</p>
-            <div className="flex space-x-3">
-              <button onClick={() => setConfirmDialog(null)} className={`flex-1 py-3.5 rounded-xl font-bold transition-colors ${isDark ? 'bg-white/[0.05] border border-white/20 hover:bg-white/10' : 'bg-black/5 border border-black/10 hover:bg-black/10'}`}>Cancel</button>
-              <button onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }} className="flex-1 py-3.5 bg-red-500/80 text-white rounded-xl font-bold hover:scale-[1.02] transition-transform shadow-[0_0_20px_rgba(239,68,68,0.3)]">Confirm</button>
+            <p className="text-sm opacity-80 mb-6">{confirmDialog.message}</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmDialog(null)}
+                className={`flex-1 py-3.5 rounded-xl font-bold transition-colors ${
+                  isDark
+                    ? 'bg-white/[0.05] border border-white/20 hover:bg-white/10'
+                    : 'bg-black/5 border border-black/10 hover:bg-black/10'
+                }`}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  confirmDialog.onConfirm();
+                  setConfirmDialog(null);
+                }}
+                className="flex-1 py-3.5 bg-red-500/80 text-white rounded-xl font-bold hover:scale-[1.02] transition-transform shadow-[0_0_20px_rgba(239,68,68,0.3)]"
+              >
+                Confirm
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      <div className="w-full max-w-5xl mx-auto flex-1 flex flex-col p-6 md:p-8 z-10">
-        <div className="flex justify-between items-center mb-8 pt-4">
+      <div className="max-w-5xl w-full mx-auto px-6 pt-8 pb-20 z-10 flex-1 flex flex-col">
+        {/* Top Header */}
+        <div className="flex justify-between items-center mb-8">
           <div>
             <p className={`text-xs font-bold mb-1 ${isDark ? 'text-[#D0BCFF]' : 'text-[#4F378B]'}`}>
               {collegeName} • {roleBadgeText}
             </p>
-            <h1 className="text-[32px] leading-tight font-bold tracking-tight">Faculty Portal</h1>
+            <h1 className="text-3xl font-extrabold tracking-tight">
+              {facultyName ? `Welcome, ${facultyName}` : "Faculty Portal"}
+            </h1>
           </div>
-          <button onClick={safeOpenSettings} className={`p-3 border rounded-2xl transition-all backdrop-blur-xl ${isDark ? 'bg-white/[0.08] border-white/20 text-white hover:bg-white/[0.15]' : 'bg-black/[0.05] border-black/10 text-neutral-900 hover:bg-black/[0.1]'}`}>
+          <button
+            onClick={safeOpenSettings}
+            className={`p-3 border rounded-2xl transition-all backdrop-blur-xl ${
+              isDark
+                ? 'bg-white/[0.08] border-white/20 text-white hover:bg-white/[0.15]'
+                : 'bg-black/[0.05] border-black/10 text-neutral-900 hover:bg-black/[0.1]'
+            }`}
+          >
             <Settings className="w-6 h-6" />
           </button>
         </div>
 
-        <div className="flex space-x-8 border-b border-white/[0.15] mb-8 overflow-x-auto [&::-webkit-scrollbar]:hidden relative">
+        {/* Navigation Tabs */}
+        <div className="flex space-x-6 border-b border-white/10 mb-8 overflow-x-auto [&::-webkit-scrollbar]:hidden">
           {tabs.map((tab) => (
-            <button key={tab} onClick={() => safeSetTab(tab)} className={`pb-4 font-semibold text-[15px] whitespace-nowrap transition-colors relative ${activeTab === tab ? (isDark ? 'text-white' : 'text-[#4F378B]') : 'opacity-60 hover:opacity-100'}`}>
+            <button
+              key={tab}
+              onClick={() => safeSetTab(tab)}
+              className={`pb-4 font-semibold text-[15px] whitespace-nowrap transition-colors relative ${
+                activeTab === tab
+                  ? isDark
+                    ? 'text-white'
+                    : 'text-[#4F378B]'
+                  : 'opacity-60 hover:opacity-100'
+              }`}
+            >
               {tab}
-              {activeTab === tab && <motion.div layoutId="activeTabIndicator" className="absolute bottom-[-1px] left-0 w-full h-[3px] bg-[#D0BCFF] rounded-t-full shadow-[0_0_15px_rgba(208,188,255,0.6)]" />}
+              {activeTab === tab && (
+                <motion.div
+                  layoutId="activeTabIndicator"
+                  className="absolute bottom-[-1px] left-0 w-full h-[3px] bg-[#D0BCFF] rounded-t-full shadow-[0_0_15px_rgba(208,188,255,0.6)]"
+                />
+              )}
             </button>
           ))}
         </div>
 
+        {/* CLASSES TAB */}
         {activeTab === "Classes" && !showProxyMode && (
-          <div className="flex-1 flex flex-col space-y-5 pb-10">
+          <div className="space-y-6">
             <div className={`border rounded-[2rem] p-6 ${cardBg}`}>
-               <div className="flex justify-between items-center mb-6">
-                 <div className="flex items-center space-x-3">
-                   <CalendarDays className="w-6 h-6 opacity-90" />
-                   <h2 className="font-semibold text-lg">Your Schedule</h2>
-                 </div>
-                 <button onClick={() => { window.history.pushState(null,""); setShowManageTimetableModal(true); }} className="text-sm font-medium text-[#D0BCFF] hover:opacity-80 transition-colors">Edit Schedule</button>
-               </div>
-               
-               <div className="flex space-x-3 mb-6">
-                 <button onClick={() => setIsWeekView(false)} className={`px-5 py-2.5 rounded-[14px] text-sm font-bold transition-all ${!isWeekView ? 'bg-[#4F378B] text-white shadow-[0_0_20px_rgba(79,55,139,0.5)]' : 'bg-neutral-500/10 hover:bg-neutral-500/20'}`}>Today ({dayName})</button>
-                 <button onClick={() => setIsWeekView(true)} className={`px-5 py-2.5 rounded-[14px] text-sm font-bold transition-all ${isWeekView ? 'bg-[#4F378B] text-white shadow-[0_0_20px_rgba(79,55,139,0.5)]' : 'bg-neutral-500/10 hover:bg-neutral-500/20'}`}>Full Week</button>
-               </div>
-               
-               {facultySchedule.length === 0 ? (
-                 <p className="text-[15px] opacity-60 font-medium">No classes scheduled. Click 'Edit Schedule' to use AI extraction.</p>
-               ) : (
-                 <div className="space-y-3">
-                   {facultySchedule.filter(slot => isWeekView || slot.dayOfWeek === dayName).map((slot, idx) => {
-                     const startMin = parseTimeToMinutes(slot.startTime) - 15;
-                     const endMin = parseTimeToMinutes(slot.endTime) + 15;
-                     const isActive = !isWeekView && (currentMinutes >= startMin && currentMinutes <= endMin);
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <CalendarDays className="w-5 h-5 text-[#D0BCFF]" />
+                  <h2 className="text-lg font-bold">Your Schedule</h2>
+                </div>
+                <button
+                  onClick={() => {
+                    window.history.pushState(null, "");
+                    setShowManageTimetableModal(true);
+                  }}
+                  className="text-sm font-medium text-[#D0BCFF] hover:opacity-80 transition-colors"
+                >
+                  Edit Schedule
+                </button>
+              </div>
 
-                     const batchText = (slot.batch && slot.batch !== "null" && slot.batch !== "All") ? ` • ${slot.batch}` : "";
+              <div className="flex gap-2 mb-4">
+                <button
+                  onClick={() => setIsWeekView(false)}
+                  className={`px-5 py-2.5 rounded-[14px] text-sm font-bold transition-all ${
+                    !isWeekView
+                      ? 'bg-[#4F378B] text-white shadow-[0_0_20px_rgba(79,55,139,0.5)]'
+                      : 'bg-neutral-500/10 hover:bg-neutral-500/20'
+                  }`}
+                >
+                  Today ({dayName})
+                </button>
+                <button
+                  onClick={() => setIsWeekView(true)}
+                  className={`px-5 py-2.5 rounded-[14px] text-sm font-bold transition-all ${
+                    isWeekView
+                      ? 'bg-[#4F378B] text-white shadow-[0_0_20px_rgba(79,55,139,0.5)]'
+                      : 'bg-neutral-500/10 hover:bg-neutral-500/20'
+                  }`}
+                >
+                  Full Week
+                </button>
+              </div>
 
-                     if (isActive) {
-                       return (
-                         <div key={idx} className="mb-4">
-                           <TextLabel text="Current Class Window:" />
-                           <div className="flex justify-between items-center bg-[#4F378B]/40 border border-[#D0BCFF] p-4 rounded-2xl mt-2">
-                             <div className="flex flex-col">
-                               <span className="font-bold text-[16px]">{slot.subject}</span>
-                               <span className="text-[#D0BCFF] text-xs font-medium">{slot.startTime} - {slot.endTime} • {slot.branch}{batchText}</span>
-                             </div>
-                             <button onClick={() => handleDirectMarkClick(slot)} className="px-4 py-2 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold text-sm hover:scale-[1.02] shadow-[0_0_15px_rgba(208,188,255,0.4)]">Mark</button>
-                           </div>
-                         </div>
-                       );
-                     }
+              {facultySchedule.length === 0 ? (
+                <p className="text-sm opacity-60 py-6 text-center">
+                  No classes scheduled. Click &apos;Edit Schedule&apos; to use AI extraction.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {facultySchedule
+                    .filter((slot) => isWeekView || slot.dayOfWeek === dayName)
+                    .map((slot, idx) => {
+                      const startMin = parseTimeToMinutes(slot.startTime) - 15;
+                      const endMin = parseTimeToMinutes(slot.endTime) + 15;
+                      const isActive =
+                        !isWeekView && currentMinutes >= startMin && currentMinutes <= endMin;
+                      const batchText =
+                        slot.batch && slot.batch !== "null" && slot.batch !== "All"
+                          ? ` • ${slot.batch}`
+                          : "";
 
-                     return (
-                       <div key={idx} className={`flex justify-between items-center border p-4 rounded-2xl ${isDark ? 'bg-white/[0.05] border-white/10' : 'bg-black/[0.03] border-black/5'}`}>
-                         <div className="flex items-center space-x-4">
-                           <div className="w-2 h-2 rounded-full bg-neutral-500/50" />
-                           <div className="flex flex-col">
-                             <span className="font-bold text-[15px]">{slot.subject}</span>
-                             <span className="opacity-60 text-xs font-medium">{slot.branch}{batchText} {isWeekView && `• ${slot.dayOfWeek}`}</span>
-                           </div>
-                         </div>
-                         <span className="opacity-70 font-medium text-sm tracking-wide">{slot.startTime} - {slot.endTime}</span>
-                       </div>
-                     );
-                   })}
-                 </div>
-               )}
+                      if (isActive) {
+                        return (
+                          <div
+                            key={idx}
+                            className="p-5 rounded-2xl bg-[#4F378B]/40 border border-[#D0BCFF] flex justify-between items-center"
+                          >
+                            <div>
+                              <span className="text-[10px] font-black uppercase text-red-400 block mb-1">
+                                🔴 HAPPENING NOW
+                              </span>
+                              <h4 className="font-bold text-base">{slot.subject}</h4>
+                              <p className="text-xs text-[#D0BCFF]">
+                                {slot.startTime} - {slot.endTime} • {slot.branch}
+                                {batchText}
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => handleDirectMarkClick(slot)}
+                              className="px-4 py-2 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold text-sm hover:scale-[1.02] shadow-[0_0_15px_rgba(208,188,255,0.4)]"
+                            >
+                              Mark
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div
+                          key={idx}
+                          className={`flex justify-between items-center border p-4 rounded-2xl ${
+                            isDark
+                              ? 'bg-white/[0.05] border-white/10'
+                              : 'bg-black/[0.03] border-black/5'
+                          }`}
+                        >
+                          <div>
+                            <h4 className="font-bold text-sm">{slot.subject}</h4>
+                            <p className="text-xs opacity-60">
+                              {slot.branch}
+                              {batchText} {isWeekView && `• ${slot.dayOfWeek}`}
+                            </p>
+                          </div>
+                          <span className="text-xs font-bold text-[#D0BCFF]">
+                            {slot.startTime} - {slot.endTime}
+                          </span>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
             </div>
 
-            {Object.keys(teachingConfig).map(comboKey => {
-              const [semester, branch] = comboKey.split('|');
-              return (
-                <div key={comboKey} onClick={() => { window.history.pushState(null, ""); setDirectMarkData(null); setActiveTab("Attendance"); }} className={`border rounded-[2rem] p-7 flex flex-col justify-center cursor-pointer transition-all group ${cardBg}`}>
-                   <h2 className="text-3xl font-bold tracking-tight">{branch}</h2>
-                   <p className="opacity-70 text-[15px] font-medium mt-2">{semester}</p>
-                </div>
-              );
-            })}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {Object.keys(teachingConfig).map((comboKey) => {
+                const [semester, branch] = comboKey.split('|');
+                return (
+                  <div
+                    key={comboKey}
+                    onClick={() => {
+                      window.history.pushState(null, "");
+                      setDirectMarkData(null);
+                      setActiveTab("Attendance");
+                    }}
+                    className={`border rounded-[2rem] p-7 flex flex-col justify-center cursor-pointer transition-all group hover:border-[#D0BCFF]/50 ${cardBg}`}
+                  >
+                    <h3 className="text-2xl font-black text-[#D0BCFF]">{branch}</h3>
+                    <p className="text-sm opacity-70 mt-1">{semester}</p>
+                  </div>
+                );
+              })}
+            </div>
 
-            <div className="flex flex-col space-y-4 pt-4 mt-auto">
-              <button onClick={() => { window.history.pushState(null,""); setDraftConfig(teachingConfig); setShowEditClasses(true); }} className="w-full py-4 bg-[#4F378B] text-white rounded-[1.25rem] font-bold text-[16px] flex justify-center items-center hover:scale-[1.02] transition-all shadow-[0_0_40px_rgba(79,55,139,0.5)]">
-                <Edit className="w-5 h-5 mr-3" /> Edit Classes &amp; Subjects
+            <div className="space-y-3 pt-2">
+              <button
+                onClick={() => {
+                  window.history.pushState(null, "");
+                  setDraftConfig(teachingConfig);
+                  setShowEditClasses(true);
+                }}
+                className="w-full py-4 bg-[#4F378B] text-white rounded-[1.25rem] font-bold text-[16px] flex justify-center items-center gap-2 hover:scale-[1.01] transition-all shadow-[0_0_40px_rgba(79,55,139,0.5)]"
+              >
+                <Edit className="w-5 h-5" /> Edit Classes & Subjects
               </button>
-              <button onClick={safeOpenProxy} className="w-full py-4 bg-[#D0BCFF] text-[#2A1B4E] rounded-[1.25rem] font-bold text-[16px] flex justify-center items-center hover:scale-[1.02] transition-all shadow-[0_0_40px_rgba(208,188,255,0.4)]">
-                <Zap className="w-5 h-5 mr-3" /> Mark Proxy Lecture
-              </button>
-              
+
+              <GlassButton
+                onClick={safeOpenProxy}
+                variant="glass"
+                className="w-full py-4 rounded-[1.25rem]"
+                icon={<Zap className="w-5 h-5 text-[#D0BCFF]" />}
+              >
+                Mark Proxy Lecture
+              </GlassButton>
+
               {canPublishTimetable && (
-                <button onClick={() => { window.history.pushState(null,""); setShowTimetableModal(true); }} className="w-full py-4 bg-green-500 text-white rounded-[1.25rem] font-bold text-[16px] flex justify-center items-center hover:bg-green-600 transition-all shadow-[0_0_20px_rgba(34,197,94,0.4)]">
-                  <CloudUpload className="w-5 h-5 mr-3" /> Publish Branch Timetables
+                <button
+                  onClick={() => {
+                    window.history.pushState(null, "");
+                    setShowTimetableModal(true);
+                  }}
+                  className="w-full py-4 bg-green-500 text-white rounded-[1.25rem] font-bold text-[16px] flex justify-center items-center gap-2 hover:bg-green-600 transition-all shadow-[0_0_20px_rgba(34,197,94,0.4)]"
+                >
+                  <CloudUpload className="w-5 h-5" /> Publish Branch Timetables
                 </button>
               )}
             </div>
@@ -770,129 +1281,276 @@ export default function FacultyDashboard() {
         )}
 
         {(activeTab === "Attendance" || showProxyMode) && (
-          <div className="flex-1 flex flex-col pb-10">
+          <div>
             <div className="flex items-center mb-6">
-               <button onClick={() => window.history.back()} className={`p-2 border rounded-xl mr-4 transition-colors backdrop-blur-md ${isDark ? 'bg-white/[0.08] border-white/20 hover:bg-white/[0.15]' : 'bg-black/5 border-black/10 hover:bg-black/10'}`}>
-                 <ChevronLeft className="w-6 h-6" />
-               </button>
-               <h2 className="text-2xl font-bold tracking-tight">{showProxyMode ? "Proxy Lecture" : "Mark Attendance"}</h2>
+              <button
+                onClick={() => window.history.back()}
+                className={`p-2 border rounded-xl mr-4 transition-colors backdrop-blur-md ${
+                  isDark
+                    ? 'bg-white/[0.08] border-white/20 hover:bg-white/[0.15]'
+                    : 'bg-black/5 border-black/10 hover:bg-black/10'
+                }`}
+              >
+                <ChevronLeft className="w-5 h-5" />
+              </button>
+              <h2 className="text-2xl font-bold">
+                {showProxyMode ? "Proxy Lecture" : "Mark Attendance"}
+              </h2>
             </div>
-            <div className="flex-1 flex flex-col"><FacultyAttendanceTab directMarkData={directMarkData} isDark={isDark} /></div>
+            <FacultyAttendanceTab
+              {...({
+                teachingConfig,
+                isDark,
+                directMarkData,
+                isProxy: showProxyMode,
+                isProxyMode: showProxyMode,
+                showProxyMode,
+                onComplete: () => {
+                  setShowProxyMode(false);
+                  setDirectMarkData(null);
+                  setActiveTab("Classes");
+                }
+              } as any)}
+            />
           </div>
         )}
 
         {/* --- INJECTED TABS --- */}
-        {activeTab === "Metrics" && <div className="flex-1 flex flex-col pb-10"><FacultyMetricsTab isDark={isDark} /></div>}
-        {activeTab === "Materials" && <div className="flex-1 flex flex-col pb-10 relative"><FacultyMaterialsTab /></div>}
-        {activeTab === "Notice Board" && <div className="flex-1 flex flex-col pb-10"><FacultyNoticeBoardTab isDark={isDark} /></div>}
-        {activeTab === "History" && <div className="flex-1 flex flex-col pb-10"><FacultyHistoryTab isDark={isDark} /></div>}
-        {activeTab === "Tests" && <div className="flex-1 flex flex-col pb-10 relative"><FacultyTestsTab isDark={isDark} /></div>}
-        {activeTab === "Gate Pass" && <div className="flex-1 flex flex-col pb-10"><FacultyGatePassTab isDark={isDark} /></div>}
-        {activeTab === "Leaves & Transfers" && <div className="flex-1 flex flex-col pb-10"><FacultyLeavesAndTransfersTab isDark={isDark} userTimetable={facultySchedule} /></div>}
-        {activeTab === "Grievances" && <div className="flex-1 flex flex-col pb-10"><FacultyGrievancesTab isDynamicHue={isDynamicHue} /></div>}
+        {activeTab === "Assignments" && <FacultyAssignmentsQuizzesTab isDark={isDark} />}
+        {activeTab === "Metrics" && (
+          <FacultyMetricsTab {...({ teachingConfig, isDark } as any)} />
+        )}
+        {activeTab === "Materials" && (
+          <FacultyMaterialsTab {...({ teachingConfig, isDark } as any)} />
+        )}
+        {activeTab === "Library" && <FacultyLibraryTab isDark={isDark} />}
+        {activeTab === "Events" && (
+          <EventsAndCalendarTab mode="FACULTY" initialSection="EVENTS" isDark={isDark} />
+        )}
+        {activeTab === "Academic Calendar" && (
+          <EventsAndCalendarTab mode="FACULTY" initialSection="CALENDAR" isDark={isDark} />
+        )}
+        {activeTab === "Notice Board" && (
+          <FacultyNoticeBoardTab {...({ isDark } as any)} />
+        )}
+        {activeTab === "History" && (
+          <FacultyHistoryTab {...({ teachingConfig, isDark } as any)} />
+        )}
+        {activeTab === "Tests" && (
+          <FacultyTestsTab {...({ teachingConfig, isDark } as any)} />
+        )}
+        {activeTab === "Gate Pass" && (
+          <FacultyGatePassTab {...({ isDark } as any)} />
+        )}
+        {activeTab === "Leaves & Transfers" && (
+          <FacultyLeavesAndTransfersTab
+            {...({
+              isDark,
+              teachingConfig,
+              facultyId,
+              facultyName,
+              facultyEmail,
+              isHod,
+              role: rawRoleScope
+            } as any)}
+          />
+        )}
+        {activeTab === "Grievances" && (
+          <FacultyGrievancesTab {...({ isDark, isHod, role: rawRoleScope } as any)} />
+        )}
       </div>
+
       {showEditClasses && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
-          <div className={`border p-8 rounded-[2rem] w-full max-w-lg flex flex-col max-h-[85vh] ${modalBg}`}>
-            <h2 className="text-2xl font-bold mb-2">Teaching Configuration</h2>
-            <p className="text-sm opacity-70 mb-8">Select your primary subjects.</p>
-            
-            <div className="flex-1 overflow-y-auto pr-2 space-y-6 mb-8 [&::-webkit-scrollbar]:hidden">
-               {Object.keys(subjectsDict).map(combo => {
-                 const dbKey = combo.replace('_', '|');
-                 return (
-                   <div key={combo} className={`p-5 rounded-2xl border ${isDark ? 'bg-white/[0.08] border-white/20' : 'bg-black/5 border-black/10'}`}>
-                     <h3 className="font-bold mb-4 text-[15px]">{combo.replace('_', ' - ')}</h3>
-                     {(subjectsDict[combo] || []).map(sub => {
-                       const isSelected = draftConfig[dbKey]?.includes(sub) || false;
-                       return (
-                         <div key={sub} onClick={() => {
-                             const newConfig = { ...draftConfig };
-                             if (!newConfig[dbKey]) newConfig[dbKey] = [];
-                             if (!isSelected) newConfig[dbKey].push(sub);
-                             else newConfig[dbKey] = newConfig[dbKey].filter(s => s !== sub);
-                             setDraftConfig(newConfig);
-                           }} className="flex items-center space-x-4 mb-3 text-[15px] cursor-pointer"
-                         >
-                           <div className={`w-6 h-6 rounded-[6px] flex items-center justify-center border transition-colors ${isSelected ? 'bg-[#D0BCFF] border-[#D0BCFF]' : (isDark ? 'border-white/40' : 'border-black/30')}`}>
-                              {isSelected && <Check className="w-4 h-4 text-[#2A1B4E] stroke-[3]" />}
-                           </div>
-                           <span className={isSelected ? 'font-bold' : 'opacity-70'}>{sub}</span>
-                         </div>
-                       );
-                     })}
-                   </div>
-                 );
-               })}
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
+          <div
+            className={`border p-8 rounded-[2rem] w-full max-w-lg flex flex-col max-h-[85vh] ${modalBg}`}
+          >
+            <h3 className="text-xl font-bold mb-1">Teaching Configuration</h3>
+            <p className="text-xs opacity-70 mb-4">Select your primary subjects.</p>
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1 mb-6 [&::-webkit-scrollbar]:hidden">
+              {Object.keys(subjectsDict).map((combo) => {
+                const dbKey = combo.replace('_', '|');
+                return (
+                  <div
+                    key={combo}
+                    className={`p-5 rounded-2xl border ${
+                      isDark ? 'bg-white/[0.08] border-white/20' : 'bg-black/5 border-black/10'
+                    }`}
+                  >
+                    <h4 className="font-bold text-[#D0BCFF] mb-3">{combo.replace('_', ' - ')}</h4>
+                    {(subjectsDict[combo] || []).map((sub) => {
+                      const isSelected = draftConfig[dbKey]?.includes(sub) || false;
+                      return (
+                        <div
+                          key={sub}
+                          onClick={() => {
+                            const newConfig = { ...draftConfig };
+                            if (!newConfig[dbKey]) newConfig[dbKey] = [];
+                            if (!isSelected) newConfig[dbKey].push(sub);
+                            else newConfig[dbKey] = newConfig[dbKey].filter((s) => s !== sub);
+                            setDraftConfig(newConfig);
+                          }}
+                          className="flex items-center space-x-4 mb-3 text-[15px] cursor-pointer"
+                        >
+                          <div
+                            className={`w-6 h-6 rounded-[6px] flex items-center justify-center border transition-colors ${
+                              isSelected
+                                ? 'bg-[#D0BCFF] border-[#D0BCFF]'
+                                : isDark
+                                ? 'border-white/40'
+                                : 'border-black/30'
+                            }`}
+                          >
+                            {isSelected && <Check className="w-4 h-4 text-[#2A1B4E]" />}
+                          </div>
+                          <span className={isSelected ? 'font-bold' : 'opacity-70'}>{sub}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
             </div>
-            
-            <div className="flex space-x-4 mt-auto">
-               <button onClick={() => window.history.back()} className={`flex-1 py-4 rounded-xl font-bold ${isDark ? 'bg-white/[0.08] border border-white/20' : 'bg-black/5 border border-black/10'}`}>Cancel</button>
-               <button onClick={handleSaveClasses} disabled={isSavingClasses} className="flex-1 py-4 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold flex justify-center items-center hover:scale-[1.02] transition-transform">
-                 {isSavingClasses ? <Loader2 className="w-5 h-5 animate-spin" /> : "Save Config"}
-               </button>
+            <div className="flex gap-3">
+              <button
+                onClick={() => window.history.back()}
+                className={`flex-1 py-4 rounded-xl font-bold ${
+                  isDark
+                    ? 'bg-white/[0.08] border border-white/20'
+                    : 'bg-black/5 border border-black/10'
+                }`}
+              >
+                Cancel
+              </button>
+              <GlassButton
+                onClick={handleSaveClasses}
+                disabled={isSavingClasses}
+                variant="primary"
+                className="flex-1"
+              >
+                {isSavingClasses ? <Loader2 className="w-5 h-5 animate-spin" /> : "Save Config"}
+              </GlassButton>
             </div>
           </div>
         </div>
       )}
 
-      {showManageTimetableModal && <ManageTimetableModal onDismiss={() => window.history.back()} modalBg={modalBg} onShowAlert={showAlert} />}
-      {showTimetableModal && <UploadTimetableModal onDismiss={() => window.history.back()} modalBg={modalBg} isDark={isDark} onShowAlert={showAlert} />}
+      {showManageTimetableModal && (
+        <ManageTimetableModal
+          onDismiss={() => window.history.back()}
+          modalBg={modalBg}
+          onShowAlert={showAlert}
+        />
+      )}
+
+      {showTimetableModal && (
+        <UploadTimetableModal
+          onDismiss={() => window.history.back()}
+          modalBg={modalBg}
+          isDark={isDark}
+          onShowAlert={showAlert}
+        />
+      )}
     </main>
   );
 }
 
-function TextLabel({ text }: { text: string }) {
-  return <h5 className="text-xs font-bold uppercase text-[#D0BCFF] mb-1">{text}</h5>;
-}
-
-function ToggleSwitch({ checked, onChange }: { checked: boolean, onChange: (val: boolean) => void }) {
+function ToggleSwitch({
+  checked,
+  onChange
+}: {
+  checked: boolean;
+  onChange: (val: boolean) => void;
+}) {
   return (
-    <div onClick={() => onChange(!checked)} className={`w-12 h-6 rounded-full relative cursor-pointer transition-colors ${checked ? 'bg-[#D0BCFF]' : 'bg-neutral-500/30'}`}>
-      <div className={`w-4 h-4 rounded-full absolute top-1 transition-transform ${checked ? 'right-1 bg-[#2A1B4E]' : 'left-1 bg-white'}`} />
+    <div
+      onClick={() => onChange(!checked)}
+      className={`w-12 h-6 rounded-full relative cursor-pointer transition-colors ${
+        checked ? 'bg-[#D0BCFF]' : 'bg-neutral-500/30'
+      }`}
+    >
+      <div
+        className={`w-4 h-4 rounded-full absolute top-1 transition-transform ${
+          checked ? 'right-1 bg-[#2A1B4E]' : 'left-1 bg-white'
+        }`}
+      />
     </div>
   );
 }
 
-function ManageTimetableModal({ onDismiss, modalBg, onShowAlert }: { onDismiss: () => void, modalBg: string, onShowAlert: (title: string, msg: string) => void }) {
+function ManageTimetableModal({
+  onDismiss,
+  modalBg,
+  onShowAlert
+}: {
+  onDismiss: () => void;
+  modalBg: string;
+  onShowAlert: (title: string, msg: string) => void;
+}) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const handleAnalyzeAndSave = async () => {
-    if (!selectedFile) return onShowAlert("Missing File", "Please select a timetable image or PDF.");
+    if (!selectedFile) {
+      return onShowAlert("Missing File", "Please select a timetable image or PDF.");
+    }
     setIsAnalyzing(true);
     try {
       const formData = new FormData();
       formData.append('file', await compressImage(selectedFile));
-
       const res = await fetch('/api/extract-timetable', { method: 'POST', body: formData });
       if (!res.ok) throw new Error("Google Gemini AI extraction failed or timed out.");
       const data = await res.json();
-      
       const uid = localStorage.getItem("academiq_faculty_id");
       if (uid && data.entries) {
-        await setDoc(tenantDoc("teacher_timetables", uid), { entries: data.entries, updatedAt: Date.now() }, { merge: true });
-        onShowAlert("Success!", `Extracted and saved ${data.entries.length} classes to your schedule!`);
+        await setDoc(
+          tenantDoc("teacher_timetables", uid),
+          { entries: data.entries, updatedAt: Date.now() },
+          { merge: true }
+        );
+        onShowAlert(
+          "Success!",
+          `Extracted and saved ${data.entries.length} classes to your schedule!`
+        );
         onDismiss();
       }
-    } catch (e) { 
-        onShowAlert("AI Helper Error", "Make sure you upload a clear image. If it still fails, try cropping the timetable slightly."); 
-    } finally { 
-        setIsAnalyzing(false); 
+    } catch (e) {
+      onShowAlert(
+        "AI Helper Error",
+        "Make sure you upload a clear image. If it still fails, try cropping the timetable slightly."
+      );
+    } finally {
+      setIsAnalyzing(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
       <div className={`border p-8 rounded-[2rem] w-full max-w-sm ${modalBg}`}>
-        <h2 className="text-xl font-bold mb-2">Manage Schedule</h2>
-        <p className="text-sm opacity-60 mb-6">Upload an image of your timetable. Gemini AI will automatically extract your classes.</p>
-        <div className="space-y-4">
-          <input type="file" accept="image/*,.pdf" onChange={(e) => setSelectedFile(e.target.files ? e.target.files[0] : null)} className="w-full text-sm file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:font-bold file:bg-[#D0BCFF] file:text-[#2A1B4E] bg-neutral-500/10 border border-neutral-500/20 rounded-xl p-2" />
+        <h3 className="text-xl font-bold mb-2">Manage Schedule</h3>
+        <p className="text-xs opacity-70 mb-4">
+          Upload an image of your timetable. Gemini AI will automatically extract your classes.
+        </p>
+        <div className="mb-6">
+          <input
+            type="file"
+            accept="image/*,.pdf"
+            onChange={(e) => setSelectedFile(e.target.files ? e.target.files[0] : null)}
+            className="w-full text-sm file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:font-bold file:bg-[#D0BCFF] file:text-[#2A1B4E] bg-neutral-500/10 border border-neutral-500/20 rounded-xl p-2"
+          />
         </div>
-        <div className="flex space-x-3 mt-8">
-          <button onClick={onDismiss} className="flex-1 py-3.5 bg-neutral-500/10 rounded-xl font-bold">Cancel</button>
-          <button onClick={handleAnalyzeAndSave} disabled={isAnalyzing || !selectedFile} className="flex-1 py-3.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold flex justify-center items-center disabled:opacity-50 hover:scale-[1.02] shadow-[0_0_20px_rgba(208,188,255,0.4)] transition-transform">
+        <div className="flex gap-3">
+          <button
+            onClick={onDismiss}
+            className="flex-1 py-3.5 rounded-xl font-bold bg-white/10"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleAnalyzeAndSave}
+            disabled={isAnalyzing || !selectedFile}
+            className="flex-1 py-3.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold flex justify-center items-center disabled:opacity-50 hover:scale-[1.02] shadow-[0_0_20px_rgba(208,188,255,0.4)] transition-transform"
+          >
             {isAnalyzing ? <Loader2 className="w-5 h-5 animate-spin" /> : "Extract with AI"}
           </button>
         </div>
@@ -901,7 +1559,17 @@ function ManageTimetableModal({ onDismiss, modalBg, onShowAlert }: { onDismiss: 
   );
 }
 
-function UploadTimetableModal({ onDismiss, modalBg, isDark, onShowAlert }: { onDismiss: () => void, modalBg: string, isDark: boolean, onShowAlert: (title: string, msg: string) => void }) {
+function UploadTimetableModal({
+  onDismiss,
+  modalBg,
+  isDark,
+  onShowAlert
+}: {
+  onDismiss: () => void;
+  modalBg: string;
+  isDark: boolean;
+  onShowAlert: (title: string, msg: string) => void;
+}) {
   const [upSem, setUpSem] = useState("Semester 3");
   const [upBranch, setUpBranch] = useState("IT");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -914,42 +1582,81 @@ function UploadTimetableModal({ onDismiss, modalBg, isDark, onShowAlert }: { onD
       const formData = new FormData();
       formData.append('file', await compressImage(selectedFile));
       formData.append('fileName', `${upSem}_${upBranch}_Timetable`);
-      formData.append('path', `timetables`);
-
+      formData.append('path', 'timetables');
       const uploadRes = await fetch('/api/upload-drive', { method: 'POST', body: formData });
       if (!uploadRes.ok) throw new Error("Google Drive upload failed or timed out.");
       const { downloadUrl } = await uploadRes.json();
-      
       const docId = `${upSem}_${upBranch}`.replace(/\s+/g, '');
-      await setDoc(tenantDoc("branch_timetables", docId), { semester: upSem, branch: upBranch, timetableUrl: downloadUrl, publishedAt: Date.now() });
-      
-      onShowAlert("Timetable Published", `Timetable for ${upBranch} ${upSem} pushed to student portals and widgets instantly!`);
+      await setDoc(tenantDoc("branch_timetables", docId), {
+        semester: upSem,
+        branch: upBranch,
+        timetableUrl: downloadUrl,
+        publishedAt: Date.now()
+      });
+      onShowAlert(
+        "Timetable Published",
+        `Timetable for ${upBranch} ${upSem} pushed to student portals and widgets instantly!`
+      );
       onDismiss();
-    } catch (e) { 
-        onShowAlert("Upload Error", "Could not upload timetable. Try cropping it slightly."); 
-    } finally { 
-        setIsUploading(false); 
+    } catch (e) {
+      onShowAlert("Upload Error", "Could not upload timetable. Try cropping it slightly.");
+    } finally {
+      setIsUploading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
       <div className={`border p-8 rounded-[2rem] w-full max-w-sm ${modalBg}`}>
-        <h2 className="text-xl font-bold mb-2">Publish Timetable</h2>
-        <p className="text-sm opacity-60 mb-6">Pushes directly to student widgets.</p>
-        
-        <div className="space-y-4">
-          <div className="flex space-x-3">
-            <GlassDropdown value={upSem} options={["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8"]} onChange={setUpSem} isDark={isDark} />
-            <GlassDropdown value={upBranch} options={["IT", "CSE", "CSE(AIML)", "EE"]} onChange={setUpBranch} isDark={isDark} />
-          </div>
-          
-          <input type="file" accept="image/*,.pdf" onChange={(e) => setSelectedFile(e.target.files ? e.target.files[0] : null)} className={`w-full text-sm file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:font-bold file:bg-[#D0BCFF] file:text-[#2A1B4E] border rounded-xl p-2 ${isDark ? 'bg-white/[0.05] border-white/20 text-white' : 'bg-black/5 border-black/10 text-neutral-900'}`} />
+        <h3 className="text-xl font-bold mb-1">Publish Timetable</h3>
+        <p className="text-xs opacity-70 mb-4">Pushes directly to student widgets.</p>
+        <div className="space-y-3 mb-6">
+          <GlassDropdown
+            value={upSem}
+            options={[
+              "Semester 1",
+              "Semester 2",
+              "Semester 3",
+              "Semester 4",
+              "Semester 5",
+              "Semester 6",
+              "Semester 7",
+              "Semester 8"
+            ]}
+            onChange={setUpSem}
+            isDark={isDark}
+          />
+          <GlassDropdown
+            value={upBranch}
+            options={["IT", "CSE", "CSE(AIML)", "EE"]}
+            onChange={setUpBranch}
+            isDark={isDark}
+          />
+          <input
+            type="file"
+            accept="image/*,.pdf"
+            onChange={(e) => setSelectedFile(e.target.files ? e.target.files[0] : null)}
+            className={`w-full text-sm file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:font-bold file:bg-[#D0BCFF] file:text-[#2A1B4E] border rounded-xl p-2 ${
+              isDark
+                ? 'bg-white/[0.05] border-white/20 text-white'
+                : 'bg-black/5 border-black/10 text-neutral-900'
+            }`}
+          />
         </div>
-
-        <div className="flex space-x-3 mt-8">
-          <button onClick={onDismiss} className={`flex-1 py-3.5 rounded-xl font-bold transition-colors ${isDark ? 'bg-white/[0.05] hover:bg-white/10' : 'bg-black/5 hover:bg-black/10'}`}>Cancel</button>
-          <button onClick={handlePublish} disabled={isUploading || !selectedFile} className="flex-1 py-3.5 bg-green-500 text-white rounded-xl font-bold flex justify-center items-center disabled:opacity-50 hover:bg-green-600 shadow-[0_0_20px_rgba(34,197,94,0.4)] transition-all">
+        <div className="flex gap-3">
+          <button
+            onClick={onDismiss}
+            className={`flex-1 py-3.5 rounded-xl font-bold transition-colors ${
+              isDark ? 'bg-white/[0.05] hover:bg-white/10' : 'bg-black/5 hover:bg-black/10'
+            }`}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handlePublish}
+            disabled={isUploading || !selectedFile}
+            className="flex-1 py-3.5 bg-green-500 text-white rounded-xl font-bold flex justify-center items-center disabled:opacity-50 hover:bg-green-600 shadow-[0_0_20px_rgba(34,197,94,0.4)] transition-all"
+          >
             {isUploading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Publish"}
           </button>
         </div>
@@ -960,12 +1667,27 @@ function UploadTimetableModal({ onDismiss, modalBg, isDark, onShowAlert }: { onD
 
 function SettingsRow({ icon, title, subtitle, titleColor, onClick, isDark }: any) {
   return (
-    <div onClick={onClick} className={`flex items-center justify-between p-5 border-b cursor-pointer group transition-colors ${isDark ? 'border-white/[0.05] hover:bg-white/[0.04]' : 'border-black/[0.05] hover:bg-black/[0.03]'}`}>
-      <div className="flex-1 pr-4">
+    <div
+      onClick={onClick}
+      className={`flex items-center justify-between p-5 border-b cursor-pointer group transition-colors ${
+        isDark
+          ? 'border-white/[0.05] hover:bg-white/[0.04]'
+          : 'border-black/[0.05] hover:bg-black/[0.03]'
+      }`}
+    >
+      <div>
         <h3 className={`font-semibold text-lg ${titleColor || ''}`}>{title}</h3>
-        <p className={`text-sm mt-0.5 ${isDark ? 'text-white/70' : 'text-neutral-600'}`}>{subtitle}</p>
+        <p className={`text-sm mt-0.5 ${isDark ? 'text-white/70' : 'text-neutral-600'}`}>
+          {subtitle}
+        </p>
       </div>
-      <div className={`p-2.5 rounded-xl ${isDark ? 'bg-white/[0.08] border border-white/20' : 'bg-black/5 border border-black/10'}`}>
+      <div
+        className={`p-2.5 rounded-xl ${
+          isDark
+            ? 'bg-white/[0.08] border border-white/20'
+            : 'bg-black/5 border border-black/10'
+        }`}
+      >
         {icon}
       </div>
     </div>

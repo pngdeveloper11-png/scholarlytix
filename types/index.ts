@@ -32,6 +32,9 @@ export interface StudentData {
   fcmToken: string;
   division: string;
   batch: string; // Explicit override
+  email?: string;
+  phone?: string;
+  contactNumber?: string;
   profilePicBase64?: string;
   linkedParentEmails?: string[];
   blockedParentEmails?: string[];
@@ -40,7 +43,7 @@ export interface StudentData {
 export interface ApprovedFaculty {
   id: string; // Document ID is their email
   name: string;
-  role: string; // e.g., "DIRECTOR", "PRINCIPAL", "REGISTRAR", "HOD|CSE", "CLASS_TEACHER|Sem 3|IT|Div A", "NONE"
+  role: string; // e.g., "DIRECTOR", "PRINCIPAL", "REGISTRAR", "LIBRARIAN", "HOD|CSE", "CLASS_TEACHER|Sem 3|IT|Div A", "NONE"
 }
 
 // ==========================================
@@ -188,4 +191,183 @@ export interface StudentGrievance {
   evidenceUrl?: string;
   timestamp: number;
   status: "Investigating" | "Resolved";
+}
+
+// ==========================================
+// 6. ASSIGNMENTS, ONLINE QUIZZES & ANTI-CHEAT
+// ==========================================
+
+export interface QuizQuestion {
+  id: string;
+  questionText: string;
+  questionType: "MCQ" | "SHORT_ANSWER";
+  options?: string[]; // 4 options if MCQ
+  correctAnswer: string; // Teacher's official answer key
+  marks: number; // Custom marks per question
+  explanation?: string;
+  imageUrl?: string; // Optional diagram/figure URL for the question
+  imageName?: string;
+  codeSnippet?: string; // Optional code block for programming/technical questions
+  codeLanguage?: string; // e.g., "Python", "C++", "Java", "SQL", etc.
+}
+
+export interface AssessmentItem {
+  id: string;
+  type: "ASSIGNMENT" | "QUIZ";
+  title: string;
+  description: string;
+  subject: string;
+  semester: string;
+  branch: string;
+  divisionName: string;
+  batch: string; // "All" or specific batch
+  facultyUid: string;
+  facultyName: string;
+  createdAt: number;
+  dueDate: number; // Unix timestamp (ms)
+  dueDayString: string; // e.g., "Monday"
+  dueDateString: string; // e.g., "28 Sep 2026"
+  dueTimeString: string; // e.g., "11:59 PM"
+  maxMarks: number;
+  attachmentUrl?: string;
+  attachmentName?: string;
+  isTimed?: boolean;
+  durationMinutes?: number; // Used when type === "QUIZ" && isTimed === true
+  questions?: QuizQuestion[];
+}
+
+export interface AssessmentSubmission {
+  id: string; // Format: `${assessmentId}_${studentId}`
+  assessmentId: string;
+  assessmentType: "ASSIGNMENT" | "QUIZ";
+  studentId: string;
+  studentName: string;
+  studentEmail?: string;
+  rollNo: number;
+  semester: string;
+  branch: string;
+  divisionName: string;
+  submittedAt: number;
+  isLate: boolean;
+  status: "SUBMITTED" | "GRADED";
+  fileUrl?: string; // Cloudflare R2 URL for Assignment upload
+  fileName?: string;
+  notes?: string;
+  answers?: Record<string, string>; // questionId -> student's submitted answer
+  markedForReviewIds?: string[]; // questionIds bookmarked by student for review
+  marksObtained: number;
+  maxMarks: number;
+  facultyRemarks?: string;
+  antiCheatFlags?: number; // Count of blocked screenshot/tab-switch attempts
+}
+
+// ==========================================
+// 7. LIBRARY CATALOGUE, QR BORROW & WAITLIST
+// ==========================================
+
+export interface LibrarySettings {
+  maxBooksPerStudent: number;
+  defaultBorrowDays: number;
+}
+
+export interface LibraryBook {
+  id: string;
+  title: string;
+  author: string;
+  isbn: string;
+  publisher?: string;
+  edition?: string;
+  category: string;
+  semester: string; // "All" or "Semester 1" .. "Semester 8"
+  branch: string; // "All" or specific branch
+  rackNumber?: string;
+  description?: string;
+  totalCopies: number;
+  availableCopies: number;
+  interestedStudentIds: string[]; // Students subscribed to "Notify Me"
+  interestedStudentEmails: string[]; // Student emails for back-in-stock email alerts
+  addedAt: number;
+  updatedAt: number;
+}
+
+export interface LibraryTransaction {
+  id: string;
+  bookId: string;
+  bookTitle: string;
+  bookAuthor: string;
+  bookIsbn: string;
+  studentId: string;
+  studentName: string;
+  studentEmail: string;
+  studentPhone: string;
+  rollNo: number;
+  grNumber: string;
+  semester: string;
+  branch: string;
+  division: string;
+  status: "REQUESTED" | "APPROVED_AWAITING_QR" | "BORROWED" | "RETURNED" | "REJECTED";
+  qrToken?: string; // Dynamic token encoded in Librarian's QR for student pickup scan
+  requestedAt: number;
+  approvedAt?: number;
+  borrowedAt?: number;
+  dueDate?: number;
+  returnedAt?: number;
+  extensionStatus?: "NONE" | "PENDING" | "APPROVED" | "REJECTED";
+  requestedExtensionDays?: number;
+  extensionReason?: string;
+  notified2DaysBefore?: boolean;
+  notified1DayBefore?: boolean;
+  notifiedOnDueDate?: boolean;
+  notifiedOverdue?: boolean;
+}
+
+// ==========================================
+// 8. CAMPUS EVENTS (RSVP) & ACADEMIC CALENDAR
+// ==========================================
+
+export interface EventParticipant {
+  studentId: string;
+  studentName: string;
+  studentEmail: string;
+  rollNo: number;
+  grNumber: string;
+  semester: string;
+  branch: string;
+  division: string;
+  registeredAt: number;
+}
+
+export interface CampusEvent {
+  id: string;
+  title: string;
+  description: string;
+  category: "Technical" | "Cultural" | "Workshop" | "Seminar" | "Sports" | "Placement" | "Other";
+  eventDate: number; // Unix timestamp (ms)
+  eventDayString: string;
+  eventDateString: string;
+  eventTimeString: string;
+  venue: string;
+  organizerName: string;
+  organizerUid: string;
+  targetSemester: string; // "All" or specific
+  targetBranch: string; // "All" or specific
+  maxCapacity: number; // 0 = Unlimited
+  registeredStudentIds: string[];
+  registeredParticipants: EventParticipant[];
+  attachmentUrl?: string;
+  attachmentName?: string;
+  createdAt: number;
+}
+
+export interface AcademicCalendarItem {
+  id: string;
+  title: string;
+  description?: string;
+  category: "Exam" | "Holiday" | "Academic" | "Submission" | "Event";
+  startDate: number;
+  endDate: number;
+  targetSemester: string; // "All" or specific
+  targetBranch: string; // "All" or specific
+  createdBy: string;
+  createdAt: number;
 }
