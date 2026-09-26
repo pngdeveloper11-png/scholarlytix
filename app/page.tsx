@@ -6,6 +6,7 @@ import {
   User,
   ArrowRight,
   ShieldCheck,
+  BookOpen,
   ChevronDown,
   Plus,
   Check,
@@ -114,7 +115,7 @@ export default function Home() {
     return () => unsub();
   }, [selectedDropdownId]);
 
-  // GLOBAL KICK-OUT LISTENER FOR PARENTS (Scoped to Active College Vault & Multi-Parent Array)
+  // GLOBAL KICK-OUT LISTENER FOR PARENTS
   useEffect(() => {
     if (
       activeCollegeId &&
@@ -169,6 +170,10 @@ export default function Home() {
       else router.replace("/parent/linking");
     } else if (userRole === "student" && currentUser) {
       router.replace("/student/dashboard");
+    } else if (userRole === "librarian" && currentUser) {
+      if (localStorage.getItem("academiq_faculty_id")) {
+        router.replace("/librarian/dashboard");
+      }
     } else if (userRole === "faculty" && currentUser) {
       if (localStorage.getItem("academiq_faculty_id")) {
         router.replace("/faculty/dashboard");
@@ -189,7 +194,7 @@ export default function Home() {
     !isSelectingCollege &&
     ((userRole === "parent" && currentUser) ||
       (userRole === "student" && currentUser) ||
-      (userRole === "faculty" &&
+      ((userRole === "faculty" || userRole === "librarian") &&
         currentUser &&
         localStorage.getItem("academiq_faculty_id")));
 
@@ -238,7 +243,6 @@ export default function Home() {
         createdAt: Date.now()
       });
 
-      // Auto-authorize primary admin email inside that college's vault
       await setDoc(
         doc(
           db,
@@ -280,7 +284,6 @@ export default function Home() {
 
   return (
     <main className="relative min-h-screen w-full flex flex-col items-center justify-between p-6 md:p-12 text-white">
-      {/* TOP PILL: Active College Indicator with 1-Click Switch (shown on Portals screen) */}
       {!isSelectingCollege && (
         <button
           onClick={() => setIsSelectingCollege(true)}
@@ -307,7 +310,7 @@ export default function Home() {
         </p>
       </div>
 
-      {/* CENTER CONTENT: Either College Selector OR 4 Portal Cards */}
+      {/* CENTER CONTENT */}
       {isSelectingCollege ? (
         <div className="w-full max-w-md my-10 flex flex-col items-center">
           <div className="w-full p-6 md:p-8 rounded-3xl bg-white/[0.08] backdrop-blur-2xl border border-white/25 shadow-2xl">
@@ -428,6 +431,23 @@ export default function Home() {
           </GlassButton>
 
           <GlassButton
+            onClick={() => handleRoleSelect("librarian", "/faculty/login?portal=librarian")}
+            size="card"
+            className="w-full"
+            icon={<BookOpen className="w-8 h-8 drop-shadow-md" />}
+            trailing={<PortalArrow />}
+          >
+            <span className="flex-1 min-w-0">
+              <span className="block text-xl font-bold text-white group-hover:text-[#D0BCFF] transition-colors drop-shadow-sm">
+                Library Portal
+              </span>
+              <span className="block text-sm text-neutral-400 font-medium group-active:opacity-70 transition-opacity">
+                Librarian QR scanner, book catalogue &amp; return desk
+              </span>
+            </span>
+          </GlassButton>
+
+          <GlassButton
             onClick={() => router.push("/guard")}
             size="card"
             className="w-full"
@@ -452,7 +472,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* CALLIGRAPHIC SIGNATURE FOOTER (Shown on Both Screens) */}
+      {/* CALLIGRAPHIC SIGNATURE FOOTER */}
       <div className="flex flex-col items-center text-center space-y-2 mb-4">
         <p className="text-xs font-medium text-white/50 tracking-wide uppercase">
           Developed by - Pratosh Gharat

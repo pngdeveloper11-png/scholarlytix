@@ -50,7 +50,6 @@ import FacultyGatePassTab from '@/components/faculty/FacultyGatePassTab';
 import FacultyLeavesAndTransfersTab from '@/components/faculty/FacultyLeavesAndTransfersTab';
 import FacultyGrievancesTab from '@/components/faculty/FacultyGrievancesTab';
 import FacultyAssignmentsQuizzesTab from '@/components/faculty/FacultyAssignmentsQuizzesTab';
-import FacultyLibraryTab from '@/components/faculty/FacultyLibraryTab';
 import EventsAndCalendarTab from '@/components/shared/EventsAndCalendarTab';
 import SuperAdminPanel from '@/components/faculty/SuperAdminPanel';
 import BugCenterPanel from '@/components/faculty/BugCenterPanel';
@@ -173,13 +172,13 @@ export default function FacultyDashboard() {
   const [collegeName, setCollegeName] = useState("MIT Mumbai");
   const [subjectsDict, setSubjectsDict] = useState<Record<string, string[]>>(SUBJECTS_DICT);
 
+  // Library is now isolated in /librarian/dashboard so Faculty only see academic tabs
   const [activeTab, setActiveTab] = useState("Classes");
   const tabs = [
     "Classes",
     "Assignments",
     "Metrics",
     "Materials",
-    "Library",
     "Events",
     "Academic Calendar",
     "Notice Board",
@@ -196,12 +195,16 @@ export default function FacultyDashboard() {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
+      if (tabParam === "Library") {
+        router.replace('/librarian/dashboard');
+        return;
+      }
       if (tabParam && tabs.includes(tabParam)) {
         setActiveTab(tabParam);
         window.history.replaceState({}, '', window.location.pathname);
       }
     }
-  }, []);
+  }, [router]);
 
   const [teachingConfig, setTeachingConfig] = useState<Record<string, string[]>>({});
   const [facultySchedule, setFacultySchedule] = useState<any[]>([]);
@@ -308,6 +311,11 @@ export default function FacultyDashboard() {
       return;
     }
 
+    if (localStorage.getItem("userRole") === "librarian") {
+      router.replace('/librarian/dashboard');
+      return;
+    }
+
     setFacultyName(name);
     setFacultyId(uid);
     if (savedPin) setIsLocked(true);
@@ -352,6 +360,14 @@ export default function FacultyDashboard() {
           if (roleDoc.exists()) {
             const data = roleDoc.data();
             const role = data.roleScope || data.role || "NONE";
+
+            // Strictly route Librarians to their dedicated portal
+            if (role === "LIBRARIAN") {
+              localStorage.setItem("userRole", "librarian");
+              router.replace('/librarian/dashboard');
+              return;
+            }
+
             setRawRoleScope(role);
             if (
               [
@@ -1323,7 +1339,6 @@ export default function FacultyDashboard() {
         {activeTab === "Materials" && (
           <FacultyMaterialsTab {...({ teachingConfig, isDark } as any)} />
         )}
-        {activeTab === "Library" && <FacultyLibraryTab isDark={isDark} />}
         {activeTab === "Events" && (
           <EventsAndCalendarTab mode="FACULTY" initialSection="EVENTS" isDark={isDark} />
         )}

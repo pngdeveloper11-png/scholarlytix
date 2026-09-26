@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   onSnapshot,
   setDoc,
@@ -24,23 +24,19 @@ import {
   StudentData
 } from '@/types';
 import {
-  BookOpen,
   Plus,
   Search,
   Settings,
   QrCode,
-  CheckCircle2,
-  XCircle,
-  Clock,
   RotateCcw,
   BellRing,
   Trash2,
   Edit3,
-  AlertTriangle,
   Loader2,
   X,
-  Users,
-  CalendarClock
+  Camera,
+  CheckCircle2,
+  User
 } from 'lucide-react';
 import GlassDropdown from '@/components/GlassDropdown';
 import GlassButton from '@/components/ui/GlassButton';
@@ -79,9 +75,10 @@ export default function FacultyLibraryTab({ isDark = true }: { isDark?: boolean 
     role === "PRINCIPAL" ||
     role === "REGISTRAR" ||
     role === "DIRECTOR" ||
-    role?.startsWith("HOD|");
+    role?.startsWith("HOD|") ||
+    localStorage.getItem("userRole") === "librarian";
 
-  const [subTab, setSubTab] = useState<"CATALOGUE" | "REQUESTS" | "BORROWED" | "EXTENSIONS" | "HISTORY">("CATALOGUE");
+  const [subTab, setSubTab] = useState<"SCANNER" | "CATALOGUE" | "BORROWED" | "EXTENSIONS" | "HISTORY">("SCANNER");
 
   const [books, setBooks] = useState<LibraryBook[]>([]);
   const [transactions, setTransactions] = useState<LibraryTransaction[]>([]);
@@ -99,7 +96,6 @@ export default function FacultyLibraryTab({ isDark = true }: { isDark?: boolean 
   const [showBookModal, setShowBookModal] = useState(false);
   const [editingBook, setEditingBook] = useState<LibraryBook | null>(null);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [activeQrTransaction, setActiveQrTransaction] = useState<LibraryTransaction | null>(null);
   const [isProcessingId, setIsProcessingId] = useState<string | null>(null);
   const [isSendingReminders, setIsSendingReminders] = useState(false);
 
@@ -147,16 +143,6 @@ export default function FacultyLibraryTab({ isDark = true }: { isDark?: boolean 
     };
   }, []);
 
-  // Auto-close QR modal as soon as the student scans the QR and status flips to BORROWED
-  useEffect(() => {
-    if (!activeQrTransaction) return;
-    const updated = transactions.find((t) => t.id === activeQrTransaction.id);
-    if (updated && updated.status === "BORROWED") {
-      alert(`✅ Handshake Complete! "${updated.bookTitle}" is now officially issued to ${updated.studentName}.`);
-      setActiveQrTransaction(null);
-    }
-  }, [transactions, activeQrTransaction]);
-
   const filteredBooks = books.filter((b) => {
     if (semesterFilter !== "All" && b.semester !== "All" && b.semester !== semesterFilter) {
       return false;
@@ -173,9 +159,6 @@ export default function FacultyLibraryTab({ isDark = true }: { isDark?: boolean 
     return true;
   });
 
-  const pendingPickupList = transactions.filter(
-    (t) => t.status === "REQUESTED" || t.status === "APPROVED_AWAITING_QR"
-  );
   const activeBorrowedList = transactions.filter((t) => t.status === "BORROWED");
   const pendingExtensionsList = transactions.filter(
     (t) => t.status === "BORROWED" && t.extensionStatus === "PENDING"
@@ -184,71 +167,7 @@ export default function FacultyLibraryTab({ isDark = true }: { isDark?: boolean 
     (t) => t.status === "RETURNED" || t.status === "REJECTED"
   );
 
-  // 1. Accept Student Borrow Request & Generate QR Token
-  const handleAcceptBorrowRequest = async (tx: LibraryTransaction) => {
-    setIsProcessingId(tx.id);
-    try {
-      const bookRef = tenantDoc("library_books", tx.bookId);
-      const txRef = tenantDoc("library_transactions", tx.id);
-      const shortCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-      const qrToken = `LIBQR|${tx.id}|${shortCode}`;
-
-      await runTransaction(db, async (transaction) => {
-        const bookSnap = await transaction.get(bookRef);
-        if (!bookSnap.exists()) throw new Error("Book no longer exists.");
-        const avail = Number(bookSnap.data().availableCopies) || 0;
-        if (avail <= 0) {
-          throw new Error("No copies currently available in stock.");
-        }
-        transaction.update(txRef, {
-          status: "APPROVED_AWAITING_QR",
-          qrToken,
-          approvedAt: Date.now()
-        });
-      });
-
-      const student = studentsMap[tx.studentId];
-      if (student?.fcmToken) {
-        await fetch('/api/send-fcm', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            targetToken: student.fcmToken,
-            title: "📚 Library Request Approved!",
-            message: `Your request for "${tx.bookTitle}" is approved. Visit the Library desk and scan the Librarian's QR code to pick it up.`,
-            targetTab: "Library"
-          })
-        });
-      }
-
-      setActiveQrTransaction({
-        ...tx,
-        status: "APPROVED_AWAITING_QR",
-        qrToken
-      });
-    } catch (e: any) {
-      alert(e.message || "Failed to approve request.");
-    } finally {
-      setIsProcessingId(null);
-    }
-  };
-
-  // 2. Reject Borrow Request
-  const handleRejectBorrowRequest = async (tx: LibraryTransaction) => {
-    if (!confirm(`Reject borrow request from ${tx.studentName}?`)) return;
-    setIsProcessingId(tx.id);
-    try {
-      await updateDoc(tenantDoc("library_transactions", tx.id), {
-        status: "REJECTED"
-      });
-    } catch (e) {
-      alert("Failed to reject request.");
-    } finally {
-      setIsProcessingId(null);
-    }
-  };
-
-  // 3. Mark Book as Physically Returned + Trigger "Back in Stock" Waitlist Notifications
+  // Mark Book as Physically Returned + Trigger "Back in Stock" Waitlist Notifications
   const handleMarkReturned = async (tx: LibraryTransaction) => {
     if (!confirm(`Confirm physical return of "${tx.bookTitle}" from ${tx.studentName}?`)) return;
     setIsProcessingId(tx.id);
@@ -308,7 +227,7 @@ export default function FacultyLibraryTab({ isDark = true }: { isDark?: boolean 
               body: JSON.stringify({
                 targetToken: st.fcmToken,
                 title: "📗 Book Back in Stock!",
-                message: `"${bookTitle}" was just returned and is now available in the college library. Request it before it's gone!`,
+                message: `"${bookTitle}" was just returned and is now available in the college library. Borrow it before it's gone!`,
                 targetTab: "Library"
               })
             });
@@ -332,7 +251,7 @@ export default function FacultyLibraryTab({ isDark = true }: { isDark?: boolean 
               html: `<div style="font-family:sans-serif;padding:20px;background:#111;color:#fff;border-radius:16px;">
                 <h2 style="color:#D0BCFF;">Book Back in Stock!</h2>
                 <p>Good news! A copy of <strong>${bookTitle}</strong> (Author: ${tx.bookAuthor}) has just been returned to the Library.</p>
-                <p>Open your Scholarlytix portal and send a borrow request right away before all copies are taken.</p>
+                <p>Open your Scholarlytix portal to generate a borrow QR code right away.</p>
               </div>`
             })
           }).catch(() => {});
@@ -349,7 +268,7 @@ export default function FacultyLibraryTab({ isDark = true }: { isDark?: boolean 
     }
   };
 
-  // 4. Approve or Reject Extension Request
+  // Approve or Reject Extension Request
   const handleExtensionDecision = async (
     tx: LibraryTransaction,
     decision: "APPROVED" | "REJECTED"
@@ -416,7 +335,7 @@ export default function FacultyLibraryTab({ isDark = true }: { isDark?: boolean 
     }
   };
 
-  // 5. Trigger 2-Day, 1-Day, Due-Day & Overdue Alerts (App + Email)
+  // Trigger 2-Day, 1-Day, Due-Day & Overdue Alerts (App + Email)
   const handleRunDeadlineAlerts = async () => {
     setIsSendingReminders(true);
     try {
@@ -502,9 +421,9 @@ export default function FacultyLibraryTab({ isDark = true }: { isDark?: boolean 
       {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
         <div>
-          <h2 className={`text-2xl font-bold ${textColor}`}>Library & Book Catalogue</h2>
+          <h2 className={`text-2xl font-bold ${textColor}`}>Library Desk & QR Scanner</h2>
           <p className="text-xs text-white/60 mt-1">
-            Max {libSettings.maxBooksPerStudent} Books / Student • {libSettings.defaultBorrowDays}-Day Borrow Limit • QR Handshake Checkout
+            Max {libSettings.maxBooksPerStudent} Books / Student • {libSettings.defaultBorrowDays}-Day Borrow Limit • Single-Use Rotating QR Checkout
           </p>
         </div>
 
@@ -553,9 +472,9 @@ export default function FacultyLibraryTab({ isDark = true }: { isDark?: boolean 
       {/* Sub-navigation Tabs */}
       <div className="flex gap-2.5 mb-6 overflow-x-auto [&::-webkit-scrollbar]:hidden">
         {[
+          { id: "SCANNER", label: "📷 Scan Student Borrow QR" },
           { id: "CATALOGUE", label: `Book Catalogue (${books.length})` },
-          { id: "REQUESTS", label: `Pickup Queue & QR (${pendingPickupList.length})` },
-          { id: "BORROWED", label: `Active Borrowed (${activeBorrowedList.length})` },
+          { id: "BORROWED", label: `Active Borrowed & Returns (${activeBorrowedList.length})` },
           { id: "EXTENSIONS", label: `Extension Requests (${pendingExtensionsList.length})` },
           { id: "HISTORY", label: `Return History (${historyList.length})` }
         ].map((t) => (
@@ -574,7 +493,18 @@ export default function FacultyLibraryTab({ isDark = true }: { isDark?: boolean 
       </div>
 
       {/* =====================================================================
-          TAB 1: BOOK CATALOGUE
+          TAB 1: LIBRARIAN QR BORROW SCANNER (GUARD-STYLE SINGLE-USE BURN)
+      ===================================================================== */}
+      {subTab === "SCANNER" && (
+        <LibrarianRotatingQrScannerView
+          borrowDays={libSettings.defaultBorrowDays}
+          studentsMap={studentsMap}
+          cardBg={cardBg}
+        />
+      )}
+
+      {/* =====================================================================
+          TAB 2: BOOK CATALOGUE
       ===================================================================== */}
       {subTab === "CATALOGUE" && (
         <div className="flex-1 flex flex-col overflow-hidden">
@@ -623,7 +553,7 @@ export default function FacultyLibraryTab({ isDark = true }: { isDark?: boolean 
                             {book.semester === "All" ? "All Semesters" : book.semester}
                           </span>
                           {book.branch && book.branch !== "All" && (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-500/20 text-blue-300">
+                            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded bg-blue-500/20 text-blue-300">
                               {book.branch}
                             </span>
                           )}
@@ -699,94 +629,6 @@ export default function FacultyLibraryTab({ isDark = true }: { isDark?: boolean 
       )}
 
       {/* =====================================================================
-          TAB 2: PICKUP QUEUE & QR CODE GENERATOR
-      ===================================================================== */}
-      {subTab === "REQUESTS" && (
-        <div className="flex-1 overflow-y-auto space-y-3 pr-1 [&::-webkit-scrollbar]:hidden">
-          {pendingPickupList.length === 0 ? (
-            <div className="py-20 text-center text-white/50 text-sm">
-              No pending book pickup requests right now.
-            </div>
-          ) : (
-            pendingPickupList.map((tx) => (
-              <div
-                key={tx.id}
-                className={`p-5 rounded-2xl border ${cardBg} flex flex-col md:flex-row md:items-center justify-between gap-4`}
-              >
-                <div className="space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span
-                      className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded ${
-                        tx.status === "APPROVED_AWAITING_QR"
-                          ? 'bg-amber-500/20 text-amber-300'
-                          : 'bg-blue-500/20 text-blue-300'
-                      }`}
-                    >
-                      {tx.status === "APPROVED_AWAITING_QR"
-                        ? "Approved • Awaiting Student QR Scan"
-                        : "New Borrow Request"}
-                    </span>
-                    <span className="text-xs font-bold text-[#D0BCFF]">
-                      {tx.bookTitle} (ISBN: {tx.bookIsbn})
-                    </span>
-                  </div>
-
-                  <h4 className="font-bold text-sm text-white">
-                    {tx.studentName} • Roll {tx.rollNo || "-"} (GR: {tx.grNumber || "-"})
-                  </h4>
-                  <p className="text-xs text-white/60">
-                    {tx.semester} • {tx.branch} ({tx.division}) • Contact: {tx.studentPhone || "N/A"} • {tx.studentEmail}
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2.5">
-                  {tx.status === "REQUESTED" ? (
-                    <>
-                      <GlassButton
-                        onClick={() => handleRejectBorrowRequest(tx)}
-                        disabled={isProcessingId === tx.id}
-                        variant="glass"
-                        size="sm"
-                      >
-                        Reject
-                      </GlassButton>
-                      <GlassButton
-                        onClick={() => handleAcceptBorrowRequest(tx)}
-                        disabled={isProcessingId === tx.id}
-                        variant="primary"
-                        size="sm"
-                        icon={<QrCode className="w-4 h-4" />}
-                      >
-                        Accept & Generate QR
-                      </GlassButton>
-                    </>
-                  ) : (
-                    <>
-                      <GlassButton
-                        onClick={() => handleRejectBorrowRequest(tx)}
-                        variant="glass"
-                        size="sm"
-                      >
-                        Cancel
-                      </GlassButton>
-                      <GlassButton
-                        onClick={() => setActiveQrTransaction(tx)}
-                        variant="primary"
-                        size="sm"
-                        icon={<QrCode className="w-4 h-4" />}
-                      >
-                        Show Pickup QR Code
-                      </GlassButton>
-                    </>
-                  )}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      {/* =====================================================================
           TAB 3: ACTIVE BORROWED BOOKS & 1-CLICK RETURN
       ===================================================================== */}
       {subTab === "BORROWED" && (
@@ -808,7 +650,7 @@ export default function FacultyLibraryTab({ isDark = true }: { isDark?: boolean 
                   <div className="space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-xs font-black text-[#D0BCFF]">
-                        {tx.bookTitle}
+                        {tx.bookTitle} (ISBN: {tx.bookIsbn})
                       </span>
                       <span className="text-[11px] text-white/60">by {tx.bookAuthor}</span>
                       {isOverdue && (
@@ -819,7 +661,7 @@ export default function FacultyLibraryTab({ isDark = true }: { isDark?: boolean 
                     </div>
 
                     <h4 className="font-bold text-sm text-white">
-                      Borrowed by: {tx.studentName} ({tx.semester} • {tx.branch} • Div {tx.division})
+                      Borrowed by: {tx.studentName} • Roll {tx.rollNo} ({tx.semester} • {tx.branch} • Div {tx.division})
                     </h4>
                     <p className="text-xs text-white/60">
                       Phone: {tx.studentPhone || "N/A"} • Email: {tx.studentEmail} • GR: {tx.grNumber}
@@ -962,14 +804,318 @@ export default function FacultyLibraryTab({ isDark = true }: { isDark?: boolean 
           onClose={() => setShowSettingsModal(false)}
         />
       )}
+    </div>
+  );
+}
 
-      {/* Librarian Live QR Handshake Modal */}
-      {activeQrTransaction && (
-        <LibrarianQrModal
-          transaction={activeQrTransaction}
-          onClose={() => setActiveQrTransaction(null)}
-        />
-      )}
+// ============================================================================
+// LIBRARIAN ROTATING QR SCANNER VIEW (SINGLE-USE ATOMIC BURN + ID PHOTO)
+// ============================================================================
+function LibrarianRotatingQrScannerView({
+  borrowDays,
+  studentsMap,
+  cardBg
+}: {
+  borrowDays: number;
+  studentsMap: Record<string, StudentData>;
+  cardBg: string;
+}) {
+  const [scanStatus, setScanStatus] = useState<string>("Awaiting Student QR Scan...");
+  const [manualToken, setManualToken] = useState<string>("");
+  const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [verifiedRecord, setVerifiedRecord] = useState<{
+    tx: LibraryTransaction;
+    student?: StudentData;
+  } | null>(null);
+  const [cameraError, setCameraError] = useState<string>("");
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  const processScannedQrPayload = async (rawPayload: string) => {
+    if (isProcessing) return;
+    const clean = rawPayload.trim();
+    const parts = clean.split("|");
+
+    if (parts.length < 3 || parts[0] !== "LIBPASS") {
+      setScanStatus("INVALID LIBRARY QR CODE");
+      return;
+    }
+
+    const txId = parts[1];
+    const qrBucket = parseInt(parts[2], 10) || 0;
+    const currentBucket = Math.floor(Date.now() / 10000);
+
+    // Verify 10-second rotation window (allow 1 bucket grace period for network latency)
+    if (Math.abs(currentBucket - qrBucket) > 1) {
+      setScanStatus("EXPIRED QR CODE (Screenshot Detected!)");
+      return;
+    }
+
+    setIsProcessing(true);
+    setScanStatus("Validating & Issuing Book...");
+
+    try {
+      const txRef = tenantDoc("library_transactions", txId);
+      let issuedTx: LibraryTransaction | null = null;
+
+      await runTransaction(db, async (transaction) => {
+        const txSnap = await transaction.get(txRef);
+        if (!txSnap.exists()) {
+          throw new Error("BORROW PASS NOT FOUND");
+        }
+
+        const txData = { id: txSnap.id, ...(txSnap.data() as any) } as LibraryTransaction;
+
+        // SINGLE-USE BURN CHECK
+        if (txData.status === "BORROWED" || txData.status === "RETURNED") {
+          throw new Error("QR CODE ALREADY USED!");
+        }
+
+        const bookRef = tenantDoc("library_books", txData.bookId);
+        const bookSnap = await transaction.get(bookRef);
+        if (!bookSnap.exists()) {
+          throw new Error("BOOK DOES NOT EXIST IN CATALOGUE");
+        }
+
+        const avail = Number(bookSnap.data().availableCopies) || 0;
+        if (avail <= 0) {
+          throw new Error("OUT OF STOCK! No copies left.");
+        }
+
+        const now = Date.now();
+        const dueDate = now + (Number(borrowDays) || 7) * 24 * 60 * 60 * 1000;
+        const st = studentsMap[txData.studentId];
+
+        const updatedFields = {
+          status: "BORROWED" as const,
+          borrowedAt: now,
+          dueDate,
+          studentName: st?.fullName || txData.studentName,
+          studentEmail: st?.email || txData.studentEmail,
+          studentPhone: st?.phone || st?.contactNumber || txData.studentPhone,
+          rollNo: st?.rollNo || txData.rollNo,
+          grNumber: st?.grNumber || txData.grNumber,
+          semester: st?.semester || txData.semester,
+          branch: st?.branch || txData.branch,
+          division: st?.division || txData.division
+        };
+
+        transaction.update(bookRef, {
+          availableCopies: avail - 1,
+          updatedAt: now
+        });
+
+        transaction.update(txRef, updatedFields);
+
+        issuedTx = { ...txData, ...updatedFields };
+      });
+
+      if (issuedTx) {
+        const st = studentsMap[(issuedTx as LibraryTransaction).studentId];
+        setVerifiedRecord({ tx: issuedTx, student: st });
+        setScanStatus("BOOK ISSUED SUCCESSFULLY ✅");
+      }
+    } catch (e: any) {
+      setScanStatus(e.message || "SCAN FAILED");
+      setIsProcessing(false);
+    }
+  };
+
+  useEffect(() => {
+    let stream: MediaStream | null = null;
+    let intervalId: any = null;
+
+    const startCamera = async () => {
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          setCameraError("Camera not supported on this browser. Paste the token below.");
+          return;
+        }
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" }
+        });
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+        }
+
+        if ("BarcodeDetector" in window) {
+          // @ts-ignore
+          const detector = new window.BarcodeDetector({ formats: ["qr_code"] });
+          intervalId = setInterval(async () => {
+            if (videoRef.current && videoRef.current.readyState === 4 && !isProcessing) {
+              try {
+                const barcodes = await detector.detect(videoRef.current);
+                if (barcodes.length > 0 && barcodes[0].rawValue) {
+                  processScannedQrPayload(barcodes[0].rawValue);
+                }
+              } catch (_) {}
+            }
+          }, 500);
+        }
+      } catch (_) {
+        setCameraError("Camera permission declined. You can paste the live token below.");
+      }
+    };
+
+    startCamera();
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+    };
+  }, [isProcessing]);
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* Left: Live Camera Viewfinder */}
+      <div className={`p-6 rounded-[2rem] border ${cardBg} flex flex-col items-center`}>
+        <h3 className="text-lg font-bold text-white mb-1 flex items-center gap-2">
+          <Camera className="w-5 h-5 text-[#D0BCFF]" /> Librarian QR Scanner
+        </h3>
+        <p className="text-xs text-white/60 text-center mb-4">
+          Scan the rotating QR code shown on the student&apos;s Library tab to automatically record their details and issue the book.
+        </p>
+
+        <div className="relative w-full h-64 bg-black rounded-2xl overflow-hidden border-2 border-[#D0BCFF]/50 flex items-center justify-center mb-4">
+          {cameraError ? (
+            <p className="text-xs text-amber-300 px-6 text-center">{cameraError}</p>
+          ) : (
+            <video ref={videoRef} muted playsInline className="w-full h-full object-cover" />
+          )}
+        </div>
+
+        <div className="w-full space-y-2 pt-2 border-t border-white/10">
+          <label className="text-[11px] font-bold text-[#D0BCFF] block">
+            Or Paste Live Token From Student Screen:
+          </label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="LIBPASS|..."
+              value={manualToken}
+              onChange={(e) => setManualToken(e.target.value)}
+              className="flex-1 bg-white/5 border border-white/20 rounded-xl px-3 py-2.5 text-xs font-mono text-white outline-none"
+            />
+            <GlassButton
+              onClick={() => processScannedQrPayload(manualToken)}
+              disabled={!manualToken.trim() || isProcessing}
+              variant="primary"
+              size="sm"
+            >
+              Verify
+            </GlassButton>
+          </div>
+        </div>
+      </div>
+
+      {/* Right: Scan Verification & Student Profile Card */}
+      <div className={`p-6 rounded-[2rem] border ${cardBg} flex flex-col justify-between`}>
+        <div>
+          <span className="text-xs font-black uppercase tracking-wider text-[#D0BCFF]">
+            Scanner Status
+          </span>
+          <h3
+            className={`text-xl font-black mt-1 ${
+              scanStatus.includes("SUCCESSFULLY")
+                ? "text-green-400"
+                : scanStatus.includes("EXPIRED") ||
+                  scanStatus.includes("ALREADY") ||
+                  scanStatus.includes("INVALID") ||
+                  scanStatus.includes("OUT OF STOCK")
+                ? "text-red-400"
+                : "text-white"
+            }`}
+          >
+            {scanStatus}
+          </h3>
+
+          {verifiedRecord ? (
+            <div className="mt-6 space-y-4">
+              <div className="flex items-center gap-4 p-4 rounded-2xl bg-green-500/10 border border-green-500/30">
+                <div className="w-16 h-16 rounded-2xl overflow-hidden bg-white/10 border border-green-400 flex items-center justify-center shrink-0">
+                  {(verifiedRecord.student as any)?.photoUrl ||
+                  verifiedRecord.student?.profilePicBase64 ? (
+                    <img
+                      src={
+                        (verifiedRecord.student as any)?.photoUrl ||
+                        `data:image/jpeg;base64,${verifiedRecord.student?.profilePicBase64}`
+                      }
+                      alt={verifiedRecord.tx.studentName}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <User className="w-8 h-8 text-green-400" />
+                  )}
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-green-500/20 text-green-300">
+                    Verified Student ID
+                  </span>
+                  <h4 className="text-lg font-bold text-white mt-0.5">
+                    {verifiedRecord.tx.studentName}
+                  </h4>
+                  <p className="text-xs text-white/70">
+                    Roll {verifiedRecord.tx.rollNo} • GR: {verifiedRecord.tx.grNumber}
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-white/5 border border-white/10 space-y-1.5 text-xs">
+                <p>
+                  <span className="text-white/50">Class:</span>{" "}
+                  <strong>
+                    {verifiedRecord.tx.semester} • {verifiedRecord.tx.branch} (Div{" "}
+                    {verifiedRecord.tx.division})
+                  </strong>
+                </p>
+                <p>
+                  <span className="text-white/50">Contact:</span>{" "}
+                  <strong>{verifiedRecord.tx.studentPhone || "N/A"}</strong>
+                </p>
+                <p>
+                  <span className="text-white/50">Email:</span>{" "}
+                  <strong>{verifiedRecord.tx.studentEmail}</strong>
+                </p>
+                <hr className="border-white/10 my-2" />
+                <p className="text-[#D0BCFF] font-bold text-sm">
+                  📖 {verifiedRecord.tx.bookTitle}
+                </p>
+                <p className="text-white/70">
+                  Author: {verifiedRecord.tx.bookAuthor} • ISBN: {verifiedRecord.tx.bookIsbn}
+                </p>
+                <p className="text-amber-300 font-bold">
+                  Due Date:{" "}
+                  {verifiedRecord.tx.dueDate
+                    ? new Date(verifiedRecord.tx.dueDate).toLocaleDateString('en-GB')
+                    : "-"}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="py-16 text-center text-white/40 text-sm">
+              Scan a student&apos;s rotating borrow QR code to view their Digital ID photo and automatically log the book checkout.
+            </div>
+          )}
+        </div>
+
+        {(verifiedRecord ||
+          scanStatus.includes("EXPIRED") ||
+          scanStatus.includes("ALREADY") ||
+          scanStatus.includes("INVALID") ||
+          scanStatus.includes("FAILED")) && (
+          <GlassButton
+            onClick={() => {
+              setVerifiedRecord(null);
+              setManualToken("");
+              setScanStatus("Awaiting Student QR Scan...");
+              setIsProcessing(false);
+            }}
+            variant="primary"
+            className="w-full mt-4"
+          >
+            Clear & Scan Next Student
+          </GlassButton>
+        )}
+      </div>
     </div>
   );
 }
@@ -1241,61 +1387,6 @@ function LibrarySettingsModal({
             {isSaving ? "Saving..." : "Save Rules"}
           </GlassButton>
         </div>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// LIBRARIAN DYNAMIC QR CODE DISPLAY MODAL (GUARD-STYLE PICKUP HANDSHAKE)
-// ============================================================================
-function LibrarianQrModal({
-  transaction,
-  onClose
-}: {
-  transaction: LibraryTransaction;
-  onClose: () => void;
-}) {
-  const qrData = transaction.qrToken || `LIBQR|${transaction.id}`;
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(qrData)}`;
-
-  return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-      <div className="bg-[#111] border border-white/20 p-6 sm:p-8 rounded-[2.2rem] w-full max-w-md text-white text-center shadow-2xl">
-        <div className="flex justify-between items-center mb-4">
-          <span className="text-xs font-black uppercase tracking-wider text-[#D0BCFF]">
-            Library Checkout QR
-          </span>
-          <button onClick={onClose} className="p-1.5 hover:bg-white/10 rounded-lg">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <h3 className="text-lg font-bold">{transaction.bookTitle}</h3>
-        <p className="text-xs text-white/60 mt-1 mb-5">
-          Ask <strong>{transaction.studentName}</strong> to scan this QR code from their Scholarlytix Library tab to automatically log their borrow details and decrement stock.
-        </p>
-
-        <div className="bg-white p-5 rounded-3xl inline-block mx-auto shadow-xl">
-          <img
-            src={qrUrl}
-            alt="Library Checkout QR Code"
-            className="w-60 h-60 object-contain"
-          />
-        </div>
-
-        <div className="mt-5 p-3.5 rounded-2xl bg-white/5 border border-white/10">
-          <p className="text-[11px] text-white/50 font-bold uppercase">
-            Fallback Verification Code
-          </p>
-          <p className="text-xl font-black tracking-widest text-[#D0BCFF] mt-1">
-            {qrData.split("|").pop()}
-          </p>
-        </div>
-
-        <p className="text-[11px] text-green-400 font-semibold mt-4 animate-pulse">
-          Listening for student scan... This window will close automatically on checkout.
-        </p>
       </div>
     </div>
   );

@@ -17,9 +17,17 @@ export default function FacultyLogin() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
   const [collegeName, setCollegeName] = useState('MIT Mumbai');
+  const [isLibrarianPortalMode, setIsLibrarianPortalMode] = useState(false);
 
   useEffect(() => {
     setCollegeName(getActiveCollegeName());
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const savedRole = localStorage.getItem("userRole");
+      if (params.get('portal') === 'librarian' || savedRole === 'librarian') {
+        setIsLibrarianPortalMode(true);
+      }
+    }
 
     const cleanupSession = async () => {
       const currentSessionId = localStorage.getItem("current_session_id");
@@ -56,13 +64,13 @@ export default function FacultyLogin() {
 
           if (!roleDoc.exists() && !isFounderEmail(email)) {
             await signOut(auth);
-            alert(`Access Denied: Your email is not registered as authorized Faculty at ${getActiveCollegeName()}. Please contact the Principal or HOD.`);
+            alert(`Access Denied: Your email is not registered as authorized staff at ${getActiveCollegeName()}. Please contact the Super Admin or Principal.`);
             setIsLoading(false);
             return;
           }
 
           if (roleDoc.exists()) {
-            userRole = roleDoc.data().role || (isFounderEmail(email) ? "SUPER_ADMIN" : "teacher");
+            userRole = roleDoc.data().role || roleDoc.data().roleScope || (isFounderEmail(email) ? "SUPER_ADMIN" : "teacher");
           } else if (isFounderEmail(email)) {
             userRole = "SUPER_ADMIN";
           }
@@ -82,7 +90,6 @@ export default function FacultyLogin() {
         }
         localStorage.setItem("current_session_id", deviceId);
 
-        // Generate a clean representation of the device
         const parser = navigator.userAgent;
         let deviceName = "Web Browser";
         if (parser.includes("Windows")) deviceName = "Windows PC";
@@ -103,7 +110,7 @@ export default function FacultyLogin() {
         }
 
         localStorage.setItem("academiq_faculty_id", user.uid);
-        localStorage.setItem("academiq_faculty_name", user.displayName || "Faculty");
+        localStorage.setItem("academiq_faculty_name", user.displayName || "Staff");
 
         try {
           await setDoc(tenantDoc("faculty_directory", user.uid), {
@@ -117,7 +124,14 @@ export default function FacultyLogin() {
           console.warn("Ignored: Could not update faculty directory.", writeError);
         }
 
-        router.replace('/faculty/dashboard');
+        // Route LIBRARIAN (or users logging in via Library Portal) directly to Dedicated Librarian Portal
+        if (userRole === "LIBRARIAN" || isLibrarianPortalMode) {
+          localStorage.setItem("userRole", "librarian");
+          router.replace('/librarian/dashboard');
+        } else {
+          localStorage.setItem("userRole", "faculty");
+          router.replace('/faculty/dashboard');
+        }
       }
     } catch (authError: any) {
       console.error("Auth failed:", authError);
@@ -132,7 +146,7 @@ export default function FacultyLogin() {
   return (
     <main className="relative min-h-screen w-full flex flex-col items-center justify-center p-4 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#1f103b] via-[#0a0a0a] to-black text-white overflow-hidden">
       <div className="absolute inset-0 z-0">
-        <DynamicHueBackground theme="indigo" />
+        <DynamicHueBackground {...({ theme: "indigo" } as any)} />
       </div>
 
       <button onClick={() => router.push('/')} className="absolute top-8 left-8 p-3 rounded-full bg-white/10 hover:bg-white/20 transition backdrop-blur-md z-50">
@@ -148,8 +162,14 @@ export default function FacultyLogin() {
           {collegeName}
         </span>
 
-        <h1 className="text-3xl font-black mb-2 text-center tracking-tight">Faculty Portal</h1>
-        <p className="text-white/60 text-sm mb-10 text-center">Sign in securely with your authorized college Google account.</p>
+        <h1 className="text-3xl font-black mb-2 text-center tracking-tight">
+          {isLibrarianPortalMode ? "Dedicated Library Portal" : "Faculty Portal"}
+        </h1>
+        <p className="text-white/60 text-sm mb-10 text-center">
+          {isLibrarianPortalMode
+            ? "Sign in with your Librarian / Admin Google account to manage the library catalogue and scan student borrow QR codes."
+            : "Sign in securely with your authorized college Google account."}
+        </p>
 
         <div className="w-full bg-white/[0.03] backdrop-blur-[40px] border border-white/10 p-8 rounded-[2.5rem] shadow-2xl">
           <button
