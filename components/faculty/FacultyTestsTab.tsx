@@ -1,8 +1,15 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { collection, doc, setDoc, onSnapshot } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import { setDoc, onSnapshot } from 'firebase/firestore';
+import {
+  tenantCol,
+  tenantDoc,
+  tenantTopic,
+  CustomRoleDef,
+  resolveWebRole,
+  isFounderEmail
+} from '../../lib/firebase';
 import { useAuth } from '../../app/context/AuthContext';
 import { Loader2, Sparkles, Image as ImageIcon } from 'lucide-react';
 import GlassDropdown from '../GlassDropdown';
@@ -59,7 +66,31 @@ const compressImage = async (file: File): Promise<File> => {
 
 export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean }) {
   const { user, role } = useAuth();
-  const isHod = role?.startsWith("HOD|") || role === "SUPER_ADMIN" || role === "DIRECTOR" || role === "PRINCIPAL" || role === "REGISTRAR";
+  const [customRolesMap, setCustomRolesMap] = useState<Record<string, CustomRoleDef>>({});
+
+  useEffect(() => {
+    const unsubRoles = onSnapshot(tenantCol("custom_roles"), (snap) => {
+      const roleMap: Record<string, CustomRoleDef> = {};
+      snap.docs.forEach((d) => {
+        roleMap[d.id] = d.data() as CustomRoleDef;
+      });
+      setCustomRolesMap(roleMap);
+    });
+    return () => unsubRoles();
+  }, []);
+
+  const resolvedRole = resolveWebRole(role || "NONE", customRolesMap, user?.email);
+  const isHod =
+    isFounderEmail(user?.email) ||
+    resolvedRole.scopeType === "COLLEGE" ||
+    resolvedRole.scopeType === "BRANCH" ||
+    resolvedRole.canManageAdminPanel ||
+    resolvedRole.canManageRoster ||
+    role?.startsWith("HOD|") ||
+    role === "SUPER_ADMIN" ||
+    role === "DIRECTOR" ||
+    role === "PRINCIPAL" ||
+    role === "REGISTRAR";
 
   const [teachingConfig, setTeachingConfig] = useState<Record<string, string[]>>({});
   const [globalStructure, setGlobalStructure] = useState<any>({});
@@ -80,16 +111,16 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const unsubRoster = onSnapshot(collection(db, "students_directory"), (snap) => setRoster(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }))));
-    const unsubStruct = onSnapshot(doc(db, "app_config", "college_structure"), (snap) => {
+    const unsubRoster = onSnapshot(tenantCol("students_directory"), (snap) => setRoster(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }))));
+    const unsubStruct = onSnapshot(tenantDoc("app_config", "college_structure"), (snap) => {
       if (snap.exists()) setGlobalStructure(snap.data());
     });
-    const unsubSubjects = onSnapshot(doc(db, "app_config", "subject_master"), (snap) => {
+    const unsubSubjects = onSnapshot(tenantDoc("app_config", "subject_master"), (snap) => {
       if (snap.exists()) setGlobalSubjects(snap.data());
     });
 
     if (!user?.uid) return;
-    const unsubConfig = onSnapshot(doc(db, "teacher_configs", user.uid), (docSnap) => {
+    const unsubConfig = onSnapshot(tenantDoc("teacher_configs", user.uid), (docSnap) => {
       if (docSnap.exists() && docSnap.get("config")) {
         const config = docSnap.get("config");
         setTeachingConfig(config);
@@ -100,7 +131,7 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
     });
 
     return () => { unsubRoster(); unsubStruct(); unsubSubjects(); unsubConfig(); };
-  }, [user?.uid]);
+  }, [user?.uid, selectedSemester]);
 
   const isFirstYear = isFirstYearSem(selectedSemester);
   const streamBranches = isHod ? (selectedStream === "Engineering" ? ["CSE", "CSE(AIML)", "IT", "EE"] : ["BMS", "MMS"]) : [];
@@ -136,14 +167,13 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
     if (!aggregatedSubjectsList.includes(selectedSubject)) setSelectedSubject(aggregatedSubjectsList[0] || "");
   }, [selectedSemester, selectedDivision, teachingConfig, isHod, selectedSubject, aggregatedSubjectsList]);
 
-  // THE FIX: Strict 3-Tier ID formulation matching the Android logic exactly
+  // Strict 3-Tier ID formulation matching the Android logic
   useEffect(() => {
     if (!selectedSubject || !selectedDivision) return;
     
-    // We bind the Document ID using the EXACT Division-First logic expected by the student portal!
     const docId = `${selectedSemester}_${selectedDivision}_${selectedSubject}`.replace(/\s+/g, '').replace(/&/g, 'and');
     
-    const unsub = onSnapshot(doc(db, "test_marks", docId), (docSnap) => {
+    const unsub = onSnapshot(tenantDoc("test_marks", docId), (docSnap) => {
       if (docSnap.exists()) setFullMarksMap(docSnap.get("marks") || {});
       else setFullMarksMap({});
     });
@@ -293,14 +323,14 @@ export default function FacultyTestsTab({ isDark = true }: { isDark?: boolean })
         <GlassButton onClick={async () => {
           setIsLoading(true);
           try {
-            // THE FIX: Save perfectly to the Division-matched document key!
             const docId = `${selectedSemester}_${selectedDivision}_${selectedSubject}`.replace(/\s+/g, '').replace(/&/g, 'and');
             
-            await setDoc(doc(db, "test_marks", docId), { marks: fullMarksMap, isPublished: true, semester: selectedSemester, division: selectedDivision, subject: selectedSubject }, { merge: true });
+            await setDoc(tenantDoc("test_marks", docId), { marks: fullMarksMap, isPublished: true, semester: selectedSemester, division: selectedDivision, subject: selectedSubject }, { merge: true });
             
+            const targetTopic = tenantTopic(`topic_${selectedSemester.replace(/ /g, "_")}`);
             await fetch('/api/send-fcm', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ targetTopic: `topic_${selectedSemester.replace(/ /g, "_")}`, title: "📊 Test Results", message: `Marks for ${selectedSubject} published.`, targetTab: "Tests" })
+              body: JSON.stringify({ targetTopic, title: "📊 Test Results", message: `Marks for ${selectedSubject} published.`, targetTab: "Tests" })
             });
             alert("Marks published to students!");
           } catch (e) { alert("Error saving marks."); } finally { setIsLoading(false); }

@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { onSnapshot, setDoc } from 'firebase/firestore';
+import { tenantDoc } from '@/lib/firebase';
 import { X, Plus, Trash2, Save, Loader2 } from 'lucide-react';
 
 const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8"];
@@ -22,7 +22,7 @@ export default function SubjectManagerDialog({ isDark, onClose }: { isDark: bool
 
   useEffect(() => {
     const classKey = `${selectedSem}|${selectedBranch}`;
-    const docRef = doc(db, 'app_config', 'subject_master');
+    const docRef = tenantDoc('app_config', 'subject_master');
     
     const unsubscribe = onSnapshot(docRef, (snap) => {
       if (snap.exists()) {
@@ -47,7 +47,7 @@ export default function SubjectManagerDialog({ isDark, onClose }: { isDark: bool
         type: sub.type
       }));
 
-      await setDoc(doc(db, 'app_config', 'subject_master'), {
+      await setDoc(tenantDoc('app_config', 'subject_master'), {
         [classKey]: listForDb
       }, { merge: true });
       
@@ -132,7 +132,7 @@ export default function SubjectManagerDialog({ isDark, onClose }: { isDark: bool
                 >
                   <option value="Theory">Theory Only</option>
                   <option value="Practical">Practical / Lab Only</option>
-                  <option value="Both">Both Theory & Practical</option>
+                  <option value="Both">Both Theory &amp; Practical</option>
                 </select>
               </div>
             </div>

@@ -2,9 +2,20 @@
 
 import React, { useEffect, useState } from 'react';
 import { getMessaging, getToken, onMessage, isSupported } from 'firebase/messaging';
-import { app } from '../lib/firebase';
+import { getDocs, getDoc } from 'firebase/firestore';
+import {
+  app,
+  tenantCol,
+  tenantDoc,
+  tenantTopic,
+  CustomRoleDef,
+  resolveWebRole,
+  isFounderEmail
+} from '../lib/firebase';
 import { useAuth } from '../app/context/AuthContext';
 import { BellRing, X } from 'lucide-react';
+
+const DEFAULT_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
 
 export default function PushNotificationManager() {
   const { user, role } = useAuth();
@@ -55,18 +66,81 @@ export default function PushNotificationManager() {
         }
 
         const messaging = getMessaging(app);
-        const currentToken = await getToken(messaging, { vapidKey: "BGGPfRStiWlYL7qqIX5hWH395DxF7VUDEDG1z8YTV5qAceVIyAZh0c3RQah3MAfzG0N6Fj9YyHoLbq3soGnWNYk" });
+        const currentToken = await getToken(messaging, {
+          vapidKey: "BGGPfRStiWlYL7qqIX5hWH395DxF7VUDEDG1z8YTV5qAceVIyAZh0c3RQah3MAfzG0N6Fj9YyHoLbq3soGnWNYk"
+        });
         
         if (currentToken) {
-          const topics = ["all_users"];
-          
-          if (role?.startsWith("HOD|")) {
-             const branches = role.replace("HOD|", "").split(",");
-             branches.forEach(b => topics.push(`hod_${b.replace(/[ ()]/g, "_")}`));
-          } else if (role === "PRINCIPAL" || role === "REGISTRAR" || role === "SUPER_ADMIN" || role === "DIRECTOR") {
-             const branches = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
-             branches.forEach(b => topics.push(`hod_${b.replace(/[ ()]/g, "_")}`));
+          const rawTopics = new Set<string>(["all_users"]);
+
+          // Resolve dynamic PBAC role for faculty / admins
+          let customRolesMap: Record<string, CustomRoleDef> = {};
+          try {
+            const rolesSnap = await getDocs(tenantCol("custom_roles"));
+            rolesSnap.docs.forEach(d => {
+              customRolesMap[d.id] = d.data() as CustomRoleDef;
+            });
+          } catch {}
+
+          const resolvedRole = resolveWebRole(role || "NONE", customRolesMap, user?.email);
+
+          if (role) {
+            rawTopics.add("all_teachers");
           }
+
+          if (
+            isFounderEmail(user?.email) ||
+            role === "PRINCIPAL" ||
+            role === "REGISTRAR" ||
+            role === "SUPER_ADMIN" ||
+            role === "DIRECTOR" ||
+            resolvedRole.scopeType === "COLLEGE" ||
+            resolvedRole.facultyLeaveTier >= 2
+          ) {
+            DEFAULT_BRANCHES.forEach(b => {
+              const cleanB = b.replace(/[ ()]/g, "_");
+              rawTopics.add(`hod_${cleanB}`);
+              rawTopics.add(`transfers_${cleanB}`);
+            });
+          } else if (role?.startsWith("HOD|")) {
+            const branches = role.replace("HOD|", "").split(",").filter(Boolean);
+            branches.forEach(b => {
+              const cleanB = b.replace(/[ ()]/g, "_");
+              rawTopics.add(`hod_${cleanB}`);
+              rawTopics.add(`transfers_${cleanB}`);
+            });
+          } else if (role?.startsWith("CUSTOM|")) {
+            const parts = role.split("|");
+            const extraScope = parts[2] || "";
+            if (extraScope && (resolvedRole.scopeType === "BRANCH" || resolvedRole.facultyLeaveTier === 1)) {
+              extraScope.split(",").filter(Boolean).forEach(b => {
+                const cleanB = b.replace(/[ ()]/g, "_");
+                rawTopics.add(`hod_${cleanB}`);
+                rawTopics.add(`transfers_${cleanB}`);
+              });
+            }
+          }
+
+          // Optional: If a student session is active on this browser, subscribe to student topics too
+          const activeStudentId = typeof window !== "undefined" ? localStorage.getItem("academiq_student_id") : null;
+          if (activeStudentId) {
+            rawTopics.add("all_students");
+            try {
+              const stuSnap = await getDoc(tenantDoc("students_directory", activeStudentId));
+              if (stuSnap.exists()) {
+                const stu = stuSnap.data();
+                const cleanSem = (stu.semester || "").replace(/\s+/g, "_");
+                const cleanBranch = (stu.branch || "").replace(/[ ()]/g, "_");
+                const cleanDiv = (stu.division || "").replace(/\s+/g, "_");
+                if (cleanSem) rawTopics.add(`topic_${cleanSem}`);
+                if (cleanSem && cleanBranch) rawTopics.add(`topic_${cleanSem}_${cleanBranch}`);
+                if (cleanSem && cleanDiv) rawTopics.add(`topic_${cleanSem}_${cleanDiv}`);
+              }
+            } catch {}
+          }
+
+          // Prefix every topic with the active college ID via tenantTopic(...)
+          const topics = Array.from(rawTopics).map(t => tenantTopic(t));
           
           // Silently fail if the subscribe API doesn't exist yet, to not disrupt the user
           try {

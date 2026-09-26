@@ -1,8 +1,14 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { doc, collection, onSnapshot } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import { onSnapshot } from 'firebase/firestore';
+import {
+  tenantCol,
+  tenantDoc,
+  CustomRoleDef,
+  resolveWebRole,
+  isFounderEmail
+} from '@/lib/firebase';
 import { useAuth } from '../../app/context/AuthContext';
 import { CollegeStructureConfig } from '../../types/index';
 import { Edit, Zap, CalendarDays, UploadCloud, X } from 'lucide-react';
@@ -15,7 +21,6 @@ const SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Seme
 
 // Fuzzy Matching helpers to guarantee compatibility with all DB string formats
 const matchSem = (a: string, b: string) => (a || "").toLowerCase().replace("semester", "sem") === (b || "").toLowerCase().replace("semester", "sem");
-const matchDiv = (a: string, b: string) => (a || "").toLowerCase().replace("div ", "") === (b || "").toLowerCase().replace("div ", "");
 
 export default function FacultyClassesTab({
   isDark,
@@ -34,6 +39,7 @@ export default function FacultyClassesTab({
   const cardBg = isDark ? "bg-white/[0.05] border-white/10" : "bg-gray-50 border-gray-200";
 
   const [globalStructure, setGlobalStructure] = useState<CollegeStructureConfig>({});
+  const [customRolesMap, setCustomRolesMap] = useState<Record<string, CustomRoleDef>>({});
   const [scheduleView, setScheduleView] = useState<"Today" | "Week">("Today");
   const [myTimetable, setMyTimetable] = useState<any[]>([]);
   
@@ -50,16 +56,24 @@ export default function FacultyClassesTab({
   const [proxySubject, setProxySubject] = useState("");
 
   const currentEmail = (user?.email || "").toLowerCase();
-  const isDeveloper = currentEmail === 'pngdeveloper11@gmail.com';
+  const rolePerms = resolveWebRole(role || "NONE", customRolesMap, currentEmail);
   const isHod = role?.startsWith("HOD|") || role === "SUPER_ADMIN" || role === "DIRECTOR" || role === "PRINCIPAL" || role === "REGISTRAR";
-  const hasAdminAccess = isHod || isDeveloper;
+  const hasAdminAccess = isHod || isFounderEmail(currentEmail) || rolePerms.canPublishTimetable;
 
   useEffect(() => {
-    const unsubConfig = onSnapshot(doc(db, 'app_config', 'college_structure'), (snap) => {
+    const unsubConfig = onSnapshot(tenantDoc('app_config', 'college_structure'), (snap) => {
       if (snap.exists()) setGlobalStructure(snap.data() as any);
     });
 
-    const unsubTimetables = onSnapshot(collection(db, 'class_timetables'), (snap) => {
+    const unsubCustomRoles = onSnapshot(tenantCol('custom_roles'), (snap) => {
+      const map: Record<string, CustomRoleDef> = {};
+      snap.docs.forEach(d => {
+        map[d.id] = { roleId: d.id, ...(d.data() as any) };
+      });
+      setCustomRolesMap(map);
+    });
+
+    const unsubTimetables = onSnapshot(tenantCol('class_timetables'), (snap) => {
       const allEntries: any[] = [];
       const teacherName = user?.displayName || localStorage.getItem("academiq_faculty_name");
       
@@ -74,7 +88,11 @@ export default function FacultyClassesTab({
       setMyTimetable(allEntries);
     });
 
-    return () => { unsubConfig(); unsubTimetables(); };
+    return () => {
+      unsubConfig();
+      unsubCustomRoles();
+      unsubTimetables();
+    };
   }, [user?.displayName]);
 
   const proxyClassKey1 = `${proxySem}|${proxyBranch}`;
@@ -91,7 +109,7 @@ export default function FacultyClassesTab({
     } else if (classSubjects.length === 0) {
       setProxySubject("");
     }
-  }, [proxySem, proxyBranch, teachingConfig]);
+  }, [proxySem, proxyBranch, teachingConfig, classSubjects, proxySubject]);
 
   const getResolvedClassInfo = (entry: any) => {
     let resolvedBranch = entry.branch;
@@ -130,18 +148,16 @@ export default function FacultyClassesTab({
 
   const handleDirectMarkClick = (slot: any) => {
     const safeBatch = (!slot.batch || slot.batch === "null") ? "All" : slot.batch;
-    // Extract exact division from the resolved info
     let safeDiv = slot.divisionName || "";
     if (!safeDiv) {
-        const resolvedStr = getResolvedClassInfo(slot);
-        if (resolvedStr.includes('(') && resolvedStr.includes(')')) {
-            safeDiv = resolvedStr.split('(')[1].split(')')[0];
-        }
+      const resolvedStr = getResolvedClassInfo(slot);
+      if (resolvedStr.includes('(') && resolvedStr.includes(')')) {
+        safeDiv = resolvedStr.split('(')[1].split(')')[0];
+      }
     }
     
-    // Dispatch custom event to trigger parent tab switch and state passing
     const customEvent = new CustomEvent("directMarkAttendance", {
-        detail: { sem: slot.semester, branch: slot.branch || "General", division: safeDiv, subject: slot.subject, batch: safeBatch }
+      detail: { sem: slot.semester, branch: slot.branch || "General", division: safeDiv, subject: slot.subject, batch: safeBatch }
     });
     window.dispatchEvent(customEvent);
   };
@@ -196,9 +212,9 @@ export default function FacultyClassesTab({
                   <div className="text-right flex flex-col items-end">
                     <p className="text-sm font-bold text-white/90 mb-2">{lecture.startTime} - {lecture.endTime}</p>
                     {scheduleView === "Today" && (
-                        <button onClick={() => handleDirectMarkClick(lecture)} className="px-4 py-1.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-lg font-bold text-xs hover:scale-[1.02] shadow-[0_0_15px_rgba(208,188,255,0.4)]">
-                            Mark
-                        </button>
+                      <button onClick={() => handleDirectMarkClick(lecture)} className="px-4 py-1.5 bg-[#D0BCFF] text-[#2A1B4E] rounded-lg font-bold text-xs hover:scale-[1.02] shadow-[0_0_15px_rgba(208,188,255,0.4)]">
+                        Mark
+                      </button>
                     )}
                     {scheduleView === "Week" && <p className="text-[10px] text-white/40 uppercase mt-0.5">{lecture.dayOfWeek}</p>}
                   </div>
@@ -232,7 +248,7 @@ export default function FacultyClassesTab({
         {/* Global Action Buttons */}
         <div className="pt-4 space-y-4">
           <GlassButton onClick={onEditSubjectsClick} variant="glass" size="lg" className="w-full" icon={<Edit className="w-5 h-5"/>}>
-            Edit Classes & Subjects
+            Edit Classes &amp; Subjects
           </GlassButton>
           
           <GlassButton onClick={() => setShowProxyModal(true)} variant="primary" size="lg" className="w-full" icon={<Zap className="w-5 h-5"/>}>
@@ -247,7 +263,7 @@ export default function FacultyClassesTab({
         </div>
       </div>
 
-      {/* --- PROXY LECTURE MODAL --- */}
+      {/* PROXY LECTURE MODAL */}
       {showProxyModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className={`p-8 rounded-[2rem] border w-full max-w-md ${isDark ? 'bg-[#111] border-white/10' : 'bg-white border-gray-200'} shadow-2xl`}>
@@ -278,11 +294,11 @@ export default function FacultyClassesTab({
             </div>
 
             <GlassButton onClick={() => {
-                const customEvent = new CustomEvent("directMarkAttendance", {
-                    detail: { sem: proxySem, branch: proxyBranch, division: "", subject: proxySubject, batch: proxyBatch, isProxy: true }
-                });
-                window.dispatchEvent(customEvent);
-                setShowProxyModal(false);
+              const customEvent = new CustomEvent("directMarkAttendance", {
+                detail: { sem: proxySem, branch: proxyBranch, division: "", subject: proxySubject, batch: proxyBatch, isProxy: true }
+              });
+              window.dispatchEvent(customEvent);
+              setShowProxyModal(false);
             }} variant="primary" size="lg" className="w-full">
               Load Student Roster
             </GlassButton>
@@ -290,7 +306,7 @@ export default function FacultyClassesTab({
         </div>
       )}
 
-      {/* --- PUBLISH TIMETABLE MODAL --- */}
+      {/* PUBLISH TIMETABLE MODAL */}
       {showPublishModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className={`p-6 rounded-[2rem] w-full max-w-sm flex flex-col ${isDark ? 'bg-[#121212] border border-white/10' : 'bg-white border-gray-200'} shadow-2xl`}>

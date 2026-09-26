@@ -1,14 +1,14 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { getDoc, getDocs } from 'firebase/firestore';
+import { tenantCol, tenantDoc } from '@/lib/firebase';
 import { Loader2 } from 'lucide-react';
 
 export default function StudentTimetableTab({ semester, branch, isDark }: { semester: string, branch: string, isDark: boolean }) {
   const [timetableEntries, setTimetableEntries] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  
+ 
   const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   const todayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
   const [selectedDay, setSelectedDay] = useState(daysOfWeek.includes(todayName) ? todayName : "Monday");
@@ -18,11 +18,29 @@ export default function StudentTimetableTab({ semester, branch, isDark }: { seme
       if (!semester || !branch) return;
       try {
         const classKey = `${semester}_${branch}`.replace(/\s+/g, '');
-        const docRef = doc(db, "class_timetables", classKey);
+        const docRef = tenantDoc("class_timetables", classKey);
         const docSnap = await getDoc(docRef);
-        
+       
         if (docSnap.exists() && docSnap.data().entries) {
           setTimetableEntries(docSnap.data().entries);
+        } else {
+          // Fallback: check class_timetables collection for matching semester & branch entries
+          const allSnap = await getDocs(tenantCol("class_timetables"));
+          const matchedEntries: any[] = [];
+          allSnap.docs.forEach(d => {
+            const data = d.data();
+            if (Array.isArray(data.entries)) {
+              data.entries.forEach((entry: any) => {
+                if (
+                  entry.semester === semester &&
+                  (entry.branch === branch || entry.branch === "General" || !entry.branch)
+                ) {
+                  matchedEntries.push(entry);
+                }
+              });
+            }
+          });
+          setTimetableEntries(matchedEntries);
         }
       } catch (error) {
         console.error("Error fetching timetable:", error);
@@ -68,8 +86,8 @@ export default function StudentTimetableTab({ semester, branch, isDark }: { seme
             key={day}
             onClick={() => setSelectedDay(day)}
             className={`px-5 py-2.5 rounded-full text-sm font-bold transition-all whitespace-nowrap ${
-              selectedDay === day 
-                ? 'bg-[#4F378B] text-white shadow-[0_0_15px_rgba(79,55,139,0.4)]' 
+              selectedDay === day
+                ? 'bg-[#4F378B] text-white shadow-[0_0_15px_rgba(79,55,139,0.4)]'
                 : (isDark ? 'bg-white/[0.05] text-white/70 hover:bg-white/[0.1]' : 'bg-black/5 text-neutral-600 hover:bg-black/10')
             }`}
           >
@@ -91,9 +109,9 @@ export default function StudentTimetableTab({ semester, branch, isDark }: { seme
       ) : (
         <div className="flex flex-col space-y-4">
           {dayLectures.map((entry, idx) => (
-            <div 
+            <div
               // React Duplicate Key Fix
-              key={entry.id ? `${entry.id}-${idx}` : idx} 
+              key={entry.id ? `${entry.id}-${idx}` : idx}
               className={`w-full p-5 rounded-2xl border flex items-center justify-between transition-all ${cardBg}`}
             >
               <div className="flex flex-col">

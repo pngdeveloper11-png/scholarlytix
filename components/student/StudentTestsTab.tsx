@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { onSnapshot } from 'firebase/firestore';
+import { tenantCol } from '@/lib/firebase';
 import { AlertTriangle, Loader2 } from 'lucide-react';
 
 export default function StudentTestsTab({ studentId, semester, branch, isDark }: { studentId: string, semester: string, branch: string, isDark: boolean }) {
@@ -10,21 +10,33 @@ export default function StudentTestsTab({ studentId, semester, branch, isDark }:
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "test_marks"), (snap) => {
+    const unsub = onSnapshot(tenantCol("test_marks"), (snap) => {
       const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      // FIX: Added (d: any) to satisfy TypeScript
-      const relevant = docs.filter((d: any) => d.id.startsWith(`${semester}_${branch}`.replace(/\s+/g, '')) && d.isPublished === true);
+      const cleanSemBranchPrefix = `${semester}_${branch}`.replace(/\s+/g, '');
+      const cleanSemPrefix = `${semester}_`.replace(/\s+/g, '');
+
+      const relevant = docs.filter((d: any) => {
+        if (d.isPublished !== true) return false;
+        const hasStudentEntry = d.marks && d.marks[studentId];
+        const matchesSemField = d.semester === semester;
+        const matchesIdPrefix = d.id.startsWith(cleanSemBranchPrefix) || (d.id.startsWith(cleanSemPrefix) && hasStudentEntry);
+        return matchesIdPrefix || (matchesSemField && hasStudentEntry);
+      });
+
       setMarksData(relevant);
       setIsLoading(false);
     });
     return () => unsub();
-  }, [semester, branch]);
+  }, [studentId, semester, branch]);
 
   const textColor = isDark ? 'text-white' : 'text-neutral-900';
   const cardBg = isDark ? 'bg-white/[0.05] border-white/10' : 'bg-white border-black/10 shadow-sm';
 
   const studentScores = marksData.map(testDoc => {
-     const subject = testDoc.id.replace(`${semester}_${branch}_`.replace(/\s+/g, ''), '');
+     const fallbackSubject = testDoc.id
+       .replace(`${semester}_${branch}_`.replace(/\s+/g, ''), '')
+       .replace(new RegExp(`^${semester.replace(/\s+/g, '')}_[^_]+_`), '');
+     const subject = testDoc.subject || fallbackSubject;
      const allMarks = testDoc.marks || {};
      const myMarks = allMarks[studentId] || {};
      const iat1 = parseInt(myMarks["IAT 1"]) || 0;
@@ -37,7 +49,7 @@ export default function StudentTestsTab({ studentId, semester, branch, isDark }:
   return (
     <div className="w-full flex flex-col pb-10">
       <h2 className={`text-xl font-bold mb-6 ${isDark ? 'text-[#D0BCFF]' : 'text-[#4F378B]'}`}>Internal Assessment Scores</h2>
-      
+     
       {isLoading ? (
         <div className="py-20 flex justify-center"><Loader2 className={`w-8 h-8 animate-spin ${isDark ? 'text-[#D0BCFF]' : 'text-[#4F378B]'}`} /></div>
       ) : studentScores.length === 0 ? (

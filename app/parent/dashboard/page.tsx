@@ -2,21 +2,30 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { collection, query, where, onSnapshot, doc, getDoc, updateDoc, addDoc } from 'firebase/firestore';
+import { query, where, onSnapshot, updateDoc, addDoc } from 'firebase/firestore';
 import { signOut, onAuthStateChanged } from 'firebase/auth';
-import { auth, db } from '@/lib/firebase';
+import {
+  auth,
+  tenantCol,
+  tenantDoc,
+  tenantTopic,
+  getActiveCollegeName
+} from '@/lib/firebase';
 import { motion } from 'framer-motion';
 import { Settings, LogOut, ChevronLeft, User, Loader2, Link2Off, Plus, Clock, FileText, XCircle } from 'lucide-react';
 import DynamicHueBackground from '@/components/DynamicHueBackground';
 import CursorGlow from '@/components/CursorGlow';
+import InAppMediaViewer from '@/components/ui/InAppMediaViewer';
 
 const TABS = ["Attendance", "Timetable", "Notice Board", "Tests", "Gate Pass", "Leave"];
+const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const LEAVE_TYPES = ["Medical Leave", "Casual Leave", "Duty Leave", "Family Event", "Emergency"];
 
 export default function ParentDashboard() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("Attendance");
+  const [collegeName, setCollegeName] = useState("MIT Mumbai");
   
   // Data States
   const [parentEmail, setParentEmail] = useState("");
@@ -31,8 +40,12 @@ export default function ParentDashboard() {
   const [showSettings, setShowSettings] = useState(false);
   const [theme, setTheme] = useState("indigo");
 
-  // THE FIX: Smart Routing from Web Push Notifications
+  const currentDayStr = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+  const [activeDay, setActiveDay] = useState(DAYS.includes(currentDayStr) ? currentDayStr : "Monday");
+
+  // Smart Routing from Web Push Notifications
   useEffect(() => {
+    setCollegeName(getActiveCollegeName());
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
@@ -47,21 +60,24 @@ export default function ParentDashboard() {
     const savedTheme = localStorage.getItem("academiq_theme");
     if (savedTheme) setTheme(savedTheme);
 
+    let unsubStudent: (() => void) | null = null;
+
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       if (!user) {
-        router.replace('/parent/login');
+        router.replace('/parent/linking');
         return;
       }
       setParentEmail(user.email || "");
 
       const sessionStr = localStorage.getItem("academiq_student_session");
       if (!sessionStr) {
-        router.replace('/parent/login');
+        router.replace('/parent/linking');
         return;
       }
       const session = JSON.parse(sessionStr);
 
-      onSnapshot(doc(db, "students_directory", session.studentId), (snap) => {
+      if (unsubStudent) unsubStudent();
+      unsubStudent = onSnapshot(tenantDoc("students_directory", session.studentId), (snap) => {
         const data = snap.data();
         // Check array or legacy string for parent email
         const parentEmailsArray = data?.linkedParentEmails || [];
@@ -71,14 +87,17 @@ export default function ParentDashboard() {
         if (!snap.exists() || (!parentEmailsArray.includes(currentEmail) && legacyEmail !== currentEmail)) {
           signOut(auth);
           localStorage.removeItem("academiq_student_session");
-          router.replace('/parent/login');
+          router.replace('/parent/linking');
           return;
         }
         setStudentProfile({ id: snap.id, ...(data as any) });
       });
     });
 
-    return () => unsubscribeAuth();
+    return () => {
+      if (unsubStudent) unsubStudent();
+      unsubscribeAuth();
+    };
   }, [router]);
 
   useEffect(() => {
@@ -86,7 +105,7 @@ export default function ParentDashboard() {
 
     const classRef = `${studentProfile.semester}_${studentProfile.division}`.replace(/\s+/g, '').replace(/&/g, 'and');
     
-    const unsubAtt = onSnapshot(collection(db, "attendance_history"), (snap) => {
+    const unsubAtt = onSnapshot(tenantCol("attendance_history"), (snap) => {
       setAttendanceHistory(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter((r: any) => 
         (r.branchName === studentProfile.branch || r.branch === studentProfile.branch) && 
         r.semester === studentProfile.semester && 
@@ -94,20 +113,34 @@ export default function ParentDashboard() {
       ));
     });
 
-    const unsubTime = onSnapshot(doc(db, "class_timetables", classRef), (snap) => {
+    const unsubTime = onSnapshot(tenantDoc("class_timetables", classRef), (snap) => {
       if (snap.exists() && snap.data().entries) setTimetable(snap.data().entries);
       else setTimetable([]);
     });
 
-    const unsubNotices = onSnapshot(collection(db, "announcements"), (snap) => {
-      setNotices(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter((n: any) => n.targetAudience === "All Students" || n.targetAudience === studentProfile.branch).sort((a: any, b: any) => b.timestamp - a.timestamp));
+    const unsubNotices = onSnapshot(tenantCol("announcements"), (snap) => {
+      const branch = studentProfile.branch || "";
+      const sem = studentProfile.semester || "";
+      const filtered = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter((n: any) => {
+        const target = (n.targetAudience || n.targetRole || n.targetBranch || "").toString().toLowerCase().trim();
+        if (!target || target === "all" || target === "all students" || target === "everyone" || target === "general") return true;
+        if (branch && target.includes(branch.toLowerCase())) return true;
+        if (sem && target.includes(sem.toLowerCase())) return true;
+        return false;
+      });
+      filtered.sort((a: any, b: any) => {
+        const timeA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp || a.createdAt || 0);
+        const timeB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp || b.createdAt || 0);
+        return timeB - timeA;
+      });
+      setNotices(filtered);
     });
 
-    const unsubPass = onSnapshot(query(collection(db, "gate_passes"), where("studentId", "==", studentProfile.id)), (snap) => {
-      setGatePasses(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).sort((a: any, b: any) => b.issuedAt - a.issuedAt));
+    const unsubPass = onSnapshot(query(tenantCol("gate_passes"), where("studentId", "==", studentProfile.id)), (snap) => {
+      setGatePasses(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).sort((a: any, b: any) => (b.issuedAt || 0) - (a.issuedAt || 0)));
     });
 
-    const unsubMarks = onSnapshot(collection(db, "test_marks"), (snap) => {
+    const unsubMarks = onSnapshot(tenantCol("test_marks"), (snap) => {
       const targetSem = (studentProfile.semester || "").toLowerCase().replace(/\s+/g, '');
       const targetDiv = (studentProfile.division || "").toLowerCase().replace(/\s+/g, '');
       
@@ -118,24 +151,32 @@ export default function ParentDashboard() {
       }));
     });
 
-    const unsubLeaves = onSnapshot(collection(db, "leave_applications"), (snap) => {
+    const unsubLeaves = onSnapshot(tenantCol("leave_applications"), (snap) => {
       setLeaveApplications(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter((l: any) => l.studentId === studentProfile.id || l.rollNo === studentProfile.rollNo).sort((a, b) => (b.appliedAt || 0) - (a.appliedAt || 0)));
     });
 
     setLoading(false);
 
     return () => { unsubAtt(); unsubTime(); unsubNotices(); unsubPass(); unsubMarks(); unsubLeaves(); };
-  }, [studentProfile?.id, studentProfile?.branch, studentProfile?.semester, studentProfile?.division]);
+  }, [studentProfile?.id, studentProfile?.branch, studentProfile?.semester, studentProfile?.division, studentProfile?.rollNo]);
 
   const handleDisconnect = async () => {
     if (confirm("Disconnect from this student? You will need to link them again later.")) {
-      // Remove from array or legacy field
-      const parentEmailsArray = studentProfile.linkedParentEmails || [];
-      const updatedArray = parentEmailsArray.filter((e: string) => e !== parentEmail);
-      await updateDoc(doc(db, "students_directory", studentProfile.id), { linkedParentEmails: updatedArray, linkedParentEmail: null });
+      const cleanEmail = parentEmail.toLowerCase().trim();
+      const parentEmailsArray: string[] = Array.isArray(studentProfile.linkedParentEmails)
+        ? studentProfile.linkedParentEmails
+        : studentProfile.linkedParentEmail
+        ? [studentProfile.linkedParentEmail]
+        : [];
+      const updatedArray = parentEmailsArray.filter((e: string) => e.toLowerCase().trim() !== cleanEmail);
+
+      await updateDoc(tenantDoc("students_directory", studentProfile.id), {
+        linkedParentEmails: updatedArray,
+        linkedParentEmail: updatedArray[0] || null
+      });
       
       localStorage.removeItem("academiq_student_session");
-      router.replace('/parent/login');
+      router.replace('/parent/linking');
     }
   };
 
@@ -155,6 +196,7 @@ export default function ParentDashboard() {
     }
   });
   const overallPct = totalConducted > 0 ? ((totalAttended / totalConducted) * 100).toFixed(1) : "100.0";
+  const dayClasses = timetable.filter((t: any) => t.dayOfWeek?.toLowerCase() === activeDay.toLowerCase() && (t.batch === 'All' || t.batch === studentProfile.batch || !t.batch));
 
   return (
     <main className={`relative min-h-screen w-full flex flex-col overflow-x-hidden [&::-webkit-scrollbar]:hidden ${bgMain}`}>
@@ -194,7 +236,7 @@ export default function ParentDashboard() {
               {studentProfile.photoUrl ? <img src={studentProfile.photoUrl} alt="Profile" className="w-full h-full object-cover" /> : <User className="w-6 h-6 text-white/50" />}
             </div>
             <div>
-              <p className="text-sm text-white/70">Monitoring:</p>
+              <p className="text-xs text-white/70">{collegeName} • Monitoring:</p>
               <h1 className="text-xl font-bold tracking-tight uppercase leading-tight">{studentProfile.fullName}</h1>
               <p className="text-xs text-[#D0BCFF] mt-0.5">{studentProfile.semester} • {studentProfile.branch} ({studentProfile.division})</p>
             </div>
@@ -240,17 +282,36 @@ export default function ParentDashboard() {
           )}
 
           {activeTab === "Timetable" && (
-            <p className="text-center py-20 opacity-50">Timetable monitoring active.</p>
+            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <div className="flex gap-2 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden">
+                {DAYS.map(day => (
+                  <button key={day} onClick={() => setActiveDay(day)} className={`px-5 py-2.5 rounded-full text-sm font-bold whitespace-nowrap transition-all ${activeDay === day ? 'bg-[#D0BCFF] text-[#2A1B4E]' : 'border border-white/20 bg-white/5 text-white/70 hover:bg-white/10'}`}>{day}</button>
+                ))}
+              </div>
+              <div className="space-y-3">
+                {dayClasses.length === 0 ? <p className="text-center py-10 opacity-50">No classes scheduled for {activeDay}.</p> : (
+                  dayClasses.map((cls: any, i: number) => (
+                    <div key={i} className={`p-5 rounded-2xl border flex items-center justify-between ${cardBg}`}>
+                      <div className="flex flex-col"><h4 className="font-bold text-[16px] mb-1">{cls.subject}</h4><p className="text-xs opacity-70 flex items-center"><Clock className="w-3 h-3 mr-1" /> {cls.startTime} - {cls.endTime}</p></div>
+                      <div className="px-3 py-1.5 rounded-lg bg-white/10 border border-white/10 text-xs font-bold">{studentProfile.division || cls.branch}</div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
           )}
 
           {activeTab === "Notice Board" && (
-             notices.map((n: any) => (
-              <div key={n.id} className={`p-5 rounded-2xl border ${cardBg}`}>
-                <h3 className="font-bold text-lg mb-1">{n.title}</h3>
-                <p className="text-xs opacity-60 mb-3">{new Date(n.timestamp).toLocaleString()}</p>
-                <p className="text-sm opacity-80">{n.message}</p>
-              </div>
-            ))
+             notices.map((n: any) => {
+               const timestampMs = n.timestamp?.seconds ? n.timestamp.seconds * 1000 : (n.timestamp || n.createdAt || Date.now());
+               return (
+                 <div key={n.id} className={`p-5 rounded-2xl border ${cardBg}`}>
+                   <h3 className="font-bold text-lg mb-1">{n.title}</h3>
+                   <p className="text-xs opacity-60 mb-3">{new Date(timestampMs).toLocaleString()}</p>
+                   <p className="text-sm opacity-80 whitespace-pre-line">{n.message}</p>
+                 </div>
+               );
+             })
           )}
 
           {activeTab === "Tests" && (
@@ -277,20 +338,20 @@ export default function ParentDashboard() {
 
           {activeTab === "Gate Pass" && (
              gatePasses.map((p: any) => (
-              <div key={p.id} className={`p-5 rounded-2xl border ${cardBg}`}>
+               <div key={p.id} className={`p-5 rounded-2xl border ${cardBg}`}>
                  <div className="flex justify-between items-start mb-4">
-                   <div><h3 className="font-bold text-lg">{p.reason}</h3><p className="text-xs opacity-60 mt-1">Issued by {p.issuedBy}</p></div>
+                   <div><h3 className="font-bold text-lg">{p.reason}</h3><p className="text-xs opacity-60 mt-1">Issued by {p.issuedByName || p.issuedBy}</p></div>
                    <span className={`px-2.5 py-1 text-[10px] font-black uppercase rounded-md border ${p.status === 'ACTIVE' ? 'bg-green-500/20 text-green-400 border-green-500/30' : p.status === 'USED' ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'}`}>{p.status}</span>
                  </div>
                  <div className="bg-black/20 p-5 rounded-xl border border-white/5 flex flex-col items-center justify-center">
                    <div className="bg-white p-2 rounded-xl mb-3 shadow-lg">
-                     <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${p.passId}&bgcolor=ffffff`} alt="Gate Pass QR" className="w-28 h-28 mix-blend-multiply" />
+                     <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(p.passId || p.id)}&bgcolor=ffffff`} alt="Gate Pass QR" className="w-28 h-28 mix-blend-multiply" />
                    </div>
                    <p className="text-[10px] opacity-50 uppercase font-bold mb-1">Pass ID</p>
-                   <p className="font-mono text-sm font-bold tracking-widest">{p.passId}</p>
+                   <p className="font-mono text-sm font-bold tracking-widest">{p.passId || p.id}</p>
                  </div>
-              </div>
-            ))
+               </div>
+             ))
           )}
 
           {activeTab === "Leave" && <LeaveView student={studentProfile} leaves={leaveApplications} cardBg={cardBg} isParent={true} parentEmail={parentEmail} />}
@@ -301,8 +362,7 @@ export default function ParentDashboard() {
   );
 }
 
-// --- THE FIX: UPGRADED LEAVE VIEW WITH R2 MEDICAL CERTIFICATE UPLOADS ---
-// Please also copy-paste this identical function into your student/dashboard/page.tsx file at the bottom!
+// --- UPGRADED LEAVE VIEW WITH R2 MEDICAL CERTIFICATE UPLOADS ---
 function LeaveView({ student, leaves, cardBg, isParent = false, parentEmail = "" }: any) {
   const [showModal, setShowModal] = useState(false);
   const [leaveType, setLeaveType] = useState(LEAVE_TYPES[0]);
@@ -311,6 +371,10 @@ function LeaveView({ student, leaves, cardBg, isParent = false, parentEmail = ""
   const [reason, setReason] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const [viewMediaUrl, setViewMediaUrl] = useState("");
+  const [viewMediaName, setViewMediaName] = useState("");
+  const [showMediaViewer, setShowMediaViewer] = useState(false);
 
   const handleApply = async () => {
     if (!startDate || !endDate || !reason.trim()) return alert("Please specify dates and a detailed reason.");
@@ -343,7 +407,7 @@ function LeaveView({ student, leaves, cardBg, isParent = false, parentEmail = ""
         finalFileName = selectedFile.name;
       }
 
-      await addDoc(collection(db, "leave_applications"), {
+      await addDoc(tenantCol("leave_applications"), {
         studentId: student.id, studentName: student.fullName, rollNo: student.rollNo, branch: student.branch, semester: student.semester, division: student.division,
         leaveType, startDate: new Date(startDate).getTime(), endDate: new Date(endDate).getTime(), reason: reason.trim(), status: "PENDING", mentorApproval: "PENDING", hodApproval: "PENDING", appliedAt: Date.now(),
         appliedByRole: isParent ? "Parent" : "Student",
@@ -352,12 +416,12 @@ function LeaveView({ student, leaves, cardBg, isParent = false, parentEmail = ""
         attachmentName: finalFileName
       });
 
-      // Fire Push Notification to HOD
+      // Fire Multi-Tenant Push Notification to HOD
       await fetch('/api/send-fcm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          targetTopic: `hod_${student.branch.replace(/[ ()]/g, "_")}`,
+          targetTopic: tenantTopic(`hod_${student.branch.replace(/[ ()]/g, "_")}`),
           title: "New Leave Request 📝",
           message: `${student.fullName} (${student.semester}) applied for leave.`,
           channelId: "academic_alerts",
@@ -392,9 +456,12 @@ function LeaveView({ student, leaves, cardBg, isParent = false, parentEmail = ""
             <p className="text-sm opacity-80 mt-3 bg-black/20 p-3 rounded-xl border border-white/5">{l.reason}</p>
             
             {l.attachmentUrl && (
-               <a href={l.attachmentUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 px-4 py-3 mt-3 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-xl hover:bg-blue-500/20 w-fit font-bold text-sm">
+               <div
+                 onClick={() => { setViewMediaUrl(l.attachmentUrl); setViewMediaName(l.attachmentName || "Medical Certificate"); setShowMediaViewer(true); }}
+                 className="flex items-center cursor-pointer gap-2 px-4 py-3 mt-3 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-xl hover:bg-blue-500/20 w-fit font-bold text-sm"
+               >
                  <FileText className="w-4 h-4"/> View Attached Certificate
-               </a>
+               </div>
             )}
 
             {l.hodRemarks && <p className="text-xs text-red-400 mt-3 font-bold bg-red-500/10 p-3 rounded-xl">HOD Remarks: {l.hodRemarks}</p>}
@@ -408,9 +475,12 @@ function LeaveView({ student, leaves, cardBg, isParent = false, parentEmail = ""
       {showModal && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
           <div className="bg-[#161616] border border-white/10 p-6 rounded-[2rem] max-w-md w-full text-white shadow-2xl overflow-y-auto max-h-[90vh]">
-            <h3 className="text-xl font-bold mb-4">Submit Leave Request</h3>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold">Submit Leave Request</h3>
+              <button onClick={() => !submitting && setShowModal(false)} className="text-white/50 hover:text-red-500 transition-colors"><XCircle className="w-6 h-6"/></button>
+            </div>
             <div className="space-y-4">
-              <div><label className="text-xs font-bold opacity-60 mb-1 block">Category</label><select value={leaveType} onChange={e => setLeaveType(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none text-white">{LEAVE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+              <div><label className="text-xs font-bold opacity-60 mb-1 block">Category</label><select value={leaveType} onChange={e => setLeaveType(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none text-white">{LEAVE_TYPES.map(t => <option key={t} value={t} className="bg-[#111]">{t}</option>)}</select></div>
               <div className="flex gap-3"><div className="flex-1"><label className="text-xs font-bold opacity-60 mb-1 block">From</label><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none text-white" /></div><div className="flex-1"><label className="text-xs font-bold opacity-60 mb-1 block">To</label><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none text-white" /></div></div>
               <div><label className="text-xs font-bold opacity-60 mb-1 block">Reason for absence</label><textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none resize-none text-white" /></div>
               
@@ -426,6 +496,10 @@ function LeaveView({ student, leaves, cardBg, isParent = false, parentEmail = ""
             </div>
           </div>
         </div>
+      )}
+
+      {showMediaViewer && viewMediaUrl && (
+        <InAppMediaViewer url={viewMediaUrl} fileName={viewMediaName} isDynamicHue={true} onClose={() => { setShowMediaViewer(false); setViewMediaUrl(""); }} />
       )}
     </div>
   );

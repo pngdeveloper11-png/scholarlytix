@@ -1,20 +1,18 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import { onSnapshot, updateDoc, deleteDoc } from 'firebase/firestore';
+import { tenantCol, tenantDoc, getActiveCollegeName } from '@/lib/firebase';
 import { Bug, X, CheckCircle, Clock, Trash2, ShieldAlert, Download, Maximize, PlayCircle } from 'lucide-react';
-import InAppMediaViewer from '../ui/InAppMediaViewer'; // <-- THE FIX: Import the Native Viewer
+import InAppMediaViewer from '../ui/InAppMediaViewer';
 
 export default function BugCenterPanel({ isDark, onClose }: { isDark: boolean, onClose: () => void }) {
   const [reports, setReports] = useState<any[]>([]);
   const [selectedFilter, setSelectedFilter] = useState("All");
-  
-  // THE FIX: Upgraded State for the In-App Media Viewer
   const [viewMedia, setViewMedia] = useState<{url: string, name: string} | null>(null);
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "user_reports"), (snap) => {
+    const unsub = onSnapshot(tenantCol("user_reports"), (snap) => {
       const data = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).sort((a: any, b: any) => {
         const timeA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp || 0);
         const timeB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp || 0);
@@ -26,12 +24,12 @@ export default function BugCenterPanel({ isDark, onClose }: { isDark: boolean, o
   }, []);
 
   const updateStatus = async (id: string, newStatus: string) => {
-    await updateDoc(doc(db, "user_reports", id), { status: newStatus });
+    await updateDoc(tenantDoc("user_reports", id), { status: newStatus });
   };
 
   const deleteReport = async (id: string) => {
     if (confirm("Delete this report permanently?")) {
-      await deleteDoc(doc(db, "user_reports", id));
+      await deleteDoc(tenantDoc("user_reports", id));
     }
   };
 
@@ -52,8 +50,8 @@ export default function BugCenterPanel({ isDark, onClose }: { isDark: boolean, o
                 <Bug className="w-6 h-6 text-blue-400" />
               </div>
               <div>
-                <h2 className="text-2xl font-bold">Bug Center & Reports</h2>
-                <p className="text-sm opacity-60">Manage user grievances, bug reports, and system issues.</p>
+                <h2 className="text-2xl font-bold">Bug Center &amp; Reports</h2>
+                <p className="text-sm opacity-60">{getActiveCollegeName()} • Manage user bug reports and system issues.</p>
               </div>
             </div>
             <button onClick={onClose} className="p-3 bg-white/5 hover:bg-red-500/20 hover:text-red-400 rounded-xl transition-colors">
@@ -73,7 +71,7 @@ export default function BugCenterPanel({ isDark, onClose }: { isDark: boolean, o
                 >
                   {filter} ({count})
                 </button>
-              )
+              );
             })}
           </div>
 
@@ -123,7 +121,6 @@ export default function BugCenterPanel({ isDark, onClose }: { isDark: boolean, o
                       <h3 className="text-xl font-bold mb-2 text-white">{reportTitle}</h3>
                       <p className="text-sm opacity-80 whitespace-pre-line bg-black/20 p-4 rounded-xl border border-white/5 text-white/90">{reportDesc}</p>
                       
-                      {/* --- THE FIX: Hooked up to the InAppMediaViewer --- */}
                       {attachmentUrl && (
                         <div className="mt-4">
                           {isVid ? (
@@ -189,12 +186,12 @@ export default function BugCenterPanel({ isDark, onClose }: { isDark: boolean, o
         </div>
       </div>
 
-      {/* --- THE FIX: NATIVE IN-APP MEDIA VIEWER --- */}
+      {/* NATIVE IN-APP MEDIA VIEWER */}
       {viewMedia && (
         <InAppMediaViewer 
           url={viewMedia.url} 
           fileName={viewMedia.name} 
-          isDynamicHue={isDark} // Passing dark mode preference
+          isDynamicHue={isDark}
           onClose={() => setViewMedia(null)} 
         />
       )}

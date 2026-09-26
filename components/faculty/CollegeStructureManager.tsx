@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { DivisionDef, BatchDef } from '@/types';
+import { onSnapshot, setDoc } from 'firebase/firestore';
+import { tenantDoc } from '@/lib/firebase';
+import { DivisionDef } from '@/types';
 import { X, Plus, Trash2, Save, Loader2 } from 'lucide-react';
 
 const STREAMS = ["Engineering", "Management"];
@@ -30,14 +30,14 @@ export default function CollegeStructureManager({ isDark, onClose }: { isDark: b
     if (!currentBranches.includes(selectedBranch)) {
       setSelectedBranch(currentBranches[0] || "");
     }
-  }, [selectedStream, currentBranches]);
+  }, [selectedStream, currentBranches, selectedBranch]);
 
   useEffect(() => {
-    // THE FIX: Accurately fetches the 3-Tier Key matching the Android App
+    // Accurately fetches the 3-Tier Key matching the Android App inside the active tenant vault
     const isFirstYear = isFirstYearSem(selectedSem);
     const classKey = isFirstYear ? selectedSem : `${selectedSem}|${selectedBranch}`;
     
-    const docRef = doc(db, 'app_config', 'college_structure');
+    const docRef = tenantDoc('app_config', 'college_structure');
     const unsubscribe = onSnapshot(docRef, (snap) => {
       if (snap.exists()) {
         const data = snap.data() as any;
@@ -65,7 +65,7 @@ export default function CollegeStructureManager({ isDark, onClose }: { isDark: b
         }))
       }));
 
-      await setDoc(doc(db, 'app_config', 'college_structure'), {
+      await setDoc(tenantDoc('app_config', 'college_structure'), {
         [classKey]: divListForDb
       }, { merge: true });
       

@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, doc, setDoc, onSnapshot } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { setDoc, onSnapshot } from 'firebase/firestore';
+import { tenantCol, tenantDoc, tenantTopic } from '@/lib/firebase';
+import { useAuth } from '@/app/context/AuthContext';
 import { Loader2, Save, FileSpreadsheet, FileUp, ScanSearch, Sparkles } from 'lucide-react';
 import GlassDropdown from '@/components/GlassDropdown';
 import GlassButton from '@/components/ui/GlassButton';
@@ -10,6 +11,7 @@ import GlassButton from '@/components/ui/GlassButton';
 const TEST_TYPES = ["IAT 1", "IAT 2"];
 
 export default function FacultyMarksTab() {
+  const { user } = useAuth();
   const [teachingConfig, setTeachingConfig] = useState<Record<string, string[]>>({});
   const [roster, setRoster] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -26,14 +28,18 @@ export default function FacultyMarksTab() {
 
   useEffect(() => {
     setIsLoading(true);
-    const uid = localStorage.getItem("academiq_faculty_id");
+    const uid = user?.uid || localStorage.getItem("academiq_faculty_id");
     
-    const unsubRoster = onSnapshot(collection(db, "students_directory"), (snap) => {
+    const unsubRoster = onSnapshot(tenantCol("students_directory"), (snap) => {
       setRoster(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
-    if (!uid) return;
-    const unsubConfig = onSnapshot(doc(db, "teacher_configs", uid), (docSnap) => {
+    if (!uid) {
+      setIsLoading(false);
+      return () => unsubRoster();
+    }
+
+    const unsubConfig = onSnapshot(tenantDoc("teacher_configs", uid), (docSnap) => {
       if (docSnap.exists() && docSnap.get("config")) {
         const config = docSnap.get("config");
         setTeachingConfig(config);
@@ -47,7 +53,7 @@ export default function FacultyMarksTab() {
     });
 
     return () => { unsubRoster(); unsubConfig(); };
-  }, []);
+  }, [user?.uid, selectedClass]);
 
   useEffect(() => {
     if (selectedClass && teachingConfig[selectedClass]) {
@@ -62,7 +68,7 @@ export default function FacultyMarksTab() {
     const [semester, branchName] = selectedClass.split("|");
     const docId = `${semester}_${branchName}_${selectedSubject}`.replace(/ & /g, "and").replace(/&/g, "and").replace(/\s+/g, "");
     
-    const unsubMarks = onSnapshot(doc(db, "test_marks", docId), (docSnap) => {
+    const unsubMarks = onSnapshot(tenantDoc("test_marks", docId), (docSnap) => {
       if (docSnap.exists()) {
         setFullMarksMap(docSnap.data().marks || {});
       } else {
@@ -111,12 +117,27 @@ export default function FacultyMarksTab() {
     const docId = `${semester}_${branchName}_${selectedSubject}`.replace(/ & /g, "and").replace(/&/g, "and").replace(/\s+/g, "");
     
     try {
-      await setDoc(doc(db, "test_marks", docId), {
+      await setDoc(tenantDoc("test_marks", docId), {
         marks: fullMarksMap,
         isPublished: true,
         maxMarks: maxMarks,
         publishedAt: Date.now()
       }, { merge: true });
+
+      const targetTopic = tenantTopic(`topic_${(semester || "").replace(/ /g, "_")}`);
+      try {
+        await fetch('/api/send-fcm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            targetTopic,
+            title: "📊 Test Results",
+            message: `${testType} marks for ${selectedSubject} published.`,
+            targetTab: "Tests"
+          })
+        });
+      } catch (err) {}
+
       alert(`Published ${testType} marks! Live on Student Portals instantly.`);
     } catch (e) {
       alert("Failed to publish marks.");
@@ -223,7 +244,7 @@ export default function FacultyMarksTab() {
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-bold text-white tracking-tight">Student Roster</h3>
             <span className="text-xs text-white/70 font-bold px-3 py-1.5 rounded-lg flex items-center bg-white/[0.05] border border-white/10">
-               Type 'AB' for Absent
+               Type &apos;AB&apos; for Absent
             </span>
           </div>
 

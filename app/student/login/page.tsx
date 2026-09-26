@@ -3,16 +3,23 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
-import { collection, query, where, getDocs, doc, setDoc } from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
+import { query, where, getDocs, setDoc } from 'firebase/firestore';
+import {
+  auth,
+  tenantCol,
+  tenantDoc,
+  getActiveCollegeName
+} from '@/lib/firebase';
 import { Loader2, ArrowLeft, User } from 'lucide-react';
 import DynamicHueBackground from '@/components/DynamicHueBackground';
 
 export default function StudentLogin() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
+  const [collegeName, setCollegeName] = useState('MIT Mumbai');
 
   useEffect(() => {
+    setCollegeName(getActiveCollegeName());
     signOut(auth).catch(() => {});
     localStorage.removeItem("academiq_student_session");
   }, []);
@@ -21,22 +28,22 @@ export default function StudentLogin() {
     setIsLoading(true);
     try {
       const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' }); 
-      
+      provider.setCustomParameters({ prompt: 'select_account' });
+
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
 
       if (user.email) {
         const email = user.email.toLowerCase().trim();
-        
+
         try {
-          // Verify against Student Directory
-          const q = query(collection(db, "students_directory"), where("email", "==", email));
+          // Verify against tenant Student Directory
+          const q = query(tenantCol("students_directory"), where("email", "==", email));
           const snap = await getDocs(q);
-          
+
           if (snap.empty) {
             await signOut(auth);
-            alert("Access Denied: Your email is not registered in the Student Directory. Please contact your Class Teacher.");
+            alert(`Access Denied: Your email is not registered in the ${getActiveCollegeName()} Student Directory. Please contact your Class Teacher.`);
             setIsLoading(false);
             return;
           }
@@ -49,16 +56,19 @@ export default function StudentLogin() {
             studentId: studentData.id,
             name: studentData.data().fullName,
             semester: studentData.data().semester,
-            branch: studentData.data().branch
+            branch: studentData.data().branch,
+            rollNo: studentData.data().rollNo
           }));
-          
+
           // Fail-safe write: Update profile photo and last login
           try {
-            await setDoc(doc(db, "students_directory", studentData.id), {
+            await setDoc(tenantDoc("students_directory", studentData.id), {
               photoUrl: user.photoURL,
               lastLogin: Date.now()
             }, { merge: true });
-          } catch (e) { console.warn("Could not update last login", e); }
+          } catch (e) {
+            console.warn("Could not update last login", e);
+          }
 
           router.replace('/student/dashboard');
 
@@ -71,7 +81,7 @@ export default function StudentLogin() {
       }
     } catch (authError: any) {
       if (authError.code !== 'auth/popup-closed-by-user') {
-         alert(`Sign in failed: ${authError.message}`);
+        alert(`Sign in failed: ${authError.message}`);
       }
       await signOut(auth);
       setIsLoading(false);
@@ -81,7 +91,7 @@ export default function StudentLogin() {
   return (
     <main className="relative min-h-screen w-full flex flex-col items-center justify-center p-4 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#1f103b] via-[#0a0a0a] to-black text-white overflow-hidden">
       <div className="absolute inset-0 z-0"><DynamicHueBackground theme="indigo" /></div>
-      
+
       <button onClick={() => router.push('/')} className="absolute top-8 left-8 p-3 rounded-full bg-white/10 hover:bg-white/20 transition backdrop-blur-md z-50">
         <ArrowLeft className="w-6 h-6" />
       </button>
@@ -90,7 +100,11 @@ export default function StudentLogin() {
         <div className="w-20 h-20 bg-[#D0BCFF]/20 border border-[#D0BCFF]/30 rounded-3xl flex items-center justify-center mb-6 shadow-2xl backdrop-blur-xl">
           <User className="w-10 h-10 text-[#D0BCFF]" />
         </div>
-        
+
+        <span className="px-3 py-1 rounded-full bg-white/10 border border-white/15 text-xs font-bold text-[#D0BCFF] mb-3">
+          {collegeName}
+        </span>
+
         <h1 className="text-3xl font-black mb-2 text-center tracking-tight">Welcome Back</h1>
         <p className="text-white/60 text-sm mb-10 text-center">Sign in with your official college Google account to access your portal.</p>
 
@@ -98,6 +112,11 @@ export default function StudentLogin() {
           <button onClick={handleGoogleLogin} disabled={isLoading} className="w-full py-4 bg-white text-black rounded-2xl font-bold flex justify-center items-center hover:scale-[1.02] transition-transform disabled:opacity-50">
             {isLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : "Sign in with Google"}
           </button>
+        </div>
+
+        <div className="mt-12 text-center">
+          <p className="text-xs text-white/40 mb-1">Developed by - Pratosh Gharat</p>
+          <img src="/signature.png" alt="Signature" className="h-10 mx-auto opacity-50 invert brightness-0" />
         </div>
       </div>
     </main>

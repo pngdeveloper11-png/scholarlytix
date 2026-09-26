@@ -2,18 +2,27 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { doc, setDoc, getDocs, getDoc, collection, query, where, deleteDoc, onSnapshot } from 'firebase/firestore';
-import { getAuth, onAuthStateChanged } from 'firebase/auth';
-import { db, auth } from '@/lib/firebase';
+import { setDoc, getDocs, query, where, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
+import {
+  auth,
+  tenantCol,
+  tenantDoc,
+  getActiveCollegeName,
+  isFounderEmail,
+  CustomRoleDef,
+  resolveWebRole,
+  formatWebRoleBadge
+} from '@/lib/firebase';
 import GlassDropdown from '@/components/GlassDropdown';
-import GlassButton from '@/components/ui/GlassButton'; // <-- ADDED THIS IMPORT
+import GlassButton from '@/components/ui/GlassButton';
 import { 
   Settings, Lock, Edit, Download, 
   Smartphone, Fingerprint, CloudUpload, LogOut, 
-  Clock, Zap, Loader2, Check, ChevronLeft, CalendarDays, AlertCircle,
+  Zap, Loader2, Check, ChevronLeft, CalendarDays, AlertCircle,
   ShieldAlert, Bug, KeyRound
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import DynamicHueBackground from '@/components/DynamicHueBackground';
 import CursorGlow from '@/components/CursorGlow';
 
@@ -88,20 +97,26 @@ export default function FacultyDashboard() {
   const [isWeekView, setIsWeekView] = useState(false);
   const [facultyName, setFacultyName] = useState("");
   const [facultyId, setFacultyId] = useState("");
+  const [facultyEmail, setFacultyEmail] = useState("");
+  const [rawRoleScope, setRawRoleScope] = useState("NONE");
+  const [customRolesMap, setCustomRolesMap] = useState<Record<string, CustomRoleDef>>({});
   const [isHod, setIsHod] = useState(false);
+  const [collegeName, setCollegeName] = useState("MIT Mumbai");
+  const [subjectsDict, setSubjectsDict] = useState<Record<string, string[]>>(SUBJECTS_DICT);
   
-// Tab State matches the exact order of the video
+  // Tab State matches the exact order of the video
   const [activeTab, setActiveTab] = useState("Classes");
   const tabs = ["Classes", "Metrics", "Materials", "Notice Board", "History", "Tests", "Gate Pass", "Leaves & Transfers", "Grievances"];
 
-  // THE FIX: Listen for URL parameters so Web Push Notifications land on the exact tab!
+  // Listen for URL parameters so Web Push Notifications land on the exact tab
   useEffect(() => {
+    setCollegeName(getActiveCollegeName());
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
       if (tabParam && tabs.includes(tabParam)) {
         setActiveTab(tabParam);
-        window.history.replaceState({}, '', window.location.pathname); // Cleans the URL after routing
+        window.history.replaceState({}, '', window.location.pathname);
       }
     }
   }, []);
@@ -129,7 +144,7 @@ export default function FacultyDashboard() {
   const [showPinModal, setShowPinModal] = useState(false);
   const [newPin, setNewPin] = useState("");
   
-  // HOD Settings Modals
+  // HOD / PBAC Settings Modals
   const [showSuperAdminPanel, setShowSuperAdminPanel] = useState(false);
   const [showBugCenter, setShowBugCenter] = useState(false);
   const [showGuardPinModal, setShowGuardPinModal] = useState(false);
@@ -146,6 +161,13 @@ export default function FacultyDashboard() {
 
   const showAlert = (title: string, message: string) => setAlertDialog({ title, message });
   const showConfirm = (title: string, message: string, onConfirm: () => void) => setConfirmDialog({ title, message, onConfirm });
+
+  // Dynamic PBAC Permission Resolution
+  const rolePerms = resolveWebRole(rawRoleScope, customRolesMap, facultyEmail);
+  const roleBadgeText = formatWebRoleBadge(rawRoleScope, customRolesMap, facultyEmail);
+  const canAccessAdminPanel = isHod || rolePerms.canManageAdminPanel || rolePerms.canManageRoster;
+  const canPublishTimetable = isHod || rolePerms.canPublishTimetable;
+  const canManageGatePin = isHod || rolePerms.canManageGatePin;
 
   useEffect(() => {
     const handlePopState = () => {
@@ -203,50 +225,76 @@ export default function FacultyDashboard() {
     setFacultyId(uid);
     if (savedPin) setIsLocked(true);
 
+    // Real-time listener for Custom Roles (PBAC)
+    const unsubCustomRoles = onSnapshot(tenantCol("custom_roles"), (snap) => {
+      const map: Record<string, CustomRoleDef> = {};
+      snap.docs.forEach(d => {
+        map[d.id] = { roleId: d.id, ...(d.data() as any) };
+      });
+      setCustomRolesMap(map);
+    });
+
+    // Real-time listener for dynamic Subject Master
+    const unsubSubjectMaster = onSnapshot(tenantDoc("app_config", "subject_master"), (snap) => {
+      if (snap.exists() && snap.data().subjects) {
+        setSubjectsDict({ ...SUBJECTS_DICT, ...(snap.data().subjects as Record<string, string[]>) });
+      }
+    });
+
+    let unsubRoleDoc: (() => void) | null = null;
+
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       if (user && user.email) {
         const email = user.email.toLowerCase().trim();
+        setFacultyEmail(email);
         
         // Ensure developer email bypasses DB checks
-        if (email === 'pngdeveloper11@gmail.com') {
+        if (isFounderEmail(email)) {
+          setRawRoleScope("SUPER_ADMIN");
           setIsHod(true);
-          return;
         }
 
-        try {
-          const roleDoc = await getDoc(doc(db, "approved_faculty_emails", email));
+        if (unsubRoleDoc) unsubRoleDoc();
+        unsubRoleDoc = onSnapshot(tenantDoc("approved_faculty_emails", email), (roleDoc) => {
+          if (isFounderEmail(email)) {
+            setRawRoleScope("SUPER_ADMIN");
+            setIsHod(true);
+            return;
+          }
           if (roleDoc.exists()) {
-            const role = roleDoc.data().role || "teacher";
-            if (["hod", "principal", "admin", "owner", "developer", "director", "registrar"].includes(role.toLowerCase())) {
+            const data = roleDoc.data();
+            const role = data.roleScope || data.role || "NONE";
+            setRawRoleScope(role);
+
+            if (["hod", "principal", "admin", "owner", "developer", "director", "registrar", "super_admin"].includes(role.toLowerCase())) {
               setIsHod(true);
-            } else if (role.startsWith("HOD|") || role.startsWith("CLASS_TEACHER|")) {
+            } else if (role.startsWith("HOD|") || role.startsWith("CLASS_TEACHER|") || role.startsWith("CUSTOM|")) {
               setIsHod(true);
             } else {
               setIsHod(false);
             }
           }
-        } catch (e) {
-          console.error("Failed to verify user role:", e);
-        }
+        });
       }
     });
 
-    if (!uid) return;
-    
-    const unsubConfig = onSnapshot(doc(db, "teacher_configs", uid), (docSnap) => {
+    const unsubConfig = onSnapshot(tenantDoc("teacher_configs", uid), (docSnap) => {
       if (docSnap.exists() && docSnap.get("config")) setTeachingConfig(docSnap.get("config"));
       else setTeachingConfig({ "Semester 3|IT": ["Database Management System and Application"] });
     });
 
-    const unsubSchedule = onSnapshot(doc(db, "teacher_timetables", uid), (docSnap) => {
+    const unsubSchedule = onSnapshot(tenantDoc("teacher_timetables", uid), (docSnap) => {
       if (docSnap.exists() && docSnap.get("entries")) setFacultySchedule(docSnap.get("entries"));
       else setFacultySchedule([]);
     });
 
     return () => { 
-        unsubscribeAuth();
-        unsubConfig(); 
-        unsubSchedule(); 
+      if (unsubRoleDoc) unsubRoleDoc();
+      unsubCustomRoles();
+      unsubSubjectMaster();
+      unsubscribeAuth();
+      unsubConfig(); 
+      unsubSchedule(); 
     };
   }, [router]);
 
@@ -265,7 +313,7 @@ export default function FacultyDashboard() {
 
   const fetchActiveSessions = async () => {
     if (!facultyId) return;
-    const q = query(collection(db, "active_sessions"), where("userId", "==", facultyId));
+    const q = query(tenantCol("active_sessions"), where("userId", "==", facultyId));
     const querySnapshot = await getDocs(q);
     const sessions = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     setActiveSessions(sessions);
@@ -274,17 +322,17 @@ export default function FacultyDashboard() {
 
   const logoutOtherDevice = async (sessionId: string) => {
     try {
-        await deleteDoc(doc(db, "active_sessions", sessionId));
-        setActiveSessions(prev => prev.filter(s => s.id !== sessionId));
-        showAlert("Success", "Logged out of device securely.");
+      await deleteDoc(tenantDoc("active_sessions", sessionId));
+      setActiveSessions(prev => prev.filter(s => s.id !== sessionId));
+      showAlert("Success", "Logged out of device securely.");
     } catch(e) {
-        console.error(e);
+      console.error(e);
     }
   };
 
   const handleSaveClasses = async () => {
     setIsSavingClasses(true);
-    if (facultyId) { await setDoc(doc(db, "teacher_configs", facultyId), { config: draftConfig }); }
+    if (facultyId) { await setDoc(tenantDoc("teacher_configs", facultyId), { config: draftConfig }); }
     setIsSavingClasses(false);
     setShowEditClasses(false);
   };
@@ -292,7 +340,10 @@ export default function FacultyDashboard() {
   const handleSaveGuardPin = async () => {
     if (guardPin.length !== 6) return showAlert("Invalid Format", "Gate PIN must be exactly 6 digits.");
     try {
-      await setDoc(doc(db, "app_config", "guard_settings"), { accessPin: guardPin }, { merge: true });
+      await Promise.all([
+        setDoc(tenantDoc("app_config", "gate_security"), { pin: guardPin, updatedAt: Date.now() }, { merge: true }),
+        setDoc(tenantDoc("app_config", "guard_settings"), { accessPin: guardPin, pin: guardPin, updatedAt: Date.now() }, { merge: true })
+      ]);
       setShowGuardPinModal(false);
       setGuardPin("");
       showAlert("Success", "Guard Gate PIN updated successfully. Guards can now use this PIN to log in.");
@@ -381,7 +432,10 @@ export default function FacultyDashboard() {
             <button onClick={() => { setShowSettings(false); window.history.back(); }} className={`p-3 border rounded-2xl transition-all backdrop-blur-xl mr-4 ${isDark ? 'bg-white/[0.08] border-white/20 text-white hover:bg-white/[0.15]' : 'bg-black/[0.05] border-black/10 text-black hover:bg-black/[0.1]'}`}>
               <ChevronLeft className="w-6 h-6" />
             </button>
-            <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
+              <p className="text-xs text-[#D0BCFF] font-bold mt-0.5">{collegeName} • {roleBadgeText}</p>
+            </div>
           </div>
 
           <div className={`border rounded-[2rem] overflow-hidden flex flex-col ${cardBg}`}>
@@ -437,12 +491,12 @@ export default function FacultyDashboard() {
               </div>
             </div>
 
-            {/* --- NEW HOD SETTINGS --- */}
-            {isHod && (
+            {/* --- HOD & PBAC SETTINGS --- */}
+            {canAccessAdminPanel && (
               <SettingsRow 
                 icon={<ShieldAlert className="text-green-400" />} 
                 title="Management Control Panel" 
-                subtitle="Add, remove, and manage HODs & Teachers." 
+                subtitle="Add, remove, and manage HODs, Custom Roles & Teachers." 
                 isDark={isDark}
                 onClick={() => { window.history.pushState(null, ""); setShowSuperAdminPanel(true); }} 
               />
@@ -456,7 +510,7 @@ export default function FacultyDashboard() {
               onClick={() => { window.history.pushState(null, ""); setShowBugCenter(true); }} 
             />
 
-            {isHod && (
+            {canManageGatePin && (
               <SettingsRow 
                 icon={<KeyRound className="text-orange-400" />} 
                 title="Manage Gate PIN" 
@@ -536,7 +590,6 @@ export default function FacultyDashboard() {
               <input type="text" maxLength={6} value={guardPin} onChange={(e) => setGuardPin(e.target.value.replace(/\D/g, ''))} className={`w-full text-center text-3xl tracking-[0.5em] border rounded-2xl p-4 outline-none mb-6 ${isDark ? 'bg-white/[0.08] border-white/20 text-white focus:border-[#D0BCFF]' : 'bg-black/5 border-black/10 text-neutral-900 focus:border-[#D0BCFF]'}`} placeholder="••••••" />
               <div className="flex space-x-3">
                 <button onClick={() => setShowGuardPinModal(false)} className={`flex-1 py-3.5 rounded-xl font-bold ${isDark ? 'bg-white/[0.05] border border-white/20' : 'bg-black/5 border border-black/10'}`}>Cancel</button>
-                {/* THE FIX: Replaced the hardcoded orange button with dynamic GlassButton */}
                 <GlassButton onClick={handleSaveGuardPin} variant="primary" className="flex-1">Update PIN</GlassButton>
               </div>
             </div>
@@ -544,21 +597,21 @@ export default function FacultyDashboard() {
         )}
 
         {showDevicesDialog && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
             <div className={`border p-8 rounded-[2rem] w-full max-w-md ${modalBg} max-h-[80vh] overflow-y-auto`}>
               <h3 className="text-xl font-bold mb-6">Active Devices</h3>
               {activeSessions.length === 0 ? <p className="text-center opacity-60">No other active devices found.</p> : (
-                  <div className="space-y-4 mb-6">
-                      {activeSessions.map(session => (
-                          <div key={session.id} className="flex justify-between items-center p-4 bg-white/5 rounded-xl border border-white/10">
-                              <div>
-                                  <p className="font-bold">{session.deviceName || "Unknown Device"}</p>
-                                  <p className="text-xs opacity-60">Logged in via App</p>
-                              </div>
-                              <button onClick={() => logoutOtherDevice(session.id)} className="text-red-400 text-sm font-bold bg-red-500/10 px-3 py-1 rounded-lg">Log Out</button>
-                          </div>
-                      ))}
-                  </div>
+                <div className="space-y-4 mb-6">
+                  {activeSessions.map(session => (
+                    <div key={session.id} className="flex justify-between items-center p-4 bg-white/5 rounded-xl border border-white/10">
+                      <div>
+                        <p className="font-bold">{session.deviceName || "Unknown Device"}</p>
+                        <p className="text-xs opacity-60">Logged in via App</p>
+                      </div>
+                      <button onClick={() => logoutOtherDevice(session.id)} className="text-red-400 text-sm font-bold bg-red-500/10 px-3 py-1 rounded-lg">Log Out</button>
+                    </div>
+                  ))}
+                </div>
               )}
               <button onClick={() => setShowDevicesDialog(false)} className="w-full py-3 bg-white/10 rounded-xl font-bold">Close</button>
             </div>
@@ -611,7 +664,9 @@ export default function FacultyDashboard() {
       <div className="w-full max-w-5xl mx-auto flex-1 flex flex-col p-6 md:p-8 z-10">
         <div className="flex justify-between items-center mb-8 pt-4">
           <div>
-            <p className={`text-sm mb-0.5 ${isDark ? 'text-white/70' : 'text-neutral-600'}`}>Good Morning</p>
+            <p className={`text-xs font-bold mb-1 ${isDark ? 'text-[#D0BCFF]' : 'text-[#4F378B]'}`}>
+              {collegeName} • {roleBadgeText}
+            </p>
             <h1 className="text-[32px] leading-tight font-bold tracking-tight">Faculty Portal</h1>
           </div>
           <button onClick={safeOpenSettings} className={`p-3 border rounded-2xl transition-all backdrop-blur-xl ${isDark ? 'bg-white/[0.08] border-white/20 text-white hover:bg-white/[0.15]' : 'bg-black/[0.05] border-black/10 text-neutral-900 hover:bg-black/[0.1]'}`}>
@@ -705,7 +760,7 @@ export default function FacultyDashboard() {
                 <Zap className="w-5 h-5 mr-3" /> Mark Proxy Lecture
               </button>
               
-              {isHod && (
+              {canPublishTimetable && (
                 <button onClick={() => { window.history.pushState(null,""); setShowTimetableModal(true); }} className="w-full py-4 bg-green-500 text-white rounded-[1.25rem] font-bold text-[16px] flex justify-center items-center hover:bg-green-600 transition-all shadow-[0_0_20px_rgba(34,197,94,0.4)]">
                   <CloudUpload className="w-5 h-5 mr-3" /> Publish Branch Timetables
                 </button>
@@ -743,12 +798,12 @@ export default function FacultyDashboard() {
             <p className="text-sm opacity-70 mb-8">Select your primary subjects.</p>
             
             <div className="flex-1 overflow-y-auto pr-2 space-y-6 mb-8 [&::-webkit-scrollbar]:hidden">
-               {Object.keys(SUBJECTS_DICT).map(combo => {
+               {Object.keys(subjectsDict).map(combo => {
                  const dbKey = combo.replace('_', '|');
                  return (
                    <div key={combo} className={`p-5 rounded-2xl border ${isDark ? 'bg-white/[0.08] border-white/20' : 'bg-black/5 border-black/10'}`}>
                      <h3 className="font-bold mb-4 text-[15px]">{combo.replace('_', ' - ')}</h3>
-                     {SUBJECTS_DICT[combo].map(sub => {
+                     {(subjectsDict[combo] || []).map(sub => {
                        const isSelected = draftConfig[dbKey]?.includes(sub) || false;
                        return (
                          <div key={sub} onClick={() => {
@@ -816,7 +871,7 @@ function ManageTimetableModal({ onDismiss, modalBg, onShowAlert }: { onDismiss: 
       
       const uid = localStorage.getItem("academiq_faculty_id");
       if (uid && data.entries) {
-        await setDoc(doc(db, "teacher_timetables", uid), { entries: data.entries, updatedAt: Date.now() }, { merge: true });
+        await setDoc(tenantDoc("teacher_timetables", uid), { entries: data.entries, updatedAt: Date.now() }, { merge: true });
         onShowAlert("Success!", `Extracted and saved ${data.entries.length} classes to your schedule!`);
         onDismiss();
       }
@@ -866,7 +921,7 @@ function UploadTimetableModal({ onDismiss, modalBg, isDark, onShowAlert }: { onD
       const { downloadUrl } = await uploadRes.json();
       
       const docId = `${upSem}_${upBranch}`.replace(/\s+/g, '');
-      await setDoc(doc(db, "branch_timetables", docId), { semester: upSem, branch: upBranch, timetableUrl: downloadUrl, publishedAt: Date.now() });
+      await setDoc(tenantDoc("branch_timetables", docId), { semester: upSem, branch: upBranch, timetableUrl: downloadUrl, publishedAt: Date.now() });
       
       onShowAlert("Timetable Published", `Timetable for ${upBranch} ${upSem} pushed to student portals and widgets instantly!`);
       onDismiss();

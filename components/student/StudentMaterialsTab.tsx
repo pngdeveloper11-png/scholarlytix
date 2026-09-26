@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { onSnapshot } from 'firebase/firestore';
+import { tenantCol } from '@/lib/firebase';
 import { BookOpen, FileText, ExternalLink } from 'lucide-react';
 import GlassDropdown from '@/components/GlassDropdown';
 
@@ -27,21 +27,28 @@ export default function StudentMaterialsTab({ semester, branch, isDark }: { seme
   const [categoryFilter, setCategoryFilter] = useState("All");
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "study_materials"), (snap) => {
+    const unsub = onSnapshot(tenantCol("study_materials"), (snap) => {
       const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setMaterials(docs.sort((a: any, b: any) => b.timestamp - a.timestamp));
+      setMaterials(docs.sort((a: any, b: any) => {
+        const timeA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp || 0);
+        const timeB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp || 0);
+        return timeB - timeA;
+      }));
     });
     return () => unsub();
   }, []);
 
+  const matchesClass = (m: any) =>
+    m.semester === semester && (m.branch === branch || m.branch === "General" || !m.branch);
+
   const filtered = materials.filter(m => {
-    if (m.semester !== semester || m.branch !== branch) return false;
+    if (!matchesClass(m)) return false;
     if (subjectFilter !== "All Subjects" && m.subject !== subjectFilter) return false;
     if (categoryFilter !== "All" && m.category !== categoryFilter) return false;
     return true;
   });
 
-  const uniqueSubjects = ["All Subjects", ...Array.from(new Set(materials.filter(m => m.semester === semester && m.branch === branch).map(m => m.subject)))];
+  const uniqueSubjects = ["All Subjects", ...Array.from(new Set(materials.filter(matchesClass).map(m => m.subject).filter(Boolean)))];
 
   const textColor = isDark ? 'text-white' : 'text-neutral-900';
   const cardBg = isDark ? 'bg-white/[0.05] border-white/10' : 'bg-black/5 border-black/10 shadow-sm hover:shadow-md';

@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
-import { collection, addDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { addDoc } from 'firebase/firestore';
+import { tenantCol, tenantTopic } from '@/lib/firebase';
 import { AlertTriangle, Upload, X, CheckCircle2, Loader2, Video } from 'lucide-react';
 import InAppMediaViewer from '../ui/InAppMediaViewer';
 
@@ -110,7 +110,7 @@ export default function StudentGrievancesTab({ student, isDynamicHue, cardBg }: 
         finalUrl = downloadUrl;
       }
 
-      // 4. Save to Firestore (Totally Anonymous)
+      // 4. Save to Tenant-Isolated Firestore (Totally Anonymous)
       const grievanceDoc: any = {
         title: title.trim(),
         description: description.trim(),
@@ -122,14 +122,14 @@ export default function StudentGrievancesTab({ student, isDynamicHue, cardBg }: 
         grievanceDoc.evidenceUrl = finalUrl;
       }
 
-      await addDoc(collection(db, "student_grievances"), grievanceDoc);
+      await addDoc(tenantCol("student_grievances"), grievanceDoc);
 
-      // 5. Fire Push Notification to all Teachers
+      // 5. Fire Multi-Tenant Push Notification to all Teachers in this college
       await fetch('/api/send-fcm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          targetTopic: "all_teachers",
+          targetTopic: tenantTopic("all_teachers"),
           title: "🚨 New Anonymous Grievance",
           message: "A new anonymous report has been filed by a student.",
           channelId: "security_alerts",
@@ -168,7 +168,7 @@ export default function StudentGrievancesTab({ student, isDynamicHue, cardBg }: 
       <div className="text-center mb-8">
         <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-4 drop-shadow-[0_0_15px_rgba(239,68,68,0.5)]" />
         <h2 className="text-2xl font-bold text-red-500 mb-2">Anonymous Grievances</h2>
-        <p className="text-sm text-white/70">Report bullying, ragging, or facility issues. Your device, email, and identity are fully stripped before sending. Attachments will have GPS & EXIF metadata wiped automatically.</p>
+        <p className="text-sm text-white/70">Report bullying, ragging, or facility issues. Your device, email, and identity are fully stripped before sending. Attachments will have GPS &amp; EXIF metadata wiped automatically.</p>
       </div>
 
       <div className={`p-6 rounded-[2rem] border ${cardBg} space-y-5`}>
@@ -249,7 +249,7 @@ export default function StudentGrievancesTab({ student, isDynamicHue, cardBg }: 
           {isSubmitting ? (
             <>
               <Loader2 className="w-5 h-5 animate-spin mr-3" /> 
-              Scrubbing Metadata & Sending...
+              Scrubbing Metadata &amp; Sending...
             </>
           ) : "Submit Securely"}
         </button>

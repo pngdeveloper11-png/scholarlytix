@@ -1,8 +1,27 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, runTransaction, writeBatch, deleteDoc } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import {
+  query,
+  where,
+  onSnapshot,
+  doc,
+  setDoc,
+  updateDoc,
+  runTransaction,
+  writeBatch,
+  deleteDoc,
+  getDocs
+} from 'firebase/firestore';
+import {
+  db,
+  tenantCol,
+  tenantDoc,
+  tenantTopic,
+  CustomRoleDef,
+  resolveWebRole,
+  isFounderEmail
+} from '../../lib/firebase';
 import { useAuth } from '../../app/context/AuthContext';
 import { FacultyLeaveApplication, ProxyRequest, TimetableEntry } from '../../types';
 import { FileText, Plus, CheckCircle, XCircle, Clock, ShieldAlert, Loader2, Calendar } from 'lucide-react';
@@ -19,17 +38,32 @@ export default function FacultyLeavesAndTransfersTab({
   userTimetable: TimetableEntry[] 
 }) {
   const { user, role } = useAuth();
+  const [customRolesMap, setCustomRolesMap] = useState<Record<string, CustomRoleDef>>({});
+
+  useEffect(() => {
+    const unsubRoles = onSnapshot(tenantCol("custom_roles"), (snap) => {
+      const roleMap: Record<string, CustomRoleDef> = {};
+      snap.docs.forEach((d) => {
+        roleMap[d.id] = d.data() as CustomRoleDef;
+      });
+      setCustomRolesMap(roleMap);
+    });
+    return () => unsubRoles();
+  }, []);
   
   const currentUid = user?.uid || "";
   const currentEmail = user?.email || "";
   const currentName = user?.displayName || currentEmail.split('@')[0];
 
-  const isDeveloper = currentEmail.toLowerCase() === 'pngdeveloper11@gmail.com';
-  const isHod = role?.startsWith("HOD|") || role === "SUPER_ADMIN" || isDeveloper;
-  const isRegistrar = role === "REGISTRAR" || role === "SUPER_ADMIN" || isDeveloper;
-  const isPrincipal = role === "PRINCIPAL" || role === "SUPER_ADMIN" || isDeveloper;
-  const isDirector = role === "DIRECTOR" || role === "SUPER_ADMIN" || isDeveloper;
-  const isAnyAdmin = isHod || isRegistrar || isPrincipal || isDirector;
+  const isDeveloper = isFounderEmail(currentEmail);
+  const resolvedRole = resolveWebRole(role || "NONE", customRolesMap, currentEmail);
+  const leaveTier = resolvedRole.facultyLeaveTier || 0; // 0=None, 1=Dept, 2=Admin, 3=Exec, 4=All
+
+  const isHod = leaveTier === 1 || leaveTier === 4 || role?.startsWith("HOD|") || role === "SUPER_ADMIN" || isDeveloper;
+  const isRegistrar = leaveTier === 2 || leaveTier === 4 || role === "REGISTRAR" || role === "SUPER_ADMIN" || isDeveloper;
+  const isPrincipal = leaveTier === 3 || leaveTier === 4 || role === "PRINCIPAL" || role === "SUPER_ADMIN" || isDeveloper;
+  const isDirector = leaveTier === 4 || role === "DIRECTOR" || role === "SUPER_ADMIN" || isDeveloper;
+  const isAnyAdmin = leaveTier > 0 || isHod || isRegistrar || isPrincipal || isDirector;
 
   const myBranches = Array.from(new Set(userTimetable.map(t => t.branch)));
 
@@ -63,22 +97,36 @@ export default function FacultyLeavesAndTransfersTab({
   useEffect(() => {
     if (!currentUid) return;
 
-    const unsubMyLeaves = onSnapshot(query(collection(db, "faculty_leaves"), where("facultyUid", "==", currentUid)), (snap) => {
+    const unsubMyLeaves = onSnapshot(query(tenantCol("faculty_leaves"), where("facultyUid", "==", currentUid)), (snap) => {
       setMyLeaves(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as FacultyLeaveApplication)).sort((a, b) => b.appliedAt - a.appliedAt));
     });
 
     let unsubAdmin = () => {};
     if (isAnyAdmin) {
-      const hodBranchesList = (isDeveloper || role === "SUPER_ADMIN" || role === "PRINCIPAL" || role === "REGISTRAR" || role === "DIRECTOR") 
-        ? [] 
-        : role?.replace("HOD|", "").split(",") || [];
+      let hodBranchesList: string[] = [];
+      if (
+        !isDeveloper &&
+        leaveTier !== 4 &&
+        resolvedRole.scopeType !== "COLLEGE" &&
+        role !== "SUPER_ADMIN" &&
+        role !== "PRINCIPAL" &&
+        role !== "REGISTRAR" &&
+        role !== "DIRECTOR"
+      ) {
+        if (role?.startsWith("HOD|")) {
+          hodBranchesList = role.replace("HOD|", "").split(",").filter(Boolean);
+        } else if (role?.startsWith("CUSTOM|")) {
+          const parts = role.split("|");
+          if (parts[2]) hodBranchesList = parts[2].split(",").filter(Boolean);
+        }
+      }
 
-      unsubAdmin = onSnapshot(collection(db, "faculty_leaves"), (snap) => {
+      unsubAdmin = onSnapshot(tenantCol("faculty_leaves"), (snap) => {
         const allLeaves = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as FacultyLeaveApplication));
         
         setPendingLeaves(allLeaves.filter(app => {
           if (app.status !== "PENDING") return false;
-          if (isDirector && (app.principalApproval === "PENDING" || app.registrarApproval === "PENDING")) return true;
+          if (isDirector && (app.principalApproval === "PENDING" || app.registrarApproval === "PENDING" || app.hodApproval === "PENDING")) return true;
           if (isPrincipal && app.principalApproval === "PENDING") return true;
           if (isRegistrar && app.registrarApproval === "PENDING") return true;
           if (isHod && app.hodApproval === "PENDING" && (hodBranchesList.length === 0 || hodBranchesList.some(hb => app.branch.includes(hb)))) return true;
@@ -89,16 +137,17 @@ export default function FacultyLeavesAndTransfersTab({
       });
     }
 
-    const unsubProxies = onSnapshot(collection(db, "proxy_requests"), (snap) => {
+    const unsubProxies = onSnapshot(tenantCol("proxy_requests"), (snap) => {
       const allReqs = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as ProxyRequest));
       setOpenProxies(allReqs.filter(req => myBranches.includes(req.branch) || myBranches.length === 0).sort((a, b) => b.timestamp - a.timestamp));
     });
 
     return () => { unsubMyLeaves(); unsubAdmin(); unsubProxies(); };
-  }, [currentUid, role, isAnyAdmin, isDeveloper, isDirector, isPrincipal, isRegistrar, isHod, myBranches]);
+  }, [currentUid, role, isAnyAdmin, isDeveloper, isDirector, isPrincipal, isRegistrar, isHod, leaveTier, resolvedRole.scopeType, myBranches]);
 
-  const triggerPush = async (topic: string, title: string, message: string, targetTab: string) => {
+  const triggerPush = async (rawTopic: string, title: string, message: string, targetTab: string) => {
     try {
+      const topic = tenantTopic(rawTopic);
       await fetch('/api/send-fcm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -135,7 +184,7 @@ export default function FacultyLeavesAndTransfersTab({
         remarks: ""
       };
 
-      const docRef = doc(collection(db, "faculty_leaves"));
+      const docRef = doc(tenantCol("faculty_leaves"));
       await setDoc(docRef, appData);
 
       const branchesToAlert = affectedBranches ? affectedBranches.split(",") : myBranches;
@@ -157,9 +206,9 @@ export default function FacultyLeavesAndTransfersTab({
     setProcessingId(app.id);
     try {
       const updates: any = {};
-      if (isDirector || isPrincipal) updates.principalApproval = "APPROVED";
-      if (isDirector || isRegistrar) updates.registrarApproval = "APPROVED";
-      if (isDirector || isHod) updates.hodApproval = "APPROVED";
+      if (isDirector || isPrincipal || leaveTier === 3 || leaveTier === 4) updates.principalApproval = "APPROVED";
+      if (isDirector || isRegistrar || leaveTier === 2 || leaveTier === 4) updates.registrarApproval = "APPROVED";
+      if (isDirector || isHod || leaveTier === 1 || leaveTier === 4) updates.hodApproval = "APPROVED";
 
       const finalHod = updates.hodApproval || app.hodApproval;
       const finalReg = updates.registrarApproval || app.registrarApproval;
@@ -170,7 +219,7 @@ export default function FacultyLeavesAndTransfersTab({
 
         const batch = writeBatch(db);
         app.lecturesToTransfer.forEach(lec => {
-          const proxyRef = doc(collection(db, "proxy_requests"));
+          const proxyRef = doc(tenantCol("proxy_requests"));
           const req: Omit<ProxyRequest, 'id'> = {
             requestedByUid: app.facultyUid,
             requestedByName: app.facultyName,
@@ -195,14 +244,14 @@ export default function FacultyLeavesAndTransfersTab({
         }
       }
 
-      await updateDoc(doc(db, "faculty_leaves", app.id), updates);
+      await updateDoc(tenantDoc("faculty_leaves", app.id), updates);
     } catch (e) { alert("Approval failed."); }
     setProcessingId(null);
   };
 
   const handleClaimProxy = async (req: ProxyRequest) => {
     try {
-      const reqRef = doc(db, "proxy_requests", req.id);
+      const reqRef = tenantDoc("proxy_requests", req.id);
       const result = await runTransaction(db, async (transaction) => {
         const snap = await transaction.get(reqRef);
         if (snap.data()?.status === "CLAIMED") return `TAKEN|${snap.data()?.claimedByName}`;
@@ -276,7 +325,7 @@ export default function FacultyLeavesAndTransfersTab({
                     </div>
                     {leave.remarks && <p className="text-xs text-red-500 mt-2 font-bold">Admin Remarks: {leave.remarks}</p>}
                     {leave.status === "PENDING" && (
-                      <button onClick={() => deleteDoc(doc(db, "faculty_leaves", leave.id))} className="text-xs text-red-500 hover:underline mt-4">Withdraw Request</button>
+                      <button onClick={() => deleteDoc(tenantDoc("faculty_leaves", leave.id))} className="text-xs text-red-500 hover:underline mt-4">Withdraw Request</button>
                     )}
                   </div>
                 ))}
@@ -307,7 +356,7 @@ export default function FacultyLeavesAndTransfersTab({
                       <>
                         <GlassButton onClick={async () => {
                           setProcessingId(app.id);
-                          await updateDoc(doc(db, "faculty_leaves", app.id), { status: "REJECTED", remarks: `Rejected by ${currentName}` });
+                          await updateDoc(tenantDoc("faculty_leaves", app.id), { status: "REJECTED", remarks: `Rejected by ${currentName}` });
                           setProcessingId(null);
                         }} variant="danger">Reject</GlassButton>
                         <GlassButton onClick={() => handleApprove(app)} variant="success" className="px-6">Approve</GlassButton>
@@ -480,12 +529,9 @@ function AuditLogCard({ app, cardBg, textStyle, formatDate }: { app: FacultyLeav
 
   useEffect(() => {
     const fetchProxies = async () => {
-      import('firebase/firestore').then(({ getDocs, query, collection, where }) => {
-        const q = query(collection(db, "proxy_requests"), where("requestedByUid", "==", app.facultyUid), where("lectureDate", "==", app.startDate));
-        getDocs(q).then(snap => {
-          setClaimedProxies(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as ProxyRequest)));
-        });
-      });
+      const q = query(tenantCol("proxy_requests"), where("requestedByUid", "==", app.facultyUid), where("lectureDate", "==", app.startDate));
+      const snap = await getDocs(q);
+      setClaimedProxies(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as ProxyRequest)));
     };
     fetchProxies();
   }, [app.facultyUid, app.startDate]);

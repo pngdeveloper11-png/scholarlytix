@@ -1,30 +1,59 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { collection, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import { onSnapshot, setDoc, deleteDoc } from 'firebase/firestore';
+import {
+  tenantCol,
+  tenantDoc,
+  tenantTopic,
+  CustomRoleDef,
+  resolveWebRole,
+  formatWebRoleBadge,
+  isFounderEmail
+} from '../../lib/firebase';
 import { useAuth } from '../../app/context/AuthContext';
 import { Bell, Plus, Trash2, Calendar, Loader2, X, Link as LinkIcon, Paperclip, ExternalLink, UploadCloud, Video } from 'lucide-react';
 import GlassButton from '../ui/GlassButton';
 import GlassDropdown from '../GlassDropdown';
-import InAppMediaViewer from '../ui/InAppMediaViewer'; // <-- THE FIX: Added native media viewer
+import InAppMediaViewer from '../ui/InAppMediaViewer';
 
 const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8"];
 const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
 
 export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: boolean }) {
   const { user, role } = useAuth();
+  const [customRolesMap, setCustomRolesMap] = useState<Record<string, CustomRoleDef>>({});
+
+  useEffect(() => {
+    const unsubRoles = onSnapshot(tenantCol("custom_roles"), (snap) => {
+      const roleMap: Record<string, CustomRoleDef> = {};
+      snap.docs.forEach((d) => {
+        roleMap[d.id] = d.data() as CustomRoleDef;
+      });
+      setCustomRolesMap(roleMap);
+    });
+    return () => unsubRoles();
+  }, []);
   
   const currentEmail = user?.email || "";
-  const isDeveloper = currentEmail.toLowerCase() === 'pngdeveloper11@gmail.com';
-  const isHod = role?.startsWith("HOD|") || role === "SUPER_ADMIN" || role === "DIRECTOR" || role === "PRINCIPAL" || role === "REGISTRAR" || isDeveloper;
+  const isDeveloper = isFounderEmail(currentEmail);
+  const resolvedRole = resolveWebRole(role || "NONE", customRolesMap, currentEmail);
+  const canBroadcast =
+    isDeveloper ||
+    resolvedRole.canBroadcastAll ||
+    resolvedRole.canManageAdminPanel ||
+    role?.startsWith("HOD|") ||
+    role === "SUPER_ADMIN" ||
+    role === "DIRECTOR" ||
+    role === "PRINCIPAL" ||
+    role === "REGISTRAR";
 
   const [notices, setNotices] = useState<any[]>([]);
   const [globalStructure, setGlobalStructure] = useState<any>({});
   const [showNewNoticeDialog, setShowNewNoticeDialog] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
 
-  // THE FIX: Hook state for the Media Viewer
+  // Hook state for the Media Viewer
   const [viewMedia, setViewMedia] = useState<{url: string, name: string} | null>(null);
 
   // Advanced Filtering States
@@ -45,10 +74,10 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
   const modalBg = isDark ? 'bg-[#111] border-white/10' : 'bg-white border-gray-200';
 
   useEffect(() => {
-    const unsubStruct = onSnapshot(doc(db, "app_config", "college_structure"), (snap) => {
+    const unsubStruct = onSnapshot(tenantDoc("app_config", "college_structure"), (snap) => {
       if (snap.exists()) setGlobalStructure(snap.data());
     });
-    const unsub = onSnapshot(collection(db, "announcements"), (snap) => {
+    const unsub = onSnapshot(tenantCol("announcements"), (snap) => {
       const records = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).sort((a: any, b: any) => {
         const timeA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp || 0);
         const timeB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp || 0);
@@ -95,7 +124,9 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
       }
 
       const noticeId = crypto.randomUUID();
-      await setDoc(doc(db, "announcements", noticeId), {
+      const formattedAuthorRole = formatWebRoleBadge(role || "NONE", customRolesMap, currentEmail) || "Management";
+
+      await setDoc(tenantDoc("announcements", noticeId), {
         title, message,
         targetRole,
         targetSemester: targetSem,
@@ -104,30 +135,32 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
         links,
         attachments: uploadedAttachments,
         authorName: user?.displayName || "Admin",
-        authorRole: role?.replace("HOD|", "HOD ") || "Management",
+        authorRole: formattedAuthorRole,
         timestamp: Date.now(),
         authorUid: user?.uid || ""
       });
 
-      // Execute targeted FCM Logic
-      let pushTopic = "all_users";
+      // Execute targeted FCM Logic prefixed with active college tenant topic
+      let rawPushTopic = "all_users";
       if (targetRole === "Teachers") {
-        pushTopic = "all_teachers";
+        rawPushTopic = "all_teachers";
       } else if (targetRole === "Students" || targetRole === "All") {
         if (targetDivision !== "All" && targetSem !== "All") {
-          pushTopic = `topic_${targetSem.replace(/\s+/g, "_")}_${targetDivision.replace(/\s+/g, "_")}`;
+          rawPushTopic = `topic_${targetSem.replace(/\s+/g, "_")}_${targetDivision.replace(/\s+/g, "_")}`;
         } else if (targetBranch !== "All" && targetSem !== "All") {
-          pushTopic = `topic_${targetSem.replace(/\s+/g, "_")}_${targetBranch.replace(/[ ()]/g, "_")}`;
+          rawPushTopic = `topic_${targetSem.replace(/\s+/g, "_")}_${targetBranch.replace(/[ ()]/g, "_")}`;
         } else if (targetSem !== "All") {
-          pushTopic = `topic_${targetSem.replace(/\s+/g, "_")}`;
+          rawPushTopic = `topic_${targetSem.replace(/\s+/g, "_")}`;
         } else {
-          pushTopic = "all_students";
+          rawPushTopic = "all_students";
         }
       }
 
+      const pushTopic = tenantTopic(rawPushTopic);
+
       await fetch('/api/send-fcm', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetTopic: pushTopic, title: `📢 ${title}`, message, targetTab: "Notice Board" }) // The exact string mapped in Android
+        body: JSON.stringify({ targetTopic: pushTopic, title: `📢 ${title}`, message, targetTab: "Notice Board" })
       });
 
       setShowNewNoticeDialog(false);
@@ -143,7 +176,7 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
            await fetch('/api/delete-file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileName: att.name || "File" }) });
          }
        }
-       await deleteDoc(doc(db, "announcements", id));
+       await deleteDoc(tenantDoc("announcements", id));
     }
   };
 
@@ -151,7 +184,7 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
     <div className="w-full flex flex-col h-full relative pb-24">
       <div className="flex justify-between items-center mb-6">
         <h2 className={`text-2xl font-bold ${textColor}`}>Notice Board</h2>
-        {isHod && (
+        {canBroadcast && (
           <GlassButton onClick={() => setShowNewNoticeDialog(true)} variant="light" icon={<Plus className="w-4 h-4" />}>
             New Notice
           </GlassButton>
@@ -191,7 +224,7 @@ export default function FacultyNoticeBoardTab({ isDark = true }: { isDark?: bool
                       </span>
                     </div>
                   </div>
-                  {(isHod || notice.authorUid === user?.uid) && (
+                  {(canBroadcast || notice.authorUid === user?.uid) && (
                     <button onClick={() => handleDelete(notice.id, notice.attachments)} className="p-2 bg-red-500/10 text-red-500 hover:bg-red-500/20 rounded-xl transition-colors">
                       <Trash2 className="w-4 h-4" />
                     </button>

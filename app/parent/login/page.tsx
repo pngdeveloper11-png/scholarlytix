@@ -2,27 +2,25 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { collection, query, where, getDocs, doc, setDoc, getDoc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { query, where, getDocs, setDoc, getDoc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { signInWithPopup } from 'firebase/auth';
-import { auth, db, googleProvider } from '@/lib/firebase';
+import { auth, googleProvider, tenantCol, tenantDoc } from '@/lib/firebase';
 import { ArrowLeft, User, Loader2 } from 'lucide-react';
 
 export default function ParentLogin() {
   const router = useRouter();
-  
+ 
   // UI States
   const [currentStep, setCurrentStep] = useState<"SIGN_IN" | "PICK_CHILD" | "LINK_NEW">("SIGN_IN");
   const [errorMessage, setErrorMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  
+ 
   // Link States
   const [linkedChildren, setLinkedChildren] = useState<any[]>([]);
   const [studentEmail, setStudentEmail] = useState("");
   const [generatedOtp, setGeneratedOtp] = useState("");
   const [timeLeft, setTimeLeft] = useState(120);
   const [requestId, setRequestId] = useState("");
-
-  const parentUser = auth.currentUser;
 
   // Auto-Redirect if Session Exists
   useEffect(() => {
@@ -37,7 +35,7 @@ export default function ParentLogin() {
 
   // Handle Google Sign In
   const handleGoogleLogin = async () => {
-    setErrorMessage(""); 
+    setErrorMessage("");
     setIsLoading(true);
 
     try {
@@ -50,43 +48,43 @@ export default function ParentLogin() {
          return;
       }
 
+      const cleanParentEmail = user.email.toLowerCase().trim();
       localStorage.setItem("userRole", "parent");
 
-      // Check if this parent is already linked to any student
-      const q = query(collection(db, "students_directory"), where("linkedParentEmails", "array-contains", user.email.toLowerCase().trim()));
-      const snap = await getDocs(q);
+      // Check if this parent is already linked to any student (supporting both array and legacy string)
+      const qArray = query(tenantCol("students_directory"), where("linkedParentEmails", "array-contains", cleanParentEmail));
+      const qLegacy = query(tenantCol("students_directory"), where("linkedParentEmail", "==", cleanParentEmail));
 
-      if (snap.empty) {
-        // Fallback check for legacy string
-        const legacyQ = query(collection(db, "students_directory"), where("linkedParentEmail", "==", user.email.toLowerCase().trim()));
-        const legacySnap = await getDocs(legacyQ);
-        
-        if (legacySnap.empty) {
-            setCurrentStep("LINK_NEW");
-        } else {
-            setLinkedChildren(legacySnap.docs.map(d => ({ id: d.id, ...d.data() })));
-            setCurrentStep("PICK_CHILD");
-        }
+      const [snapArray, snapLegacy] = await Promise.all([getDocs(qArray), getDocs(qLegacy)]);
+
+      const childrenMap = new Map<string, any>();
+      snapArray.docs.forEach(d => childrenMap.set(d.id, { id: d.id, ...d.data() }));
+      snapLegacy.docs.forEach(d => childrenMap.set(d.id, { id: d.id, ...d.data() }));
+
+      const mergedChildren = Array.from(childrenMap.values());
+
+      if (mergedChildren.length === 0) {
+        setCurrentStep("LINK_NEW");
       } else {
-        setLinkedChildren(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setLinkedChildren(mergedChildren);
         setCurrentStep("PICK_CHILD");
       }
 
-    } catch (error: any) { 
-      setErrorMessage(error.message || "Google Sign-In failed. Please try again."); 
-    } finally { 
-      setIsLoading(false); 
+    } catch (error: any) {
+      setErrorMessage(error.message || "Google Sign-In failed. Please try again.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleChildSelect = (child: any) => {
-      const sessionData = { 
-          studentId: child.id, 
-          name: child.fullName, 
-          branch: child.branch, 
-          semester: child.semester, 
+      const sessionData = {
+          studentId: child.id,
+          name: child.fullName,
+          branch: child.branch,
+          semester: child.semester,
           division: child.division,
-          grNumber: child.grNumber 
+          grNumber: child.grNumber
       };
       localStorage.setItem('academiq_student_session', JSON.stringify(sessionData));
       router.replace('/parent/dashboard');
@@ -95,15 +93,15 @@ export default function ParentLogin() {
   // Generate Link OTP
   const handleGenerateLink = async () => {
     if (!studentEmail.trim() || !studentEmail.includes('@')) {
-        setErrorMessage("Enter a valid student email address."); 
+        setErrorMessage("Enter a valid student email address.");
         return;
     }
-    
+   
     setIsLoading(true);
     setErrorMessage("");
 
     try {
-        const q = query(collection(db, "students_directory"), where("email", "==", studentEmail.trim().toLowerCase()));
+        const q = query(tenantCol("students_directory"), where("email", "==", studentEmail.trim().toLowerCase()));
         const snapshot = await getDocs(q);
 
         if (snapshot.empty) {
@@ -113,14 +111,30 @@ export default function ParentLogin() {
         }
 
         const studentDoc = snapshot.docs[0];
+        const studentData = studentDoc.data();
         const studentId = studentDoc.id;
-        const fcmToken = studentDoc.data().fcmToken || "";
-        
+        const fcmToken = studentData.fcmToken || "";
+
+        // Enforce max 2 parents per student
+        const existingParents = new Set<string>();
+        if (Array.isArray(studentData.linkedParentEmails)) {
+            studentData.linkedParentEmails.forEach((e: string) => { if (e) existingParents.add(e.toLowerCase().trim()); });
+        }
+        if (studentData.linkedParentEmail) {
+            existingParents.add(String(studentData.linkedParentEmail).toLowerCase().trim());
+        }
+        const currentParentEmail = (auth.currentUser?.email || "").toLowerCase().trim();
+        if (existingParents.size >= 2 && !existingParents.has(currentParentEmail)) {
+            setErrorMessage("Maximum limit reached (2 parent accounts are already linked to this student).");
+            setIsLoading(false);
+            return;
+        }
+       
         const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
         const reqId = crypto.randomUUID();
         const parentEmail = auth.currentUser?.email || "Unknown Parent";
 
-        await setDoc(doc(db, "link_requests", reqId), {
+        await setDoc(tenantDoc("link_requests", reqId), {
             otp: newOtp,
             studentId: studentId,
             studentEmail: studentEmail.trim().toLowerCase(),
@@ -161,7 +175,7 @@ export default function ParentLogin() {
         const timerId = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
         return () => clearTimeout(timerId);
     } else if (timeLeft === 0 && requestId) {
-        updateDoc(doc(db, "link_requests", requestId), { status: "expired" });
+        updateDoc(tenantDoc("link_requests", requestId), { status: "expired" });
         setGeneratedOtp("");
         setErrorMessage("Code expired. Please request a new one.");
     }
@@ -170,12 +184,12 @@ export default function ParentLogin() {
   // Firebase Realtime Listener for Student Approval
   useEffect(() => {
       if (!requestId) return;
-      const unsub = onSnapshot(doc(db, "link_requests", requestId), async (docSnap) => {
+      const unsub = onSnapshot(tenantDoc("link_requests", requestId), async (docSnap) => {
           if (docSnap.exists()) {
               const status = docSnap.data().status;
               if (status === "approved") {
                   const studentId = docSnap.data().studentId;
-                  const sDoc = await getDoc(doc(db, "students_directory", studentId));
+                  const sDoc = await getDoc(tenantDoc("students_directory", studentId));
                   if (sDoc.exists()) {
                       handleChildSelect({ id: sDoc.id, ...sDoc.data() });
                   }
@@ -197,7 +211,7 @@ export default function ParentLogin() {
 
       <div className="w-full max-w-md flex flex-col items-center z-50 relative">
         <div className="w-full flex items-center mb-10 relative">
-          <button 
+          <button
             onClick={() => {
               if (currentStep === 'LINK_NEW' && linkedChildren.length > 0) setCurrentStep('PICK_CHILD');
               else { localStorage.removeItem('userRole'); router.replace('/'); }
@@ -210,10 +224,10 @@ export default function ParentLogin() {
             <div className="p-4 rounded-[1.25rem] bg-white/[0.03] border border-white/[0.08] backdrop-blur-[40px] shadow-[0_8px_32px_0_rgba(0,0,0,0.3)] mb-5">
               <User className="w-12 h-12 text-[#D0BCFF]" />
             </div>
-            <h1 className="text-3xl font-bold tracking-tight">Parents' Portal</h1>
+            <h1 className="text-3xl font-bold tracking-tight">Parents&apos; Portal</h1>
             <p className="text-white/50 text-sm mt-2 text-center">
-                {currentStep === "SIGN_IN" ? "Sign in with Google to monitor your child's progress." : 
-                 currentStep === "PICK_CHILD" ? "Select a linked student profile." : 
+                {currentStep === "SIGN_IN" ? "Sign in with Google to monitor your child's progress." :
+                 currentStep === "PICK_CHILD" ? "Select a linked student profile." :
                  "Link your child's account to your portal."}
             </p>
           </div>
@@ -224,9 +238,9 @@ export default function ParentLogin() {
             <div className="w-full p-8 rounded-[2rem] bg-white/[0.03] backdrop-blur-[40px] border border-white/[0.08] shadow-[0_8px_32px_0_rgba(0,0,0,0.4)] space-y-6">
             {errorMessage && <p className="text-red-400 text-sm text-center font-medium bg-red-500/10 py-3 px-4 rounded-xl border border-red-500/20">{errorMessage}</p>}
 
-            <button 
-                onClick={handleGoogleLogin} 
-                disabled={isLoading} 
+            <button
+                onClick={handleGoogleLogin}
+                disabled={isLoading}
                 className="w-full py-4 bg-transparent border border-white/20 text-white rounded-2xl font-bold text-lg flex items-center justify-center space-x-3 disabled:opacity-50 transition-all hover:bg-white/5 hover:border-white/40 shadow-lg"
             >
                 {isLoading ? (
@@ -271,26 +285,26 @@ export default function ParentLogin() {
             <div className="w-full p-8 rounded-[2rem] bg-white/[0.03] backdrop-blur-[40px] border border-white/[0.08] shadow-[0_8px_32px_0_rgba(0,0,0,0.4)] space-y-6">
                 {!generatedOtp ? (
                     <>
-                        <p className="text-sm opacity-70 text-center mb-2">Enter your child's official college email address to request a secure link.</p>
+                        <p className="text-sm opacity-70 text-center mb-2">Enter your child&apos;s official college email address to request a secure link.</p>
                         {errorMessage && <p className="text-red-400 text-sm text-center font-bold">{errorMessage}</p>}
-                        
+                       
                         <div className="space-y-2">
-                            <label className="text-xs font-bold opacity-60 uppercase ml-1">Child's Student Email</label>
+                            <label className="text-xs font-bold opacity-60 uppercase ml-1">Child&apos;s Student Email</label>
                             <input type="email" value={studentEmail} onChange={e => setStudentEmail(e.target.value)} placeholder="student@college.edu" className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white outline-none focus:border-[#D0BCFF]" />
                         </div>
-                        
+                       
                         <button onClick={handleGenerateLink} disabled={isLoading} className="w-full py-4 bg-[#D0BCFF] text-[#2A1B4E] rounded-xl font-bold flex justify-center items-center hover:scale-[1.02] transition-transform disabled:opacity-50">
                             {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Generate Link Code"}
                         </button>
                     </>
                 ) : (
                     <div className="flex flex-col items-center text-center space-y-4">
-                        <p className="text-sm opacity-90">A notification has been sent to your child's phone. Ask them to accept it and enter this code.</p>
-                        
+                        <p className="text-sm opacity-90">A notification has been sent to your child&apos;s phone. Ask them to accept it and enter this code.</p>
+                       
                         <div className="bg-black/40 border border-white/10 w-full py-6 rounded-2xl">
                             <h2 className="text-5xl font-black tracking-[0.2em] text-[#D0BCFF] ml-4">{generatedOtp}</h2>
                         </div>
-                        
+                       
                         <p className="font-bold text-red-400 mt-2">Code expires in: {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}</p>
                     </div>
                 )}

@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { collection, doc, onSnapshot, addDoc, query, where, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { onSnapshot, addDoc, query, where, getDocs } from 'firebase/firestore';
+import { tenantCol, tenantDoc } from '@/lib/firebase';
 import { CheckCircle, XCircle, Search, Loader2 } from 'lucide-react';
 import GlassDropdown from '../GlassDropdown';
 import GlassButton from '../ui/GlassButton';
@@ -26,37 +26,39 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
   const [isLoadingStudents, setIsLoadingStudents] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // --- THE FIX: AI LECTURE SUMMARIZER STATES ---
+  // AI LECTURE SUMMARIZER STATES
   const [showPostSaveDialog, setShowPostSaveDialog] = useState(false);
   const [showManualInputDialog, setShowManualInputDialog] = useState(false);
   const [manualSummaryText, setManualSummaryText] = useState("");
 
   useEffect(() => {
-    // Listen for the custom event dispatched from the Classes Tab
     const handleDirectMark = (e: any) => {
-        if (e.detail) {
-            setSelectedSem(e.detail.sem);
-            setSelectedBranch(e.detail.branch);
-            setSelectedDivision(e.detail.division);
-            setSelectedSubject(e.detail.subject);
-            setSelectedBatch(e.detail.batch);
-        }
+      if (e.detail) {
+        setSelectedSem(e.detail.sem);
+        setSelectedBranch(e.detail.branch);
+        setSelectedDivision(e.detail.division);
+        setSelectedSubject(e.detail.subject);
+        setSelectedBatch(e.detail.batch);
+      }
     };
     window.addEventListener("directMarkAttendance", handleDirectMark);
     return () => window.removeEventListener("directMarkAttendance", handleDirectMark);
   }, []);
 
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, "app_config", "college_structure"), (snap) => {
+    const unsub = onSnapshot(tenantDoc("app_config", "college_structure"), (snap) => {
       if (snap.exists()) setGlobalStructure(snap.data());
     });
     return () => unsub();
   }, []);
 
-  const availableDivisions = Object.keys(globalStructure)
-    .filter(k => matchSem(k.split("|")[0], selectedSem))
-    .flatMap(k => globalStructure[k])
-    .map((d: any) => d.divisionName);
+  const availableDivisions = Array.from(new Set(
+    Object.keys(globalStructure)
+      .filter(k => matchSem(k.split("|")[0], selectedSem))
+      .flatMap(k => globalStructure[k])
+      .map((d: any) => d?.divisionName)
+      .filter(Boolean)
+  )) as string[];
 
   useEffect(() => {
     if (!availableDivisions.includes(selectedDivision)) setSelectedDivision(availableDivisions[0] || "");
@@ -72,7 +74,7 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
     
     setIsLoadingStudents(true);
     try {
-      const q = query(collection(db, "students_directory"), where("semester", "==", selectedSem));
+      const q = query(tenantCol("students_directory"), where("semester", "==", selectedSem));
       const snap = await getDocs(q);
       
       let fetchedStudents = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }))
@@ -106,8 +108,8 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
   };
 
   const handleInitialSubmit = () => {
-      if (students.length === 0) return;
-      setShowPostSaveDialog(true);
+    if (students.length === 0) return;
+    setShowPostSaveDialog(true);
   };
 
   const confirmAndSave = async () => {
@@ -118,9 +120,8 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
       const presentIds = Object.keys(attendance).filter(id => attendance[id]);
       const absentIds = Object.keys(attendance).filter(id => !attendance[id]);
 
-      // Simple local fallback string mimicking Android's AI if no manual text is provided
       if (!showManualInputDialog || !finalSummary) {
-          finalSummary = `Completed ${selectedSubject} session with ${presentIds.length}/${students.length} attendees present.`;
+        finalSummary = `Completed ${selectedSubject} session with ${presentIds.length}/${students.length} attendees present.`;
       }
       
       const record = {
@@ -128,7 +129,7 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
         branch: selectedBranch,
         branchName: selectedBranch,
         division: selectedDivision,
-        divisionName: selectedDivision, // Match Android 3-Tier
+        divisionName: selectedDivision,
         subjectName: selectedSubject,
         batch: selectedBatch,
         presentStudentIds: presentIds,
@@ -139,7 +140,7 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
         conductedBy: localStorage.getItem("academiq_faculty_name") || "Faculty Member"
       };
 
-      await addDoc(collection(db, "attendance_history"), record);
+      await addDoc(tenantCol("attendance_history"), record);
 
       for (const id of absentIds) {
         const student = students.find(s => s.id === id);
@@ -173,7 +174,6 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
   };
 
   const cardBg = isDark ? 'bg-white/[0.08] border-white/20 backdrop-blur-2xl' : 'bg-white border-black/10 shadow-lg';
-  const textColor = isDark ? 'text-white' : 'text-gray-900';
   const modalBg = isDark ? 'bg-[#111] border-white/10 text-white' : 'bg-white border-gray-200 text-gray-900';
 
   return (
@@ -244,7 +244,7 @@ export default function FacultyAttendanceTab({ directMarkData, isDark }: { direc
         </div>
       )}
 
-      {/* --- THE FIX: AI SUMMARIZER POST-SAVE DIALOG --- */}
+      {/* AI SUMMARIZER POST-SAVE DIALOG */}
       {showPostSaveDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className={`border p-8 rounded-[2rem] w-full max-w-md ${modalBg} shadow-2xl`}>

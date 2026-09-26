@@ -1,8 +1,15 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { collection, onSnapshot, doc, writeBatch, getDocs, deleteDoc, setDoc, updateDoc } from 'firebase/firestore';
-import { db } from '../../lib/firebase'; 
+import { onSnapshot, doc, writeBatch, getDocs, deleteDoc, setDoc, updateDoc } from 'firebase/firestore';
+import {
+  db,
+  tenantCol,
+  tenantDoc,
+  CustomRoleDef,
+  resolveWebRole,
+  isFounderEmail
+} from '../../lib/firebase'; 
 import { useAuth } from '../../app/context/AuthContext';
 import { Loader2, UploadCloud, Users, Trash2, Check, ArrowDownAZ, Settings, UserPlus, TrendingUp, Edit3, FileSpreadsheet } from 'lucide-react'; 
 import GlassDropdown from '../GlassDropdown';
@@ -56,7 +63,7 @@ function ImportStudentsDialog({ isDynamicHue, onDismiss, globalStructure }: { is
       if (lines.length === 0) throw new Error("File is empty.");
 
       setUploadProgress("Fetching Existing Data...");
-      const existingSnapshot = await getDocs(collection(db, "students_directory"));
+      const existingSnapshot = await getDocs(tenantCol("students_directory"));
       
       const existingStudentsByEmail = new Map();
       existingSnapshot.forEach(docSnap => {
@@ -113,14 +120,14 @@ function ImportStudentsDialog({ isDynamicHue, onDismiss, globalStructure }: { is
         if (fullName && email) {
           const existingDoc = existingStudentsByEmail.get(email);
           if (existingDoc) {
-            const studentRef = doc(db, "students_directory", existingDoc.id);
+            const studentRef = tenantDoc("students_directory", existingDoc.id);
             const updates: any = { email, branch: finalBranch, semester: finalSem, division: rowDivRaw, batch: rowBatchRaw };
             if (rollNo > 0) updates.rollNo = rollNo;
             if (grNumber) updates.grNumber = grNumber;
             currentBatch.update(studentRef, updates);
             updatedStudentsCount++;
           } else {
-            const newRef = doc(collection(db, "students_directory"));
+            const newRef = doc(tenantCol("students_directory"));
             currentBatch.set(newRef, {
               rollNo, fullName, branch: finalBranch, semester: finalSem, division: rowDivRaw, batch: rowBatchRaw,
               grNumber, email, admissionTimestamp: Date.now(), totalConducted: 0, totalAttended: 0
@@ -165,7 +172,7 @@ function ImportStudentsDialog({ isDynamicHue, onDismiss, globalStructure }: { is
               <GlassDropdown label="Division" value={selectedDivision} options={availableDivisions} onChange={setSelectedDivision} isDark={isDynamicHue} zIndex={90} />
             ) : <p className="text-red-500 text-sm font-bold">No divisions built for this class.</p>}
           </div>
-        ) : <p className="text-sm opacity-80 text-white mb-6">Uploading the entire college directory.<br/>CSV must contain 'Branch', 'Semester', and 'Division' columns.</p>}
+        ) : <p className="text-sm opacity-80 text-white mb-6">Uploading the entire college directory.<br/>CSV must contain &apos;Branch&apos;, &apos;Semester&apos;, and &apos;Division&apos; columns.</p>}
         {isUploading && <div className="flex items-center mb-6"><Loader2 className="w-5 h-5 mr-3 text-[#D0BCFF] animate-spin" /><span className="text-[#D0BCFF] font-bold">{uploadProgress}</span></div>}
         <div className="flex space-x-3 mt-auto">
           <GlassButton onClick={onDismiss} disabled={isUploading} variant="glass" className="flex-1">Cancel</GlassButton>
@@ -179,7 +186,7 @@ function ImportStudentsDialog({ isDynamicHue, onDismiss, globalStructure }: { is
   );
 }
 
-// --- THE FIX: LEGACY ATTENDANCE IMPORTER DIALOG ---
+// --- LEGACY ATTENDANCE IMPORTER DIALOG ---
 function LegacyAttendanceImportDialog({ isDynamicHue, semester, division, roster, onDismiss }: { isDynamicHue: boolean, semester: string, division: string, roster: StudentData[], onDismiss: () => void }) {
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -224,7 +231,7 @@ function LegacyAttendanceImportDialog({ isDynamicHue, semester, division, roster
         if (rollNo > 0) {
           const student = roster.find(s => s.rollNo === rollNo);
           if (student) {
-            const docRef = doc(db, "students_directory", student.id);
+            const docRef = tenantDoc("students_directory", student.id);
             currentBatch.update(docRef, { legacyConducted: conducted, legacyAttended: attended });
             updateCount++;
             batchCount++;
@@ -253,7 +260,7 @@ function LegacyAttendanceImportDialog({ isDynamicHue, semester, division, roster
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
       <div className={`border p-8 rounded-[2rem] w-full max-w-md flex flex-col ${modalBg} shadow-2xl`}>
         <h2 className={`text-xl font-bold mb-2 ${textColor}`}>Import Legacy Attendance</h2>
-        <p className="text-sm opacity-80 mb-6">Upload a CSV for {semester} ({division}) to fuse previously maintained physical attendance with the app's digital metrics.</p>
+        <p className="text-sm opacity-80 mb-6">Upload a CSV for {semester} ({division}) to fuse previously maintained physical attendance with the app&apos;s digital metrics.</p>
         
         <div className="bg-white/[0.05] p-4 rounded-xl border border-white/10 mb-6">
           <h4 className="text-xs font-bold text-[#D0BCFF] mb-2 uppercase">Required CSV Columns:</h4>
@@ -281,10 +288,33 @@ function LegacyAttendanceImportDialog({ isDynamicHue, semester, division, roster
 // --- FACULTY METRICS TAB ---
 export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean }) {
   const { user, role } = useAuth();
+  const [customRolesMap, setCustomRolesMap] = useState<Record<string, CustomRoleDef>>({});
+
+  useEffect(() => {
+    const unsubRoles = onSnapshot(tenantCol("custom_roles"), (snap) => {
+      const roleMap: Record<string, CustomRoleDef> = {};
+      snap.docs.forEach((d) => {
+        roleMap[d.id] = d.data() as CustomRoleDef;
+      });
+      setCustomRolesMap(roleMap);
+    });
+    return () => unsubRoles();
+  }, []);
   
   const currentEmail = (user?.email || "").toLowerCase();
-  const isDeveloper = currentEmail === 'pngdeveloper11@gmail.com';
-  const isHod = role?.startsWith("HOD|") || role === "SUPER_ADMIN" || role === "DIRECTOR" || role === "PRINCIPAL" || role === "REGISTRAR" || isDeveloper;
+  const isDeveloper = isFounderEmail(currentEmail);
+  const resolvedRole = resolveWebRole(role || "NONE", customRolesMap, currentEmail);
+  const isHod =
+    isDeveloper ||
+    resolvedRole.canManageRoster ||
+    resolvedRole.canManageAdminPanel ||
+    resolvedRole.scopeType === "COLLEGE" ||
+    resolvedRole.scopeType === "BRANCH" ||
+    role?.startsWith("HOD|") ||
+    role === "SUPER_ADMIN" ||
+    role === "DIRECTOR" ||
+    role === "PRINCIPAL" ||
+    role === "REGISTRAR";
 
   const [teachingConfig, setTeachingConfig] = useState<Record<string, string[]>>({});
   const [globalStructure, setGlobalStructure] = useState<CollegeStructureConfig>({});
@@ -300,7 +330,7 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
   const [sortMode, setSortMode] = useState<"default" | "az">("default");
   
   const [showImportDialog, setShowImportDialog] = useState(false);
-  const [showLegacyImportDialog, setShowLegacyImportDialog] = useState(false); // NEW STATE
+  const [showLegacyImportDialog, setShowLegacyImportDialog] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showPromoteModal, setShowPromoteModal] = useState(false);
   const [editingStudent, setEditingStudent] = useState<StudentData | null>(null);
@@ -314,7 +344,7 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
 
   useEffect(() => {
     if (!user?.uid) return;
-    const unsubConfig = onSnapshot(doc(db, "teacher_configs", user.uid), (docSnap) => {
+    const unsubConfig = onSnapshot(tenantDoc("teacher_configs", user.uid), (docSnap) => {
       if (docSnap.exists() && docSnap.get("config")) {
         const config = docSnap.get("config");
         setTeachingConfig(config);
@@ -322,16 +352,16 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
         if (!selectedSemester && validSems.length > 0) setSelectedSemester(validSems[0]);
       }
     });
-    const unsubStruct = onSnapshot(doc(db, "app_config", "college_structure"), (snap) => {
+    const unsubStruct = onSnapshot(tenantDoc("app_config", "college_structure"), (snap) => {
       if (snap.exists()) setGlobalStructure(snap.data() as CollegeStructureConfig);
     });
-    const unsubSubjects = onSnapshot(doc(db, "app_config", "subject_master"), (snap) => {
+    const unsubSubjects = onSnapshot(tenantDoc("app_config", "subject_master"), (snap) => {
       if (snap.exists()) setGlobalSubjects(snap.data());
     });
-    const unsubRoster = onSnapshot(collection(db, "students_directory"), (snap) => {
+    const unsubRoster = onSnapshot(tenantCol("students_directory"), (snap) => {
       setRoster(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as StudentData)));
     });
-    const unsubHistory = onSnapshot(collection(db, "attendance_history"), (snap) => {
+    const unsubHistory = onSnapshot(tenantCol("attendance_history"), (snap) => {
       setHistory(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })));
     });
     return () => { unsubConfig(); unsubStruct(); unsubSubjects(); unsubRoster(); unsubHistory(); };
@@ -373,7 +403,7 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
 
   const matchingLectures = history.filter(h => matchSem(h.semester, selectedSemester) && matchDiv(h.divisionName || h.division, selectedDivision) && (isHod ? true : (h.subjectName === selectedSubject || h.subject === selectedSubject)));
 
-  // THE FIX: Fusing Digital Attendance with the CSV Legacy Attendance
+  // Fusing Digital Attendance with the CSV Legacy Attendance
   const studentStats = divisionRoster.map((student) => {
     let studentBatch = (student as any).batch;
     if (!studentBatch && globalStructure[selectedSemester]) {
@@ -413,7 +443,7 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
 
   const handleDeleteStudent = async (studentId: string, studentName: string) => {
     if (!window.confirm(`Are you absolutely sure you want to completely remove ${studentName}?`)) return;
-    await deleteDoc(doc(db, "students_directory", studentId));
+    await deleteDoc(tenantDoc("students_directory", studentId));
   };
 
   const handleSaveStudent = async () => {
@@ -423,9 +453,9 @@ export default function FacultyMetricsTab({ isDark = true }: { isDark?: boolean 
       grNumber: formGR, semester: selectedSemester, division: selectedDivision, branch: formBranch, batch: formBatch === "Auto (Dynamic)" ? "" : formBatch
     };
     if (editingStudent) {
-      await updateDoc(doc(db, "students_directory", (editingStudent as any).id), payload);
+      await updateDoc(tenantDoc("students_directory", (editingStudent as any).id), payload);
     } else {
-      await setDoc(doc(collection(db, "students_directory")), { ...payload, admissionTimestamp: Date.now(), totalConducted: 0, totalAttended: 0 });
+      await setDoc(doc(tenantCol("students_directory")), { ...payload, admissionTimestamp: Date.now(), totalConducted: 0, totalAttended: 0 });
     }
     setShowAddModal(false); setEditingStudent(null);
   };

@@ -1,8 +1,14 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, doc, deleteDoc, updateDoc, onSnapshot } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import { deleteDoc, updateDoc, onSnapshot } from 'firebase/firestore';
+import {
+  tenantCol,
+  tenantDoc,
+  CustomRoleDef,
+  resolveWebRole,
+  isFounderEmail
+} from '../../lib/firebase';
 import { useAuth } from '../../app/context/AuthContext';
 import { StudentData, AttendanceRecord } from '../../types';
 import { 
@@ -21,8 +27,32 @@ const formatExportDate = (date: Date) => {
 const matchSem = (a: string, b: string) => (a || "").toLowerCase().replace("semester", "sem") === (b || "").toLowerCase().replace("semester", "sem");
 
 export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean }) {
-  const { role } = useAuth();
-  const isHod = role?.startsWith("HOD|") || role === "SUPER_ADMIN" || role === "DIRECTOR" || role === "PRINCIPAL" || role === "REGISTRAR";
+  const { user, role } = useAuth();
+  const [customRolesMap, setCustomRolesMap] = useState<Record<string, CustomRoleDef>>({});
+
+  useEffect(() => {
+    const unsubRoles = onSnapshot(tenantCol("custom_roles"), (snap) => {
+      const roleMap: Record<string, CustomRoleDef> = {};
+      snap.docs.forEach((d) => {
+        roleMap[d.id] = d.data() as CustomRoleDef;
+      });
+      setCustomRolesMap(roleMap);
+    });
+    return () => unsubRoles();
+  }, []);
+
+  const resolvedRole = resolveWebRole(role || "NONE", customRolesMap, user?.email);
+  const isHod =
+    isFounderEmail(user?.email) ||
+    resolvedRole.scopeType === "COLLEGE" ||
+    resolvedRole.scopeType === "BRANCH" ||
+    resolvedRole.canManageAdminPanel ||
+    resolvedRole.canManageRoster ||
+    role?.startsWith("HOD|") ||
+    role === "SUPER_ADMIN" ||
+    role === "DIRECTOR" ||
+    role === "PRINCIPAL" ||
+    role === "REGISTRAR";
 
   const [history, setHistory] = useState<AttendanceRecord[]>([]);
   const [roster, setRoster] = useState<StudentData[]>([]);
@@ -58,19 +88,19 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
   const modalBg = isDark ? 'bg-black/90 border-white/20 text-white' : 'bg-white border-black/10 text-neutral-900';
 
   useEffect(() => {
-    const uid = localStorage.getItem("academiq_faculty_id");
+    const uid = user?.uid || localStorage.getItem("academiq_faculty_id");
     if (uid && !isHod) {
-      const unsubConfig = onSnapshot(doc(db, "teacher_configs", uid), (docSnap) => {
+      const unsubConfig = onSnapshot(tenantDoc("teacher_configs", uid), (docSnap) => {
         if (docSnap.exists() && docSnap.get("config")) {
           setTeachingConfig(docSnap.get("config"));
         }
       });
       return () => unsubConfig();
     }
-  }, [isHod]);
+  }, [isHod, user?.uid]);
 
   useEffect(() => {
-    const unsubHistory = onSnapshot(collection(db, "attendance_history"), (snap) => {
+    const unsubHistory = onSnapshot(tenantCol("attendance_history"), (snap) => {
       const records = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as AttendanceRecord)).sort((a, b) => {
         const timeA = (a as any).timestamp?.seconds ? (a as any).timestamp.seconds * 1000 : ((a as any).timestamp || (a as any).conductedAt || 0);
         const timeB = (b as any).timestamp?.seconds ? (b as any).timestamp.seconds * 1000 : ((b as any).timestamp || (b as any).conductedAt || 0);
@@ -79,7 +109,7 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
       setHistory(records);
     });
 
-    const unsubRoster = onSnapshot(collection(db, "students_directory"), (snap) => {
+    const unsubRoster = onSnapshot(tenantCol("students_directory"), (snap) => {
       setRoster(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as StudentData)));
     });
 
@@ -98,13 +128,13 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
 
   const handleDeleteRecord = async (id: string) => {
     if (confirm("Are you sure you want to permanently delete this attendance record?")) {
-      await deleteDoc(doc(db, "attendance_history", id));
+      await deleteDoc(tenantDoc("attendance_history", id));
     }
   };
 
   const handleSaveNotes = async () => {
     if (!notesRecord) return;
-    await updateDoc(doc(db, "attendance_history", notesRecord.id), { summary: notesText.trim() || null });
+    await updateDoc(tenantDoc("attendance_history", notesRecord.id), { summary: notesText.trim() || null });
     setNotesRecord(null); setNotesText("");
   };
 
@@ -184,7 +214,7 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
     if (!editingRecord) return;
     setIsUpdatingAttendance(true);
     try {
-      await updateDoc(doc(db, "attendance_history", editingRecord.id), { presentStudentIds: editingPresentIds });
+      await updateDoc(tenantDoc("attendance_history", editingRecord.id), { presentStudentIds: editingPresentIds });
       setEditingRecord(null);
     } catch (e) { alert("Failed to update attendance."); } finally { setIsUpdatingAttendance(false); }
   };
@@ -445,7 +475,7 @@ export default function FacultyHistoryTab({ isDark = true }: { isDark?: boolean 
                                                     <FileText className="w-5 h-5" />
                                                   </button>
                                                   {record.summary && (
-                                                    <button onClick={() => updateDoc(doc(db, "attendance_history", record.id), { summary: null })} className="p-2.5 bg-white/[0.05] border border-white/10 hover:bg-white/[0.15] hover:text-[#FF453A] rounded-xl transition-all" title="Delete Notes">
+                                                    <button onClick={() => updateDoc(tenantDoc("attendance_history", record.id), { summary: null })} className="p-2.5 bg-white/[0.05] border border-white/10 hover:bg-white/[0.15] hover:text-[#FF453A] rounded-xl transition-all" title="Delete Notes">
                                                       <Trash2 className="w-5 h-5" />
                                                     </button>
                                                   )}

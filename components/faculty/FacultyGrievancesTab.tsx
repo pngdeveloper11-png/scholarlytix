@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, doc, updateDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { ShieldAlert, Video } from 'lucide-react';
+import { query, orderBy, onSnapshot, updateDoc } from 'firebase/firestore';
+import { tenantCol, tenantDoc } from '@/lib/firebase';
+import { ShieldAlert, Video, Lock } from 'lucide-react';
 import InAppMediaViewer from '../ui/InAppMediaViewer';
 
 interface FacultyGrievancesTabProps {
@@ -12,25 +12,34 @@ interface FacultyGrievancesTabProps {
 
 export default function FacultyGrievancesTab({ isDynamicHue }: FacultyGrievancesTabProps) {
   const [grievancesList, setGrievancesList] = useState<any[]>([]);
+  const [zeroKnowledgeBlocked, setZeroKnowledgeBlocked] = useState(false);
   
   const [viewMediaUrl, setViewMediaUrl] = useState("");
   const [viewMediaName, setViewMediaName] = useState("");
   const [showMediaViewer, setShowMediaViewer] = useState(false);
 
   const cardBg = isDynamicHue ? 'bg-white/[0.08] border-white/20 backdrop-blur-2xl' : 'bg-[#121212] border-white/10';
-  const textColor = 'text-white';
 
   useEffect(() => {
-    const q = query(collection(db, "student_grievances"), orderBy("timestamp", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setGrievancesList(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
+    const q = query(tenantCol("student_grievances"), orderBy("timestamp", "desc"));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        setZeroKnowledgeBlocked(false);
+        setGrievancesList(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      },
+      (err) => {
+        console.warn("Zero-Knowledge Grievance Isolation:", err.message);
+        setZeroKnowledgeBlocked(true);
+        setGrievancesList([]);
+      }
+    );
     return () => unsubscribe();
   }, []);
 
   const updateStatus = async (id: string, newStatus: string) => {
     try {
-      await updateDoc(doc(db, "student_grievances", id), { status: newStatus });
+      await updateDoc(tenantDoc("student_grievances", id), { status: newStatus });
     } catch (e) {
       console.error("Failed to update status", e);
     }
@@ -45,7 +54,15 @@ export default function FacultyGrievancesTab({ isDynamicHue }: FacultyGrievances
         <p className="text-sm opacity-70 mt-1">These reports are strictly anonymous. Attached media metadata has been scrubbed.</p>
       </div>
 
-      {grievancesList.length === 0 ? (
+      {zeroKnowledgeBlocked ? (
+        <div className={`p-10 rounded-[2rem] border ${cardBg} text-center flex flex-col items-center`}>
+          <Lock className="w-12 h-12 mb-3 text-[#D0BCFF]" />
+          <h3 className="font-bold text-lg">Zero-Knowledge Privacy Enforced</h3>
+          <p className="text-sm opacity-70 mt-1 max-w-md">
+            Student grievances for this institution are encrypted and isolated at the database rule level. Only authorized local college grievance officers can view them.
+          </p>
+        </div>
+      ) : grievancesList.length === 0 ? (
         <div className="py-20 text-center opacity-50 flex flex-col items-center">
           <ShieldAlert className="w-16 h-16 mb-4 opacity-20" />
           <p>No grievances reported.</p>

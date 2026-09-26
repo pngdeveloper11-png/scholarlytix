@@ -3,22 +3,32 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
-import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
+import { getDoc, setDoc, deleteDoc } from 'firebase/firestore';
+import {
+  auth,
+  tenantDoc,
+  getActiveCollegeName,
+  isFounderEmail
+} from '@/lib/firebase';
 import { Loader2, ArrowLeft } from 'lucide-react';
 import DynamicHueBackground from '@/components/DynamicHueBackground';
 
 export default function FacultyLogin() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
+  const [collegeName, setCollegeName] = useState('MIT Mumbai');
 
   useEffect(() => {
+    setCollegeName(getActiveCollegeName());
+
     const cleanupSession = async () => {
       const currentSessionId = localStorage.getItem("current_session_id");
       if (currentSessionId) {
         try {
-          await deleteDoc(doc(db, "active_sessions", currentSessionId));
-        } catch (e) { console.error("Session cleanup failed", e); }
+          await deleteDoc(tenantDoc("active_sessions", currentSessionId));
+        } catch (e) {
+          console.error("Session cleanup failed", e);
+        }
         localStorage.removeItem("current_session_id");
       }
       signOut(auth).catch(() => {});
@@ -32,26 +42,30 @@ export default function FacultyLogin() {
     setIsLoading(true);
     try {
       const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' }); 
-      
+      provider.setCustomParameters({ prompt: 'select_account' });
+
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
 
       if (user.email) {
         const email = user.email.toLowerCase().trim();
         let userRole = "teacher";
-        
+
         try {
-          const roleDoc = await getDoc(doc(db, "approved_faculty_emails", email));
-          
-          if (!roleDoc.exists()) {
+          const roleDoc = await getDoc(tenantDoc("approved_faculty_emails", email));
+
+          if (!roleDoc.exists() && !isFounderEmail(email)) {
             await signOut(auth);
-            alert("Access Denied: Your email is not registered as authorized Faculty. Please contact the Principal or HOD.");
+            alert(`Access Denied: Your email is not registered as authorized Faculty at ${getActiveCollegeName()}. Please contact the Principal or HOD.`);
             setIsLoading(false);
-            return; 
+            return;
           }
 
-          userRole = roleDoc.data().role || "teacher";
+          if (roleDoc.exists()) {
+            userRole = roleDoc.data().role || (isFounderEmail(email) ? "SUPER_ADMIN" : "teacher");
+          } else if (isFounderEmail(email)) {
+            userRole = "SUPER_ADMIN";
+          }
         } catch (readError) {
           console.error("Firestore Read Error:", readError);
           await signOut(auth);
@@ -60,7 +74,7 @@ export default function FacultyLogin() {
           return;
         }
 
-        // --- THE FIX: Unique Persistent Device Session ---
+        // --- Unique Persistent Device Session ---
         let deviceId = localStorage.getItem("unique_device_id");
         if (!deviceId) {
           deviceId = crypto.randomUUID();
@@ -77,20 +91,22 @@ export default function FacultyLogin() {
         else if (parser.includes("Android")) deviceName = "Android Device";
 
         try {
-          await setDoc(doc(db, "active_sessions", deviceId), {
+          await setDoc(tenantDoc("active_sessions", deviceId), {
             userId: user.uid,
             role: userRole,
             deviceName: deviceName,
             loginTime: Date.now(),
             sessionId: deviceId
           });
-        } catch (sessionError) { console.error("Session tracking failed", sessionError); }
+        } catch (sessionError) {
+          console.error("Session tracking failed", sessionError);
+        }
 
         localStorage.setItem("academiq_faculty_id", user.uid);
         localStorage.setItem("academiq_faculty_name", user.displayName || "Faculty");
-        
+
         try {
-          await setDoc(doc(db, "faculty_directory", user.uid), {
+          await setDoc(tenantDoc("faculty_directory", user.uid), {
             name: user.displayName,
             email: user.email,
             photoUrl: user.photoURL,
@@ -106,7 +122,7 @@ export default function FacultyLogin() {
     } catch (authError: any) {
       console.error("Auth failed:", authError);
       if (authError.code !== 'auth/popup-closed-by-user') {
-         alert(`Sign in failed: ${authError.message}`);
+        alert(`Sign in failed: ${authError.message}`);
       }
       await signOut(auth);
       setIsLoading(false);
@@ -115,11 +131,10 @@ export default function FacultyLogin() {
 
   return (
     <main className="relative min-h-screen w-full flex flex-col items-center justify-center p-4 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#1f103b] via-[#0a0a0a] to-black text-white overflow-hidden">
-      
       <div className="absolute inset-0 z-0">
         <DynamicHueBackground theme="indigo" />
       </div>
-      
+
       <button onClick={() => router.push('/')} className="absolute top-8 left-8 p-3 rounded-full bg-white/10 hover:bg-white/20 transition backdrop-blur-md z-50">
         <ArrowLeft className="w-6 h-6" />
       </button>
@@ -128,12 +143,16 @@ export default function FacultyLogin() {
         <div className="w-20 h-20 bg-white/10 border border-white/20 rounded-3xl flex items-center justify-center mb-6 shadow-2xl backdrop-blur-xl">
           <svg className="w-10 h-10 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" /></svg>
         </div>
-        
+
+        <span className="px-3 py-1 rounded-full bg-white/10 border border-white/15 text-xs font-bold text-[#D0BCFF] mb-3">
+          {collegeName}
+        </span>
+
         <h1 className="text-3xl font-black mb-2 text-center tracking-tight">Faculty Portal</h1>
         <p className="text-white/60 text-sm mb-10 text-center">Sign in securely with your authorized college Google account.</p>
 
         <div className="w-full bg-white/[0.03] backdrop-blur-[40px] border border-white/10 p-8 rounded-[2.5rem] shadow-2xl">
-          <button 
+          <button
             onClick={handleGoogleLogin}
             disabled={isLoading}
             className="w-full py-4 bg-white text-black rounded-2xl font-bold flex justify-center items-center hover:scale-[1.02] transition-transform disabled:opacity-50 disabled:hover:scale-100"

@@ -1,13 +1,20 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { collection, doc, addDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
-import { db } from '../../lib/firebase'; 
+import { addDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import {
+  tenantCol,
+  tenantDoc,
+  tenantTopic,
+  CustomRoleDef,
+  resolveWebRole,
+  isFounderEmail
+} from '../../lib/firebase'; 
 import { useAuth } from '../../app/context/AuthContext';
 import { Loader2, UploadCloud, Trash2, FileQuestion, BookOpen, ExternalLink, Paperclip, X, Link as LinkIcon, Video } from 'lucide-react';
 import GlassDropdown from '../GlassDropdown';
 import GlassButton from '../ui/GlassButton';
-import InAppMediaViewer from '../ui/InAppMediaViewer'; // <-- THE FIX: Added native media viewer
+import InAppMediaViewer from '../ui/InAppMediaViewer';
 
 const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8"];
 const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
@@ -26,7 +33,31 @@ const isFirstYearSem = (sem: string) => {
 
 export default function FacultyMaterialsTab() {
   const { user, role } = useAuth();
-  const isHod = role?.startsWith("HOD|") || role === "SUPER_ADMIN" || role === "DIRECTOR" || role === "PRINCIPAL" || role === "REGISTRAR";
+  const [customRolesMap, setCustomRolesMap] = useState<Record<string, CustomRoleDef>>({});
+
+  useEffect(() => {
+    const unsubRoles = onSnapshot(tenantCol("custom_roles"), (snap) => {
+      const roleMap: Record<string, CustomRoleDef> = {};
+      snap.docs.forEach((d) => {
+        roleMap[d.id] = d.data() as CustomRoleDef;
+      });
+      setCustomRolesMap(roleMap);
+    });
+    return () => unsubRoles();
+  }, []);
+
+  const resolvedRole = resolveWebRole(role || "NONE", customRolesMap, user?.email);
+  const isHod =
+    isFounderEmail(user?.email) ||
+    resolvedRole.scopeType === "COLLEGE" ||
+    resolvedRole.scopeType === "BRANCH" ||
+    resolvedRole.canManageAdminPanel ||
+    resolvedRole.canManageRoster ||
+    role?.startsWith("HOD|") ||
+    role === "SUPER_ADMIN" ||
+    role === "DIRECTOR" ||
+    role === "PRINCIPAL" ||
+    role === "REGISTRAR";
 
   const [materials, setMaterials] = useState<any[]>([]);
   const [teachingConfig, setTeachingConfig] = useState<Record<string, string[]>>({});
@@ -43,7 +74,7 @@ export default function FacultyMaterialsTab() {
   const [viewMedia, setViewMedia] = useState<{url: string, name: string} | null>(null);
 
   useEffect(() => {
-    const unsubMaterials = onSnapshot(collection(db, "study_materials"), (snap) => {
+    const unsubMaterials = onSnapshot(tenantCol("study_materials"), (snap) => {
       const mats = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).sort((a: any, b: any) => {
         const timeA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp || 0);
         const timeB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp || 0);
@@ -52,16 +83,16 @@ export default function FacultyMaterialsTab() {
       setMaterials(mats);
     });
 
-    const unsubSubjects = onSnapshot(doc(db, "app_config", "subject_master"), (snap) => {
+    const unsubSubjects = onSnapshot(tenantDoc("app_config", "subject_master"), (snap) => {
       if (snap.exists()) setGlobalSubjects(snap.data());
     });
 
-    const unsubStructure = onSnapshot(doc(db, "app_config", "college_structure"), (snap) => {
+    const unsubStructure = onSnapshot(tenantDoc("app_config", "college_structure"), (snap) => {
       if (snap.exists()) setGlobalStructure(snap.data());
     });
 
     if (!user?.uid) return;
-    const unsubConfig = onSnapshot(doc(db, "teacher_configs", user.uid), (docSnap) => {
+    const unsubConfig = onSnapshot(tenantDoc("teacher_configs", user.uid), (docSnap) => {
       if (docSnap.exists() && docSnap.get("config")) {
         const config = docSnap.get("config");
         setTeachingConfig(config);
@@ -82,7 +113,7 @@ export default function FacultyMaterialsTab() {
              await fetch('/api/delete-file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileName: att.name || "File" }) });
            }
         }
-        await deleteDoc(doc(db, "study_materials", mat.id));
+        await deleteDoc(tenantDoc("study_materials", mat.id));
       } catch(e) {}
     }
   };
@@ -168,7 +199,7 @@ export default function FacultyMaterialsTab() {
                   
                   {mat.message && <div className="bg-black/20 p-4 rounded-xl border border-white/5 text-sm text-white/80 mb-4">{mat.message}</div>}
 
-                  {/* THE FIX: Support for Native PDF and Cloudflare R2 preview logic */}
+                  {/* Support for Native PDF and Cloudflare R2 preview logic */}
                   {mat.downloadUrl && (
                       <div 
                         onClick={() => setViewMedia({ url: mat.downloadUrl, name: mat.fileName })}
@@ -260,7 +291,7 @@ function UploadMaterialDialog({ user, isHod, teachingConfig, initialSem, initial
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, "app_config", "subject_master"), (snap) => {
+    const unsub = onSnapshot(tenantDoc("app_config", "subject_master"), (snap) => {
       if (snap.exists()) setGlobalSubjects(snap.data());
     });
     return () => unsub();
@@ -310,7 +341,7 @@ function UploadMaterialDialog({ user, isHod, teachingConfig, initialSem, initial
       });
       if (!uploadRes.ok) throw new Error("Cloudflare R2 upload failed.");
 
-      await addDoc(collection(db, "study_materials"), { 
+      await addDoc(tenantCol("study_materials"), { 
         fileName: customFileName || selectedFile.name, 
         message,
         downloadUrl,
@@ -327,7 +358,8 @@ function UploadMaterialDialog({ user, isHod, teachingConfig, initialSem, initial
       const cleanSem = upSem.replace(/ /g, "_");
       const cleanDiv = upDivision.replace(/ /g, "_");
       const cleanBranch = (upBranch || "").replace(/[ ()]/g, "_");
-      const topicName = isFirstYear ? `topic_${cleanSem}_${cleanDiv}` : `topic_${cleanSem}_${cleanBranch}`;
+      const rawTopicName = isFirstYear ? `topic_${cleanSem}_${cleanDiv}` : `topic_${cleanSem}_${cleanBranch}`;
+      const topicName = tenantTopic(rawTopicName);
 
       await fetch('/api/send-fcm', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },

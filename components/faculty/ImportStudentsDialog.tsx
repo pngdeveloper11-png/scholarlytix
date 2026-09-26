@@ -1,17 +1,17 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { db } from '@/lib/firebase';
-import { collection, getDocs, writeBatch, doc, onSnapshot } from 'firebase/firestore';
+import { db, tenantCol, tenantDoc } from '@/lib/firebase';
+import { getDocs, writeBatch, doc, onSnapshot } from 'firebase/firestore';
 
 const AVAILABLE_SEMESTERS = ["Semester 1", "Semester 2", "Semester 3", "Semester 4", "Semester 5", "Semester 6", "Semester 7", "Semester 8"];
-const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE"];
+const AVAILABLE_BRANCHES = ["CSE", "CSE(AIML)", "IT", "EE", "BMS", "MMS"];
 
 export default function ImportStudentsDialog({ onClose }: { onClose: () => void }) {
   const [importMode, setImportMode] = useState<"Single" | "Master">("Single");
   const [selectedSemester, setSelectedSemester] = useState(AVAILABLE_SEMESTERS[2]);
   
-  // Only used in Master Mode as a tag
+  // Used in Single / Master Mode
   const [selectedBranch, setSelectedBranch] = useState(AVAILABLE_BRANCHES[0]); 
   
   const [selectedDivision, setSelectedDivision] = useState("");
@@ -21,19 +21,35 @@ export default function ImportStudentsDialog({ onClose }: { onClose: () => void 
   const [uploadProgress, setUploadProgress] = useState("");
 
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'app_config', 'college_structure'), (snap) => {
+    const unsub = onSnapshot(tenantDoc('app_config', 'college_structure'), (snap) => {
       if (snap.exists()) setGlobalStructure(snap.data());
     });
     return () => unsub();
   }, []);
 
-  const availableDivisions = globalStructure[selectedSemester]?.map((d: any) => d.divisionName) || [];
+  // Resolve divisions from either direct semester key or Semester|Branch key
+  const availableDivisions: string[] = React.useMemo(() => {
+    const direct = globalStructure[selectedSemester]?.map((d: any) => d.divisionName) || [];
+    if (direct.length > 0) return direct;
+    const branchScoped = globalStructure[`${selectedSemester}|${selectedBranch}`]?.map((d: any) => d.divisionName) || [];
+    if (branchScoped.length > 0) return branchScoped;
+    // Fallback: gather all divisions for this semester across branches
+    const allForSem = new Set<string>();
+    Object.keys(globalStructure).forEach(k => {
+      if (k.startsWith(`${selectedSemester}|`) && Array.isArray(globalStructure[k])) {
+        globalStructure[k].forEach((d: any) => {
+          if (d?.divisionName) allForSem.add(d.divisionName);
+        });
+      }
+    });
+    return Array.from(allForSem);
+  }, [globalStructure, selectedSemester, selectedBranch]);
   
   useEffect(() => {
     if (!availableDivisions.includes(selectedDivision)) {
       setSelectedDivision(availableDivisions[0] || "");
     }
-  }, [selectedSemester, availableDivisions]);
+  }, [selectedSemester, availableDivisions, selectedDivision]);
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -56,7 +72,7 @@ export default function ImportStudentsDialog({ onClose }: { onClose: () => void 
 
         setUploadProgress("Fetching Existing Data...");
         
-        const existingSnapshot = await getDocs(collection(db, "students_directory"));
+        const existingSnapshot = await getDocs(tenantCol("students_directory"));
         const existingStudentsByEmail = new Map();
         const existingStudentsByName = new Map();
 
@@ -120,7 +136,7 @@ export default function ImportStudentsDialog({ onClose }: { onClose: () => void 
             }
 
             if (existingDoc) {
-              const docRef = doc(db, "students_directory", existingDoc.id);
+              const docRef = tenantDoc("students_directory", existingDoc.id);
               const updates: any = { email, branch: finalBranch, semester: finalSem };
               if (rollNo > 0) updates.rollNo = rollNo;
               if (grNumber) updates.grNumber = grNumber;
@@ -130,7 +146,7 @@ export default function ImportStudentsDialog({ onClose }: { onClose: () => void 
               batch.update(docRef, updates);
               updatedStudentsCount++;
             } else {
-              const docRef = doc(collection(db, "students_directory"));
+              const docRef = doc(tenantCol("students_directory"));
               batch.set(docRef, {
                 rollNo,
                 fullName,

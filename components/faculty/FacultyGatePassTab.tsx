@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, doc, setDoc, updateDoc, getDoc } from 'firebase/firestore';
-import { db, auth } from '@/lib/firebase';
+import { onSnapshot, setDoc, updateDoc, getDoc } from 'firebase/firestore';
+import { auth, tenantCol, tenantDoc } from '@/lib/firebase';
 import { ShieldCheck, Search, Loader2, FileText, Clock } from 'lucide-react';
 import GlassDropdown from '../GlassDropdown';
 import GlassButton from '../ui/GlassButton';
@@ -37,20 +37,20 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
   const facultyName = currentUser?.displayName || "Faculty Mentor";
 
   useEffect(() => {
-    const unsubStruct = onSnapshot(doc(db, "app_config", "college_structure"), (snap) => {
+    const unsubStruct = onSnapshot(tenantDoc("app_config", "college_structure"), (snap) => {
       if (snap.exists()) setGlobalStructure(snap.data());
     });
-    const unsubStudents = onSnapshot(collection(db, "students_directory"), (snap) => setStudents(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }))));
+    const unsubStudents = onSnapshot(tenantCol("students_directory"), (snap) => setStudents(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }))));
     
-    // THE FIX: Strict 15-day limit for metrics to match Android
+    // Strict 15-day limit for metrics to match Android
     const fifteenDaysAgo = Date.now() - (15 * 24 * 60 * 60 * 1000);
-    const unsubPasses = onSnapshot(collection(db, "gate_passes"), (snap) => {
+    const unsubPasses = onSnapshot(tenantCol("gate_passes"), (snap) => {
       const allPasses = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
       const myPasses = allPasses.filter(p => (p.facultyUid === currentUser?.uid || p.issuedByName === facultyName || p.issuedBy === facultyName) && p.issuedAt >= fifteenDaysAgo);
       myPasses.sort((a, b) => (b.issuedAt || 0) - (a.issuedAt || 0));
       setIssuedHistory(myPasses);
     });
-    const unsubLeaves = onSnapshot(collection(db, "leave_applications"), (snap) => {
+    const unsubLeaves = onSnapshot(tenantCol("leave_applications"), (snap) => {
       const allLeaves = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).sort((a, b) => (b.appliedAt || 0) - (a.appliedAt || 0));
       setStudentLeaves(allLeaves);
     });
@@ -58,8 +58,6 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
   }, [currentUser?.uid, facultyName]);
 
   const isFirstYear = isFirstYearSem(selectedSem);
-  
-  // Need to safely mock the CollegeSettings logic for the Web
   const streamBranches = selectedStream === "Engineering" ? ["CSE", "CSE(AIML)", "IT", "EE"] : ["BMS", "MMS"];
   
   const availableClasses = React.useMemo(() => {
@@ -89,11 +87,11 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
       const passToken = Array.from({ length: 10 }, () => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".charAt(Math.floor(Math.random() * 32))).join('');
       const now = Date.now();
       
-      // THE FIX: Strict 11:59 PM Expiration Time to match Android
+      // Strict 11:59 PM Expiration Time to match Android
       const expiry = new Date();
       expiry.setHours(23, 59, 59, 999);
       
-      await setDoc(doc(db, "gate_passes", passToken), {
+      await setDoc(tenantDoc("gate_passes", passToken), {
         passId: passToken,
         studentId: selectedStudent.id,
         studentName: selectedStudent.fullName,
@@ -130,25 +128,25 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
 
   const handleRevokePass = async (passId: string) => {
     if (!confirm("Revoke this active gate pass?")) return;
-    try { await updateDoc(doc(db, "gate_passes", passId), { status: "EXPIRED" }); } catch (e) { alert("Failed to revoke pass."); }
+    try { await updateDoc(tenantDoc("gate_passes", passId), { status: "EXPIRED" }); } catch (e) { alert("Failed to revoke pass."); }
   };
 
   const handleLeaveApproval = async (leaveId: string, status: "APPROVED" | "REJECTED", studentId: string) => {
     try { 
-      await updateDoc(doc(db, "leave_applications", leaveId), { status: status, mentorApproval: status === "APPROVED" ? facultyName : "REJECTED" }); 
+      await updateDoc(tenantDoc("leave_applications", leaveId), { status: status, mentorApproval: status === "APPROVED" ? facultyName : "REJECTED" }); 
       
-      const sDoc = await getDoc(doc(db, "students_directory", studentId));
+      const sDoc = await getDoc(tenantDoc("students_directory", studentId));
       if (sDoc.exists() && sDoc.data().fcmToken) {
-         await fetch('/api/send-fcm', {
-           method: 'POST',
-           headers: { 'Content-Type': 'application/json' },
-           body: JSON.stringify({
-             targetToken: sDoc.data().fcmToken,
-             title: status === "APPROVED" ? "Leave Approved ✅" : "Leave Rejected ❌",
-             message: status === "APPROVED" ? "Your leave application has been approved." : "Your leave application was rejected.",
-             targetTab: "Leave"
-           })
-         }).catch(console.error);
+        await fetch('/api/send-fcm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            targetToken: sDoc.data().fcmToken,
+            title: status === "APPROVED" ? "Leave Approved ✅" : "Leave Rejected ❌",
+            message: status === "APPROVED" ? "Your leave application has been approved." : "Your leave application was rejected.",
+            targetTab: "Leave"
+          })
+        }).catch(console.error);
       }
       
       alert(`Leave ${status.toLowerCase()} successfully.`);
@@ -166,7 +164,7 @@ export default function FacultyGatePassTab({ isDark }: { isDark: boolean }) {
     <div className="w-full flex flex-col h-full overflow-y-auto pr-2 pb-24 [&::-webkit-scrollbar]:hidden">
       <div className="flex space-x-3 bg-white/5 p-1.5 rounded-2xl border border-white/10 w-fit overflow-x-auto mb-6 mx-auto">
         <button onClick={() => setActiveSubTab("issue")} className={`px-5 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${activeSubTab === "issue" ? 'bg-[#D0BCFF] text-[#2A1B4E]' : 'opacity-60 hover:opacity-100 text-white'}`}>Issue Pass</button>
-        <button onClick={() => setActiveSubTab("history")} className={`px-5 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${activeSubTab === "history" ? 'bg-[#D0BCFF] text-[#2A1B4E]' : 'opacity-60 hover:opacity-100 text-white'}`}>History & Active</button>
+        <button onClick={() => setActiveSubTab("history")} className={`px-5 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${activeSubTab === "history" ? 'bg-[#D0BCFF] text-[#2A1B4E]' : 'opacity-60 hover:opacity-100 text-white'}`}>History &amp; Active</button>
         <button onClick={() => setActiveSubTab("leaves")} className={`px-5 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all flex items-center gap-2 ${activeSubTab === "leaves" ? 'bg-[#D0BCFF] text-[#2A1B4E]' : 'opacity-60 hover:opacity-100 text-white'}`}>
           Student Leaves {studentLeaves.filter(l => l.status === 'PENDING').length > 0 && <span className="bg-red-500 text-white w-5 h-5 rounded-full flex items-center justify-center text-[10px]">{studentLeaves.filter(l => l.status === 'PENDING').length}</span>}
         </button>

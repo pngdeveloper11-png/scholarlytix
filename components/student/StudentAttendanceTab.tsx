@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { onSnapshot } from 'firebase/firestore';
+import { tenantCol } from '@/lib/firebase';
 import { AlertTriangle, Loader2 } from 'lucide-react';
 
 export default function StudentAttendanceTab({ studentId, branch, semester, isDark }: { studentId: string, branch: string, semester: string, isDark: boolean }) {
@@ -10,10 +10,10 @@ export default function StudentAttendanceTab({ studentId, branch, semester, isDa
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "attendance_history"), (snap) => {
+    const unsub = onSnapshot(tenantCol("attendance_history"), (snap) => {
       const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       // FIX: Added (r: any) to satisfy TypeScript
-      setHistory(docs.filter((r: any) => r.branchName === branch && r.semester === semester));
+      setHistory(docs.filter((r: any) => (r.branchName === branch || !r.branchName || r.branchName === "General") && r.semester === semester));
       setIsLoading(false);
     });
     return () => unsub();

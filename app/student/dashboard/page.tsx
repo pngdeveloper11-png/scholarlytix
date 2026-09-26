@@ -2,9 +2,15 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { collection, query, where, onSnapshot, doc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { query, where, onSnapshot, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { signOut, onAuthStateChanged } from 'firebase/auth';
-import { auth, db } from '@/lib/firebase';
+import {
+  auth,
+  tenantCol,
+  tenantDoc,
+  tenantTopic,
+  getActiveCollegeName
+} from '@/lib/firebase';
 import { motion } from 'framer-motion';
 import { 
   Settings, LogOut, ChevronLeft, Bell, BookOpen, 
@@ -17,7 +23,7 @@ import DynamicHueBackground from '@/components/DynamicHueBackground';
 import CursorGlow from '@/components/CursorGlow';
 
 import StudentGrievancesTab from '@/components/student/StudentGrievancesTab';
-import InAppMediaViewer from '@/components/ui/InAppMediaViewer'; // <-- THE FIX: Added Viewer Import
+import InAppMediaViewer from '@/components/ui/InAppMediaViewer';
 
 const TABS = ["Attendance", "Timetable", "Notice Board", "Materials", "Tests", "Gate Pass", "Leave", "Grievances"];
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -27,15 +33,17 @@ export default function StudentDashboard() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("Attendance");
+  const [collegeName, setCollegeName] = useState("MIT Mumbai");
 
-  // THE FIX: Listen for URL parameters so Web Push Notifications land on the exact tab!
+  // Listen for URL parameters so Web Push Notifications land on the exact tab
   useEffect(() => {
+    setCollegeName(getActiveCollegeName());
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
       if (tabParam && TABS.includes(tabParam)) {
         setActiveTab(tabParam);
-        window.history.replaceState({}, '', window.location.pathname); // Cleans the URL after routing
+        window.history.replaceState({}, '', window.location.pathname);
       }
     }
   }, []);
@@ -62,17 +70,32 @@ export default function StudentDashboard() {
     if (savedDark !== null) setIsDarkTheme(savedDark === "true");
     if (savedHue !== null) setIsDynamicHue(savedHue === "true");
 
+    let unsubProfile: (() => void) | null = null;
+
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      if (!user || !user.email) return router.replace('/student/login');
+      if (!user || !user.email) {
+        router.replace('/student/login');
+        return;
+      }
       
-      const unsubProfile = onSnapshot(query(collection(db, "students_directory"), where("email", "==", user.email.toLowerCase().trim())), (snap) => {
-        if (snap.empty) { signOut(auth); router.replace('/student/login'); return; }
-        setStudentProfile({ id: snap.docs[0].id, ...(snap.docs[0].data() as any) });
-      });
-      return () => unsubProfile();
+      if (unsubProfile) unsubProfile();
+      unsubProfile = onSnapshot(
+        query(tenantCol("students_directory"), where("email", "==", user.email.toLowerCase().trim())),
+        (snap) => {
+          if (snap.empty) {
+            signOut(auth);
+            router.replace('/student/login');
+            return;
+          }
+          setStudentProfile({ id: snap.docs[0].id, ...(snap.docs[0].data() as any) });
+        }
+      );
     });
 
-    return () => unsubscribeAuth();
+    return () => {
+      if (unsubProfile) unsubProfile();
+      unsubscribeAuth();
+    };
   }, [router]);
 
   useEffect(() => {
@@ -82,10 +105,10 @@ export default function StudentDashboard() {
     const branch = studentProfile.branch || "";
     const division = studentProfile.division || "";
     
-    // THE FIX: Syncs perfectly with the Faculty's Division-first document generation
+    // Syncs with the Faculty's Division-first document generation
     const cleanClassRef = `${sem}_${division}`.replace(/\s+/g, '').replace(/&/g, 'and');
 
-    const unsubAtt = onSnapshot(collection(db, "attendance_history"), (snap) => {
+    const unsubAtt = onSnapshot(tenantCol("attendance_history"), (snap) => {
       setAttendanceHistory(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter((r: any) => 
         (r.branchName === branch || r.branch === branch) && 
         r.semester === sem && 
@@ -93,12 +116,12 @@ export default function StudentDashboard() {
       ));
     });
 
-    const unsubTime = onSnapshot(doc(db, "class_timetables", cleanClassRef), (snap) => {
+    const unsubTime = onSnapshot(tenantDoc("class_timetables", cleanClassRef), (snap) => {
       if (snap.exists() && snap.data().entries) setTimetable(snap.data().entries);
       else setTimetable([]);
     });
 
-    const unsubNotices = onSnapshot(collection(db, "announcements"), (snap) => {
+    const unsubNotices = onSnapshot(tenantCol("announcements"), (snap) => {
       const filtered = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter((n: any) => {
         const target = (n.targetAudience || n.targetRole || n.targetBranch || "").toString().toLowerCase().trim();
         if (!target || target === "all" || target === "all students" || target === "everyone" || target === "general") return true;
@@ -114,35 +137,46 @@ export default function StudentDashboard() {
       setNotices(filtered);
     });
 
-    const unsubMat = onSnapshot(collection(db, "study_materials"), (snap) => {
+    const unsubMat = onSnapshot(tenantCol("study_materials"), (snap) => {
       setMaterials(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter((m: any) => 
         m.branch === branch && m.semester === sem && m.divisionName === division
       ));
     });
 
-    const unsubPass = onSnapshot(query(collection(db, "gate_passes"), where("studentId", "==", studentProfile.id)), (snap) => {
+    const unsubPass = onSnapshot(query(tenantCol("gate_passes"), where("studentId", "==", studentProfile.id)), (snap) => {
       setGatePasses(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).sort((a: any, b: any) => (b.issuedAt || 0) - (a.issuedAt || 0)));
     });
 
-    const unsubLeaves = onSnapshot(collection(db, "leave_applications"), (snap) => {
+    const unsubLeaves = onSnapshot(tenantCol("leave_applications"), (snap) => {
       setLeaveApplications(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter((l: any) => l.studentId === studentProfile.id || l.rollNo === studentProfile.rollNo).sort((a, b) => (b.appliedAt || 0) - (a.appliedAt || 0)));
     });
 
-    const unsubLinks = onSnapshot(query(collection(db, "link_requests"), where("studentId", "==", studentProfile.id), where("status", "==", "PENDING")), (snap) => {
+    const unsubLinks = onSnapshot(query(tenantCol("link_requests"), where("studentId", "==", studentProfile.id), where("status", "==", "PENDING")), (snap) => {
       setPendingLinks(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })));
     });
 
     setLoading(false);
     return () => { unsubAtt(); unsubTime(); unsubNotices(); unsubMat(); unsubPass(); unsubLeaves(); unsubLinks(); };
-  }, [studentProfile?.id, studentProfile?.branch, studentProfile?.semester, studentProfile?.division]);
+  }, [studentProfile?.id, studentProfile?.branch, studentProfile?.semester, studentProfile?.division, studentProfile?.rollNo]);
 
   const handleLinkResponse = async (reqId: string, parentEmail: string, accept: boolean) => {
     if (accept) {
-      await updateDoc(doc(db, "students_directory", studentProfile.id), { linkedParentEmail: parentEmail });
-      await updateDoc(doc(db, "link_requests", reqId), { status: "APPROVED" });
+      const cleanParentEmail = parentEmail.toLowerCase().trim();
+      const existingList: string[] = Array.isArray(studentProfile.linkedParentEmails)
+        ? studentProfile.linkedParentEmails
+        : studentProfile.linkedParentEmail
+        ? [studentProfile.linkedParentEmail]
+        : [];
+      const updatedList = Array.from(new Set([...existingList, cleanParentEmail])).slice(0, 2);
+
+      await updateDoc(tenantDoc("students_directory", studentProfile.id), {
+        linkedParentEmail: cleanParentEmail,
+        linkedParentEmails: updatedList
+      });
+      await updateDoc(tenantDoc("link_requests", reqId), { status: "APPROVED" });
       alert("Parent account linked successfully.");
     } else {
-      await updateDoc(doc(db, "link_requests", reqId), { status: "REJECTED" });
+      await updateDoc(tenantDoc("link_requests", reqId), { status: "REJECTED" });
     }
   };
 
@@ -172,7 +206,7 @@ export default function StudentDashboard() {
               {studentProfile.photoUrl ? <img src={studentProfile.photoUrl} alt="Profile" className="w-full h-full object-cover" /> : <User className="w-6 h-6 text-white/50" />}
             </div>
             <div>
-              <p className="text-sm text-white/70">Welcome,</p>
+              <p className="text-xs text-white/70">{collegeName} • Welcome,</p>
               <h1 className="text-xl font-bold tracking-tight uppercase leading-tight">{studentProfile.fullName}</h1>
               <p className="text-xs text-[#D0BCFF] mt-0.5">{studentProfile.semester} • {studentProfile.branch} ({studentProfile.division}) • Batch {studentProfile.batch || "A"}</p>
             </div>
@@ -212,7 +246,6 @@ export default function StudentDashboard() {
           {activeTab === "Materials" && <MaterialsView materials={materials} cardBg={cardBg} isDynamicHue={isDynamicHue} />}
           {activeTab === "Tests" && <TestsView student={studentProfile} cardBg={cardBg} />}
           {activeTab === "Gate Pass" && <GatePassView passes={gatePasses} cardBg={cardBg} />}
-          {/* THE FIX: Passing isDynamicHue down to LeaveView so the native viewer blends perfectly */}
           {activeTab === "Leave" && <LeaveView student={studentProfile} leaves={leaveApplications} cardBg={cardBg} isDynamicHue={isDynamicHue} />}
           {activeTab === "Grievances" && <StudentGrievancesTab student={studentProfile} isDynamicHue={isDynamicHue} cardBg={cardBg} />}
         </div>
@@ -372,7 +405,7 @@ function TestsView({ student, cardBg }: any) {
   const [marks, setMarks] = useState<any[]>([]);
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "test_marks"), (snap) => {
+    const unsub = onSnapshot(tenantCol("test_marks"), (snap) => {
       const targetSem = (student.semester || "").toLowerCase().replace(/\s+/g, '');
       const targetDiv = (student.division || "").toLowerCase().replace(/\s+/g, '');
       
@@ -422,7 +455,7 @@ function GatePassView({ passes, cardBg }: any) {
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 60000); // Update every minute
+    const interval = setInterval(() => setNow(Date.now()), 60000);
     return () => clearInterval(interval);
   }, []);
 
@@ -487,7 +520,7 @@ function GatePassView({ passes, cardBg }: any) {
   );
 }
 
-// --- THE FIX: UPGRADED LEAVE VIEW WITH R2 MEDICAL CERTIFICATE UPLOADS ---
+// --- UPGRADED LEAVE VIEW WITH R2 MEDICAL CERTIFICATE UPLOADS ---
 function LeaveView({ student, leaves, cardBg, isDynamicHue, isParent = false, parentEmail = "" }: any) {
   const [showModal, setShowModal] = useState(false);
   const [leaveType, setLeaveType] = useState(LEAVE_TYPES[0]);
@@ -532,7 +565,7 @@ function LeaveView({ student, leaves, cardBg, isDynamicHue, isParent = false, pa
         finalFileName = selectedFile.name;
       }
 
-      await addDoc(collection(db, "leave_applications"), {
+      await addDoc(tenantCol("leave_applications"), {
         studentId: student.id, studentName: student.fullName, rollNo: student.rollNo, branch: student.branch, semester: student.semester, division: student.division,
         leaveType, startDate: new Date(startDate).getTime(), endDate: new Date(endDate).getTime(), reason: reason.trim(), status: "PENDING", mentorApproval: "PENDING", hodApproval: "PENDING", appliedAt: Date.now(),
         appliedByRole: isParent ? "Parent" : "Student",
@@ -541,12 +574,12 @@ function LeaveView({ student, leaves, cardBg, isDynamicHue, isParent = false, pa
         attachmentName: finalFileName
       });
 
-      // Fire Push Notification to HOD
+      // Fire Multi-Tenant Push Notification to HOD
       await fetch('/api/send-fcm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          targetTopic: `hod_${student.branch.replace(/[ ()]/g, "_")}`,
+          targetTopic: tenantTopic(`hod_${student.branch.replace(/[ ()]/g, "_")}`),
           title: "New Leave Request 📝",
           message: `${student.fullName} (${student.semester}) applied for leave.`,
           channelId: "academic_alerts",
@@ -605,7 +638,7 @@ function LeaveView({ student, leaves, cardBg, isDynamicHue, isParent = false, pa
               <button onClick={() => !submitting && setShowModal(false)} className="text-white/50 hover:text-red-500 transition-colors"><XCircle className="w-6 h-6"/></button>
             </div>
             <div className="space-y-4">
-              <div><label className="text-xs font-bold opacity-60 mb-1 block">Category</label><select value={leaveType} onChange={e => setLeaveType(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none text-white">{LEAVE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+              <div><label className="text-xs font-bold opacity-60 mb-1 block">Category</label><select value={leaveType} onChange={e => setLeaveType(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none text-white">{LEAVE_TYPES.map(t => <option key={t} value={t} className="bg-[#111]">{t}</option>)}</select></div>
               <div className="flex gap-3"><div className="flex-1"><label className="text-xs font-bold opacity-60 mb-1 block">From</label><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none text-white" /></div><div className="flex-1"><label className="text-xs font-bold opacity-60 mb-1 block">To</label><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none text-white" /></div></div>
               <div><label className="text-xs font-bold opacity-60 mb-1 block">Reason for absence</label><textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm outline-none resize-none text-white" /></div>
               
@@ -642,16 +675,27 @@ function StudentSettingsOverlay({ student, isDark, isDynamicHue, theme, onClose,
   const [activeSessions, setActiveSessions] = useState<any[]>([]);
 
   useEffect(() => {
-    const unsub = onSnapshot(query(collection(db, "active_sessions"), where("userId", "==", student.id)), (snap) => {
+    const unsub = onSnapshot(query(tenantCol("active_sessions"), where("userId", "==", student.id)), (snap) => {
       setActiveSessions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
     return () => unsub();
   }, [student.id]);
 
-  const handleRevoke = async () => {
+  const linkedParents: string[] = Array.isArray(student.linkedParentEmails) && student.linkedParentEmails.length > 0
+    ? student.linkedParentEmails
+    : student.linkedParentEmail
+    ? [student.linkedParentEmail]
+    : [];
+
+  const handleRevoke = async (emailToRevoke?: string) => {
     if (confirm("Revoke access for the linked parent account?")) {
-      await updateDoc(doc(db, "students_directory", student.id), { linkedParentEmail: null });
-      alert("Access revoked."); onClose();
+      const remaining = emailToRevoke ? linkedParents.filter(e => e !== emailToRevoke) : [];
+      await updateDoc(tenantDoc("students_directory", student.id), {
+        linkedParentEmails: remaining,
+        linkedParentEmail: remaining[0] || null
+      });
+      alert("Access revoked.");
+      onClose();
     }
   };
 
@@ -667,7 +711,7 @@ function StudentSettingsOverlay({ student, isDark, isDynamicHue, theme, onClose,
       const res = await fetch('/api/upload-drive', { method: 'POST', body: formData });
       if (!res.ok) throw new Error("Upload endpoint returned error.");
       const { downloadUrl } = await res.json();
-      await updateDoc(doc(db, "students_directory", student.id), { photoUrl: downloadUrl });
+      await updateDoc(tenantDoc("students_directory", student.id), { photoUrl: downloadUrl });
       alert("Digital ID photo updated. Campus security scanner synced.");
     } catch (err) { alert("Photo upload failed. Check connection."); } finally { setIsUploadingPhoto(false); }
   };
@@ -675,7 +719,7 @@ function StudentSettingsOverlay({ student, isDark, isDynamicHue, theme, onClose,
   const handleEmailRequest = async () => {
     if (!newEmailReq || !newEmailReq.includes('@')) return alert("Enter a valid email address.");
     try {
-      await addDoc(collection(db, "email_change_requests"), {
+      await addDoc(tenantCol("email_change_requests"), {
         studentId: student.id, studentName: student.fullName, currentEmail: student.email,
         requestedEmail: newEmailReq.toLowerCase().trim(), status: "PENDING", timestamp: Date.now()
       });
@@ -698,10 +742,14 @@ function StudentSettingsOverlay({ student, isDark, isDynamicHue, theme, onClose,
         <div className="flex-1 overflow-y-auto p-6 space-y-6 [&::-webkit-scrollbar]:hidden">
           <div className="p-5 rounded-2xl bg-white/5 border border-white/10">
             <h3 className="font-bold text-lg mb-1">Linked Parent Account</h3>
-            {student.linkedParentEmail ? (
-              <div className="flex items-center justify-between mt-2">
-                <p className="text-sm opacity-70">Authorized Monitor: <strong className="text-white">{student.linkedParentEmail}</strong></p>
-                <button onClick={handleRevoke} className="text-red-400 font-bold text-sm px-3 py-1.5 bg-red-500/10 border border-red-500/20 rounded-lg hover:bg-red-500/20">Revoke</button>
+            {linkedParents.length > 0 ? (
+              <div className="space-y-2 mt-2">
+                {linkedParents.map(pEmail => (
+                  <div key={pEmail} className="flex items-center justify-between">
+                    <p className="text-sm opacity-70">Authorized Monitor: <strong className="text-white">{pEmail}</strong></p>
+                    <button onClick={() => handleRevoke(pEmail)} className="text-red-400 font-bold text-sm px-3 py-1.5 bg-red-500/10 border border-red-500/20 rounded-lg hover:bg-red-500/20">Revoke</button>
+                  </div>
+                ))}
               </div>
             ) : <p className="text-sm opacity-50 mt-2">No parent account is currently linked.</p>}
           </div>
@@ -756,9 +804,9 @@ function StudentSettingsOverlay({ student, isDark, isDynamicHue, theme, onClose,
                  <div key={session.id} className="p-4 bg-white/5 border border-white/10 rounded-xl flex justify-between items-center">
                    <div>
                      <p className="font-bold">{session.deviceName || session.deviceModel || "Unknown Device"}</p>
-                     <p className="text-xs opacity-50 mt-1">Last active: {new Date(session.lastActive || Date.now()).toLocaleDateString()}</p>
+                     <p className="text-xs opacity-50 mt-1">Last active: {new Date(session.lastActive || session.loginTime || Date.now()).toLocaleDateString()}</p>
                    </div>
-                   <button onClick={() => deleteDoc(doc(db, "active_sessions", session.id))} className="p-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors"><Trash2 className="w-4 h-4"/></button>
+                   <button onClick={() => deleteDoc(tenantDoc("active_sessions", session.id))} className="p-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors"><Trash2 className="w-4 h-4"/></button>
                  </div>
                ))}
             </div>

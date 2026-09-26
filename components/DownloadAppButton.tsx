@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { db, tenantDoc } from '@/lib/firebase';
 import { Smartphone, Download, Loader2 } from 'lucide-react';
 
 export default function DownloadAppButton({ className = "" }: { className?: string }) {
@@ -12,11 +12,29 @@ export default function DownloadAppButton({ className = "" }: { className?: stri
   useEffect(() => {
     const fetchAppDetails = async () => {
       try {
-        const docRef = doc(db, 'app_config', 'updates');
-        const docSnap = await getDoc(docRef);
+        // 1. Check active college vault's app_config/updates
+        const tenantRef = tenantDoc('app_config', 'updates');
+        const tenantSnap = await getDoc(tenantRef);
 
-        if (docSnap.exists()) {
-          setApkUrl(docSnap.data().download_link);
+        if (tenantSnap.exists() && tenantSnap.data()?.download_link) {
+          setApkUrl(tenantSnap.data().download_link);
+          return;
+        }
+
+        // 2. Fallback to primary vault (mit_mumbai) so new colleges still get the APK link
+        const fallbackRef = doc(db, 'colleges', 'mit_mumbai', 'app_config', 'updates');
+        const fallbackSnap = await getDoc(fallbackRef);
+
+        if (fallbackSnap.exists() && fallbackSnap.data()?.download_link) {
+          setApkUrl(fallbackSnap.data().download_link);
+          return;
+        }
+
+        // 3. Final fallback to legacy root app_config/updates
+        const legacyRef = doc(db, 'app_config', 'updates');
+        const legacySnap = await getDoc(legacyRef);
+        if (legacySnap.exists() && legacySnap.data()?.download_link) {
+          setApkUrl(legacySnap.data().download_link);
         }
       } catch (error) {
         console.error("Error fetching APK URL:", error);
@@ -26,6 +44,8 @@ export default function DownloadAppButton({ className = "" }: { className?: stri
     };
 
     fetchAppDetails();
+    window.addEventListener('college-changed', fetchAppDetails);
+    return () => window.removeEventListener('college-changed', fetchAppDetails);
   }, []);
 
   if (isLoading) {
@@ -41,10 +61,10 @@ export default function DownloadAppButton({ className = "" }: { className?: stri
   const formatUrl = (url: string) => url.startsWith('http') ? url : `https://${url}`;
 
   return (
-    <a 
-      href={formatUrl(apkUrl)} 
-      download 
-      target="_blank" 
+    <a
+      href={formatUrl(apkUrl)}
+      download
+      target="_blank"
       rel="noopener noreferrer"
       className={`group flex items-center justify-between px-6 py-3 rounded-2xl bg-white/5 backdrop-blur-md border border-white/15 hover:border-[#D0BCFF]/50 hover:bg-white/10 transition-all duration-300 shadow-lg cursor-pointer ${className}`}
     >
