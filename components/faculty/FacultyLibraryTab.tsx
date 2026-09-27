@@ -6,7 +6,8 @@ import {
   setDoc,
   deleteDoc,
   updateDoc,
-  runTransaction
+  runTransaction,
+  getDocs
 } from 'firebase/firestore';
 import {
   db,
@@ -76,7 +77,7 @@ export default function FacultyLibraryTab({ isDark = true }: { isDark?: boolean 
     role === "REGISTRAR" ||
     role === "DIRECTOR" ||
     role?.startsWith("HOD|") ||
-    localStorage.getItem("userRole") === "librarian";
+    (typeof window !== "undefined" && localStorage.getItem("userRole") === "librarian");
 
   const [subTab, setSubTab] = useState<"SCANNER" | "CATALOGUE" | "BORROWED" | "EXTENSIONS" | "HISTORY">("SCANNER");
 
@@ -463,7 +464,7 @@ export default function FacultyLibraryTab({ isDark = true }: { isDark?: boolean 
               size="sm"
               icon={<Plus className="w-4 h-4" />}
             >
-              Add Book
+              Add Book (Scan ISBN)
             </GlassButton>
           </div>
         )}
@@ -1121,7 +1122,7 @@ function LibrarianRotatingQrScannerView({
 }
 
 // ============================================================================
-// ADD / EDIT BOOK CATALOGUE MODAL
+// ADD / EDIT BOOK CATALOGUE MODAL (WITH ISBN BARCODE SCANNER & AUTO-FETCH)
 // ============================================================================
 function BookEditorModal({
   book,
@@ -1130,6 +1131,7 @@ function BookEditorModal({
   book: LibraryBook | null;
   onClose: () => void;
 }) {
+  const [existingId, setExistingId] = useState<string | null>(book?.id || null);
   const [title, setTitle] = useState(book?.title || "");
   const [author, setAuthor] = useState(book?.author || "");
   const [isbn, setIsbn] = useState(book?.isbn || "");
@@ -1139,9 +1141,150 @@ function BookEditorModal({
   const [semester, setSemester] = useState(book?.semester || "All");
   const [branch, setBranch] = useState(book?.branch || "All");
   const [rackNumber, setRackNumber] = useState(book?.rackNumber || "");
-  const [totalCopies, setTotalCopies] = useState<number>(book?.totalCopies ?? 5);
-  const [availableCopies, setAvailableCopies] = useState<number>(book?.availableCopies ?? 5);
+  const [totalCopies, setTotalCopies] = useState<number>(book?.totalCopies ?? 1);
+  const [availableCopies, setAvailableCopies] = useState<number>(book?.availableCopies ?? 1);
+
   const [isSaving, setIsSaving] = useState(false);
+  const [isFetchingIsbn, setIsFetchingIsbn] = useState(false);
+  const [isScanningBarcode, setIsScanningBarcode] = useState(false);
+  const [scanNotice, setScanNotice] = useState<string>("");
+  const barcodeVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Auto-lookup ISBN in College Vault first (to increment copies), then Google Books + OpenLibrary
+  const lookupBookByIsbn = async (rawIsbn: string) => {
+    const cleanIsbn = rawIsbn.replace(/[^0-9Xx]/g, "").trim();
+    if (cleanIsbn.length < 10) {
+      return alert("Please scan or enter a valid 10 or 13-digit ISBN.");
+    }
+
+    setIsbn(cleanIsbn);
+    setIsFetchingIsbn(true);
+    setScanNotice("Searching ISBN database...");
+
+    try {
+      // 1. Check if this ISBN already exists in the college's library_books collection
+      const snap = await getDocs(tenantCol("library_books"));
+      const existingDoc = snap.docs.find(
+        (d) => (d.data().isbn || "").replace(/[^0-9Xx]/g, "") === cleanIsbn
+      );
+
+      if (existingDoc) {
+        const d = existingDoc.data() as LibraryBook;
+        setExistingId(existingDoc.id);
+        setTitle(d.title || "");
+        setAuthor(d.author || "");
+        setPublisher(d.publisher || "");
+        setEdition(d.edition || "");
+        setCategory(d.category || "Textbook");
+        setSemester(d.semester || "All");
+        setBranch(d.branch || "All");
+        setRackNumber(d.rackNumber || "General");
+        const nextTotal = (Number(d.totalCopies) || 1) + 1;
+        const nextAvail = (Number(d.availableCopies) || 0) + 1;
+        setTotalCopies(nextTotal);
+        setAvailableCopies(nextAvail);
+        setScanNotice(
+          `✅ Book already in catalogue! Incremented stock to ${nextTotal} copies (${nextAvail} available). Click Save to confirm.`
+        );
+        setIsFetchingIsbn(false);
+        return;
+      }
+
+      // 2. Query Google Books API (Free, No Key Required)
+      const gRes = await fetch(
+        `https://www.googleapis.com/books/v1/volumes?q=isbn:${cleanIsbn}`
+      );
+      const gData = await gRes.json();
+
+      if (gData.items && gData.items.length > 0) {
+        const info = gData.items[0].volumeInfo;
+        setTitle(info.title ? (info.subtitle ? `${info.title}: ${info.subtitle}` : info.title) : "");
+        setAuthor(Array.isArray(info.authors) ? info.authors.join(", ") : info.authors || "");
+        setPublisher(info.publisher || "");
+        setEdition(info.publishedDate ? `Published ${info.publishedDate.substring(0, 4)}` : "");
+        setScanNotice("✨ Auto-filled Title, Author & Publisher from ISBN! Just select the Semester & Rack.");
+        setIsFetchingIsbn(false);
+        return;
+      }
+
+      // 3. Fallback: Open Library API
+      const olRes = await fetch(
+        `https://openlibrary.org/api/books?bibkeys=ISBN:${cleanIsbn}&format=json&jscmd=data`
+      );
+      const olData = await olRes.json();
+      const bookKey = `ISBN:${cleanIsbn}`;
+
+      if (olData[bookKey]) {
+        const info = olData[bookKey];
+        setTitle(info.title || "");
+        setAuthor(
+          Array.isArray(info.authors)
+            ? info.authors.map((a: any) => a.name).join(", ")
+            : ""
+        );
+        setPublisher(
+          Array.isArray(info.publishers)
+            ? info.publishers.map((p: any) => p.name).join(", ")
+            : ""
+        );
+        setEdition(info.publish_date || "");
+        setScanNotice("✨ Auto-filled from OpenLibrary! Select Semester & Rack below.");
+      } else {
+        setScanNotice("⚠️ ISBN scanned, but metadata wasn't found online. Please type Title & Author once.");
+      }
+    } catch (err) {
+      setScanNotice("⚠️ Could not reach book lookup server. Enter details manually.");
+    } finally {
+      setIsFetchingIsbn(false);
+    }
+  };
+
+  // Camera EAN-13 / ISBN Barcode Scanner Effect
+  useEffect(() => {
+    if (!isScanningBarcode) return;
+    let stream: MediaStream | null = null;
+    let intervalId: any = null;
+
+    const startBarcodeCamera = async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" }
+        });
+        if (barcodeVideoRef.current) {
+          barcodeVideoRef.current.srcObject = stream;
+          await barcodeVideoRef.current.play();
+        }
+
+        if ("BarcodeDetector" in window) {
+          // @ts-ignore
+          const detector = new window.BarcodeDetector({
+            formats: ["ean_13", "ean_8", "upc_a", "code_128", "qr_code"]
+          });
+          intervalId = setInterval(async () => {
+            if (barcodeVideoRef.current && barcodeVideoRef.current.readyState === 4) {
+              try {
+                const codes = await detector.detect(barcodeVideoRef.current);
+                if (codes.length > 0 && codes[0].rawValue) {
+                  const raw = codes[0].rawValue;
+                  setIsScanningBarcode(false);
+                  lookupBookByIsbn(raw);
+                }
+              } catch (_) {}
+            }
+          }, 400);
+        }
+      } catch (_) {
+        alert("Could not access camera for barcode scanning.");
+        setIsScanningBarcode(false);
+      }
+    };
+
+    startBarcodeCamera();
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+    };
+  }, [isScanningBarcode]);
 
   const handleSave = async () => {
     if (!title.trim() || !author.trim() || !isbn.trim()) {
@@ -1149,7 +1292,7 @@ function BookEditorModal({
     }
     setIsSaving(true);
     try {
-      const id = book?.id || crypto.randomUUID();
+      const id = existingId || book?.id || crypto.randomUUID();
       const payload: LibraryBook = {
         id,
         title: title.trim(),
@@ -1181,11 +1324,75 @@ function BookEditorModal({
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/75 backdrop-blur-md">
       <div className="bg-[#111] border border-white/20 p-6 sm:p-8 rounded-[2rem] w-full max-w-xl text-white shadow-2xl max-h-[90vh] overflow-y-auto [&::-webkit-scrollbar]:hidden">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-xl font-bold">{book ? "Edit Book Details" : "Add Book to Catalogue"}</h3>
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-xl font-bold">
+            {existingId ? "Update Book / Add Copy" : "Add Book (Smart ISBN Scan)"}
+          </h3>
           <button onClick={onClose} className="p-1.5 hover:bg-white/10 rounded-lg">
             <X className="w-5 h-5" />
           </button>
+        </div>
+
+        {/* Smart ISBN Barcode Scanner Banner */}
+        <div className="p-4 rounded-2xl bg-[#D0BCFF]/10 border border-[#D0BCFF]/30 mb-5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-bold text-[#D0BCFF]">
+                ⚡ Instant ISBN Barcode Auto-Fill
+              </p>
+              <p className="text-[11px] text-white/70">
+                Scan the barcode on the back of the book to auto-fill Title, Author & Publisher—or scan additional copies to increment stock (+1).
+              </p>
+            </div>
+            <GlassButton
+              onClick={() => setIsScanningBarcode(!isScanningBarcode)}
+              variant="primary"
+              size="sm"
+              icon={<Camera className="w-4 h-4" />}
+            >
+              {isScanningBarcode ? "Close Camera" : "Scan Book Barcode"}
+            </GlassButton>
+          </div>
+
+          {isScanningBarcode && (
+            <div className="relative w-full h-48 bg-black rounded-xl overflow-hidden border border-[#D0BCFF]">
+              <video
+                ref={barcodeVideoRef}
+                muted
+                playsInline
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute inset-x-8 top-1/2 h-0.5 bg-red-500 shadow-[0_0_8px_#ef4444]" />
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="Scan or type ISBN (e.g. 9780131103627) & press Enter..."
+              value={isbn}
+              onChange={(e) => setIsbn(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  lookupBookByIsbn(isbn);
+                }
+              }}
+              className="flex-1 bg-black/40 border border-white/20 rounded-xl px-3.5 py-2.5 text-sm font-mono text-white outline-none focus:border-[#D0BCFF]"
+            />
+            <GlassButton
+              onClick={() => lookupBookByIsbn(isbn)}
+              disabled={isFetchingIsbn || !isbn.trim()}
+              variant="glass"
+              size="sm"
+            >
+              {isFetchingIsbn ? "Fetching..." : "Auto-Fill"}
+            </GlassButton>
+          </div>
+
+          {scanNotice && (
+            <p className="text-xs font-semibold text-emerald-300">{scanNotice}</p>
+          )}
         </div>
 
         <div className="space-y-4">
@@ -1207,31 +1414,24 @@ function BookEditorModal({
             />
             <input
               type="text"
-              placeholder="ISBN Number *"
-              value={isbn}
-              onChange={(e) => setIsbn(e.target.value)}
+              placeholder="Publisher"
+              value={publisher}
+              onChange={(e) => setPublisher(e.target.value)}
               className="w-full bg-white/5 border border-white/20 rounded-xl p-3.5 text-sm text-white outline-none"
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <input
               type="text"
-              placeholder="Publisher"
-              value={publisher}
-              onChange={(e) => setPublisher(e.target.value)}
-              className="w-full bg-white/5 border border-white/20 rounded-xl p-3 text-xs text-white outline-none"
-            />
-            <input
-              type="text"
-              placeholder="Edition (e.g. 4th Ed)"
+              placeholder="Edition / Year (e.g. 4th Ed)"
               value={edition}
               onChange={(e) => setEdition(e.target.value)}
               className="w-full bg-white/5 border border-white/20 rounded-xl p-3 text-xs text-white outline-none"
             />
             <input
               type="text"
-              placeholder="Rack / Shelf No."
+              placeholder="Rack / Shelf No. (e.g. Rack B-2)"
               value={rackNumber}
               onChange={(e) => setRackNumber(e.target.value)}
               className="w-full bg-white/5 border border-white/20 rounded-xl p-3 text-xs text-white outline-none"
@@ -1275,7 +1475,7 @@ function BookEditorModal({
                 onChange={(e) => {
                   const val = parseInt(e.target.value) || 1;
                   setTotalCopies(val);
-                  if (!book) setAvailableCopies(val);
+                  if (!book && !existingId) setAvailableCopies(val);
                 }}
                 className="w-full bg-white/5 border border-white/20 rounded-xl p-3 text-sm font-bold text-white outline-none"
               />
@@ -1299,7 +1499,7 @@ function BookEditorModal({
             Cancel
           </GlassButton>
           <GlassButton onClick={handleSave} disabled={isSaving} variant="primary" className="flex-1">
-            {isSaving ? "Saving..." : "Save Book"}
+            {isSaving ? "Saving..." : existingId ? "Save Updated Stock" : "Save Book"}
           </GlassButton>
         </div>
       </div>
