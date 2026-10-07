@@ -74,4 +74,4 @@ export default function StudentSettings({ session, isParentMode, onLogout }: { s
             </button>
         </div>
     );
-}
+}   
